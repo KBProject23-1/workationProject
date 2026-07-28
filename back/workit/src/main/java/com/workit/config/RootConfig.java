@@ -19,8 +19,8 @@ import javax.sql.DataSource;
 
 @Configuration
 @PropertySource({"classpath:/application.properties"})
-@MapperScan(basePackages = {})
-@ComponentScan(basePackages = {})
+@MapperScan(basePackages = {"com.workit.domain.**.mapper"})
+@ComponentScan(basePackages = {"com.workit.domain", "com.workit.exception"})
 
 @EnableTransactionManagement
 public class RootConfig {
