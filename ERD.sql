@@ -35,6 +35,22 @@ CREATE TABLE `user_profile` (
                                 CONSTRAINT `fk_user_profile_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 부가 프로필 정보 테이블 (비식별 관계)';
 
+CREATE TABLE `user_device` (
+                               `id`             BIGINT        NOT NULL AUTO_INCREMENT COMMENT '기기 등록 고유 번호(PK)',
+                               `user_id`        BIGINT        NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+                               `device_id`      VARCHAR(100)  NOT NULL                COMMENT '브라우저 고유 식별 UUID',
+                               `device_name`    VARCHAR(100)  NOT NULL                COMMENT '사용자 기기 정보 (예: Chrome / Windows)',
+                               `pin_number`     CHAR(60)      NOT NULL                COMMENT '자산 거래용 6자리 핀번호 (BCrypt 암호화문)',
+                               `fail_count`     INT           NOT NULL DEFAULT 0      COMMENT '핀번호 연속 실패 횟수 (5회 도달 시 잠금)',
+                               `last_login_at`  DATETIME      NULL                    COMMENT '해당 기기 최종 로그인 일시',
+                               `created_at`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '기기 최초 인증 등록 일시',
+
+    -- 제약 조건 설정 (금융권 표준 자물쇠)
+                               PRIMARY KEY (`id`),
+                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), --q 한 유저가 동일 기기를 중복 등록하는 것 방지
+                               CONSTRAINT `fk_user_device_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 보안 핀번호 및 로그인 기기 관리 테이블 (비식별 관계)';
+
 CREATE TABLE `terms` (
                          `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '약관 고유 번호(PK)',
                          `title`       VARCHAR(100)  NOT NULL                COMMENT '약관 제목',
