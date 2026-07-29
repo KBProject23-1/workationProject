@@ -145,4 +145,25 @@
           AND status = 'SETTLED'
     </select>
 
+    <update id="updateWorkation"
+            parameterType="com.workit.domain.workation.domain.WorkationVO">
+        UPDATE workations
+        SET title                 = #{title},
+            region_id             = #{regionId},
+            start_date            = #{startDate},
+            end_date              = #{endDate},
+            business_budget_total = #{businessBudgetTotal},
+            personal_budget_total = #{personalBudgetTotal},
+            updated_at            = NOW()
+        WHERE id     = #{id}
+          AND status = 'ACTIVE'
+    </update>
+
+    <select id="countExpensesOutOfPeriod" resultType="int">
+        SELECT COUNT(*)
+        FROM workation_expenses
+        WHERE workation_id = #{workationId}
+          AND (spent_at &lt; #{startDate} OR spent_at &gt; #{endDate})
+    </select>
+
 </mapper>

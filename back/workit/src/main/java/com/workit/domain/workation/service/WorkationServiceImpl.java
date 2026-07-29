@@ -1,6 +1,7 @@
 package com.workit.domain.workation.service;
 
 import com.workit.domain.workation.domain.BudgetSpentVO;
+import com.workit.domain.workation.domain.WorkationStatus;
 import com.workit.domain.workation.domain.WorkationVO;
 import com.workit.domain.workation.dto.*;
 import com.workit.domain.workation.exception.WorkationErrorCode;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -88,25 +90,81 @@ public class WorkationServiceImpl implements WorkationService {
         return PageResponseDTO.of(content, safePage, safeSize, totalElements);
     }
 
-    private void validateRequest(WorkationCreateRequestDTO dto) {
+    @Override
+    @Transactional
+    public WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto) {
 
-        if (dto.getTitle() == null || dto.getTitle().trim().isEmpty()) {
+        // 1) 존재 여부 + 소유자 검증
+        WorkationVO target = getOwnedWorkation(userId, workationId);
+
+        // 2) 정산 완료된 워케이션은 수정 불가
+        if (target.getStatus() == WorkationStatus.SETTLED) {
+            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED,
+                    "정산 완료된 워케이션은 수정할 수 없습니다.");
+        }
+
+        // 3) 입력값 검증 (등록과 동일한 규칙)
+        validateWorkationInput(dto.getTitle(), dto.getStartDate(), dto.getEndDate(),
+                dto.getRegionId(), dto.getBusinessBudgetTotal(), dto.getPersonalBudgetTotal());
+
+        // 4) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
+        int outOfPeriod = workationMapper.countExpensesOutOfPeriod(
+                workationId, dto.getStartDate(), dto.getEndDate());
+
+        if (outOfPeriod > 0) {
+            throw new BusinessException(WorkationErrorCode.EXPENSE_OUT_OF_PERIOD,
+                    "이미 등록된 지출 " + outOfPeriod + "건이 변경한 기간을 벗어납니다.");
+        }
+
+        workationMapper.updateWorkation(dto.toVO(workationId));
+        log.info("워케이션 수정 완료 - id: {}, userId: {}", workationId, userId);
+
+        return WorkationResponseDTO.from(workationMapper.selectWorkationById(workationId));
+    }
+
+    // 워케이션 존재 여부와 소유자를 함께 검증
+    // 1.4 수정 / 1.5 삭제 / 1.6 종료에서 공통 사용
+    private WorkationVO getOwnedWorkation(Long userId, Long workationId) {
+
+        WorkationVO vo = workationMapper.selectWorkationById(workationId);
+
+        if (vo == null) {
+            throw new BusinessException(WorkationErrorCode.WORKATION_NOT_FOUND);
+        }
+        // Long 은 객체이므로 == 이 아닌 equals 로 비교해야 한다
+        if (!vo.getUserId().equals(userId)) {
+            throw new BusinessException(WorkationErrorCode.ACCESS_DENIED);
+        }
+        return vo;
+    }
+
+    // 등록 요청 검증
+    private void validateRequest(WorkationCreateRequestDTO dto) {
+        validateWorkationInput(dto.getTitle(), dto.getStartDate(), dto.getEndDate(),
+                dto.getRegionId(), dto.getBusinessBudgetTotal(), dto.getPersonalBudgetTotal());
+    }
+
+    // 등록·수정 공통 입력값 검증
+    private void validateWorkationInput(String title, LocalDate startDate, LocalDate endDate,
+                                        Long regionId, BigDecimal businessBudget, BigDecimal personalBudget) {
+
+        if (title == null || title.trim().isEmpty()) {
             throw new IllegalArgumentException("워케이션 제목을 입력해 주세요.");
         }
-        if (dto.getTitle().length() > 100) {
+        if (title.length() > 100) {
             throw new IllegalArgumentException("워케이션 제목은 100자를 넘을 수 없습니다.");
         }
-        if (dto.getStartDate() == null || dto.getEndDate() == null) {
+        if (startDate == null || endDate == null) {
             throw new IllegalArgumentException("워케이션 기간을 입력해 주세요.");
         }
-        if (dto.getEndDate().isBefore(dto.getStartDate())) {
+        if (endDate.isBefore(startDate)) {
             throw new IllegalArgumentException("종료일은 시작일 이후여야 합니다.");
         }
-        if (dto.getRegionId() == null || workationMapper.countRegion(dto.getRegionId()) == 0) {
+        if (regionId == null || workationMapper.countRegion(regionId) == 0) {
             throw new BusinessException(WorkationErrorCode.REGION_NOT_FOUND);
         }
-        validateBudget(dto.getBusinessBudgetTotal(), "법인 예산");
-        validateBudget(dto.getPersonalBudgetTotal(), "개인 예산");
+        validateBudget(businessBudget, "법인 예산");
+        validateBudget(personalBudget, "개인 예산");
     }
 
     private void validateBudget(BigDecimal amount, String label) {

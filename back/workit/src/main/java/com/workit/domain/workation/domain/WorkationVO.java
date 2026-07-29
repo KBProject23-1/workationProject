@@ -26,6 +26,6 @@ public class WorkationVO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    /** region 테이블 조인 결과 */
+    // region 테이블 조인 결과
     private Region region;
 }

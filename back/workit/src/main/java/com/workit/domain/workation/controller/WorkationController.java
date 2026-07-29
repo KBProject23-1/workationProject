@@ -49,4 +49,16 @@ public class WorkationController {
 
         return ResponseEntity.ok(workationService.getWorkationHistory(userId, page, size));
     }
+
+    // 1.4 워케이션 수정
+    @PutMapping("/{workationId}")
+    public ResponseEntity<WorkationResponseDTO> workationModify(
+            @PathVariable("workationId") Long workationId,
+            @RequestBody WorkationUpdateRequestDTO dto) {
+
+        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
+        Long userId = 1L;
+
+        return ResponseEntity.ok(workationService.modifyWorkation(userId, workationId, dto));
+    }
 }

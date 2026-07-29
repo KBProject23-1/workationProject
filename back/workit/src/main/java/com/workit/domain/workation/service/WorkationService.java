@@ -12,4 +12,7 @@ public interface WorkationService {
 
     // 1.3 워케이션 기록 목록 (정산 완료, 최신순)
     PageResponseDTO<WorkationHistoryResponseDTO> getWorkationHistory(Long userId, int page, int size);
+
+    // 1.4 워케이션 수정
+    WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto);
 }
