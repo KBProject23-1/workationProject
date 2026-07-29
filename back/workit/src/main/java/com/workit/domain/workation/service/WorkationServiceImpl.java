@@ -8,7 +8,7 @@ import com.workit.domain.workation.exception.WorkationErrorCode;
 import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-@Log4j2
+@Slf4j
 public class WorkationServiceImpl implements WorkationService {
 
     private static final int DEFAULT_PAGE_SIZE = 10;
