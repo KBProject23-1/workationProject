@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.workation.mapper.WorkationMapper">
+
+    <resultMap id="workationMap" type="com.workit.domain.workation.vo.WorkationVO">
+        <id     property="id"                  column="id"/>
+        <result property="userId"              column="user_id"/>
+        <result property="regionId"            column="region_id"/>
+        <result property="title"               column="title"/>
+        <result property="startDate"           column="start_date"/>
+        <result property="endDate"             column="end_date"/>
+        <result property="businessBudgetTotal" column="business_budget_total"/>
+        <result property="personalBudgetTotal" column="personal_budget_total"/>
+        <result property="status"              column="status"/>
+        <result property="settledAt"           column="settled_at"/>
+        <result property="createdAt"           column="created_at"/>
+        <result property="updatedAt"           column="updated_at"/>
+        <association property="region" javaType="com.workit.domain.workation.vo.Region">
+            <id     property="id"   column="region_id"/>
+            <result property="name" column="region_name"/>
+        </association>
+    </resultMap>
+
+    <resultMap id="workationHistoryMap"
+               type="com.workit.domain.workation.vo.WorkationHistoryVO">
+        <id     property="id"                 column="id"/>
+        <result property="title"              column="title"/>
+        <result property="startDate"          column="start_date"/>
+        <result property="endDate"            column="end_date"/>
+        <result property="businessSpentTotal" column="business_spent_total"/>
+        <result property="personalSpentTotal" column="personal_spent_total"/>
+        <result property="status"             column="status"/>
+        <result property="settledAt"          column="settled_at"/>
+        <association property="region" javaType="com.workit.domain.workation.vo.Region">
+            <id     property="id"   column="region_id"/>
+            <result property="name" column="region_name"/>
+        </association>
+    </resultMap>
+
+    <sql id="workationColumns">
+        w.id,
+        w.user_id,
+        w.region_id,
+        w.title,
+        w.start_date,
+        w.end_date,
+        w.business_budget_total,
+        w.personal_budget_total,
+        w.status,
+        w.settled_at,
+        w.created_at,
+        w.updated_at,
+        r.name AS region_name
+    </sql>
+
+    <insert id="insertWorkation"
+            parameterType="com.workit.domain.workation.vo.WorkationVO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO workations (
+            user_id, region_id, title, start_date, end_date,
+            business_budget_total, personal_budget_total, status
+        ) VALUES (
+                     #{userId}, #{regionId}, #{title}, #{startDate}, #{endDate},
+                     #{businessBudgetTotal}, #{personalBudgetTotal}, 'ACTIVE'
+                 )
+    </insert>
+
+    <select id="selectWorkationById" resultMap="workationMap">
+        SELECT
+        <include refid="workationColumns"/>
+        FROM workations w
+        JOIN region r ON r.id = w.region_id
+        WHERE w.id = #{id}
+    </select>
+
+    <select id="selectActiveWorkation" resultMap="workationMap">
+        SELECT
+        <include refid="workationColumns"/>
+        FROM workations w
+        JOIN region r ON r.id = w.region_id
+        WHERE w.user_id = #{userId}
+        AND w.status = 'ACTIVE'
+        ORDER BY w.created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectBudgetSpentList"
+            resultType="com.workit.domain.workation.vo.BudgetSpentVO">
+        SELECT budget_type   AS budgetType,
+               SUM(amount)   AS spentTotal
+        FROM workation_expenses
+        WHERE workation_id = #{workationId}
+        GROUP BY budget_type
+    </select>
+
+    <select id="countUncheckedExpenses" resultType="int">
+        SELECT COUNT(*)
+        FROM workation_expenses
+        WHERE workation_id = #{workationId}
+          AND is_auto_categorized = 1
+    </select>
+
+    <select id="countActiveWorkation" resultType="int">
+        SELECT COUNT(*)
+        FROM workations
+        WHERE user_id = #{userId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="countRegion" resultType="int">
+        SELECT COUNT(*)
+        FROM region
+        WHERE id = #{regionId}
+    </select>
+
+    <select id="selectSettledWorkationList" resultMap="workationHistoryMap">
+        SELECT
+            w.id,
+            w.title,
+            w.start_date,
+            w.end_date,
+            w.status,
+            w.settled_at,
+            w.region_id,
+            r.name AS region_name,
+            COALESCE(SUM(CASE WHEN e.budget_type = 'WORK'     THEN e.amount END), 0) AS business_spent_total,
+            COALESCE(SUM(CASE WHEN e.budget_type = 'PERSONAL' THEN e.amount END), 0) AS personal_spent_total
+        FROM workations w
+                 JOIN region r ON r.id = w.region_id
+                 LEFT JOIN workation_expenses e ON e.workation_id = w.id
+        WHERE w.user_id = #{userId}
+          AND w.status = 'SETTLED'
+        GROUP BY w.id, w.title, w.start_date, w.end_date,
+                 w.status, w.settled_at, w.region_id, r.name
+        ORDER BY w.settled_at DESC
+            LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countSettledWorkation" resultType="long">
+        SELECT COUNT(*)
+        FROM workations
+        WHERE user_id = #{userId}
+          AND status = 'SETTLED'
+    </select>
+
+    <update id="updateWorkation"
+            parameterType="com.workit.domain.workation.vo.WorkationVO">
+        UPDATE workations
+        SET title                 = #{title},
+            region_id             = #{regionId},
+            start_date            = #{startDate},
+            end_date              = #{endDate},
+            business_budget_total = #{businessBudgetTotal},
+            personal_budget_total = #{personalBudgetTotal},
+            updated_at            = NOW()
+        WHERE id     = #{id}
+          AND status = 'ACTIVE'
+    </update>
+
+    <select id="countExpensesOutOfPeriod" resultType="int">
+        SELECT COUNT(*)
+        FROM workation_expenses
+        WHERE workation_id = #{workationId}
+          AND (spent_at &lt; #{startDate} OR spent_at &gt; #{endDate})
+    </select>
+
+    <delete id="deleteExpensesByWorkationId">
+        DELETE FROM workation_expenses
+        WHERE workation_id = #{workationId}
+    </delete>
+
+    <delete id="deleteBudgetsByWorkationId">
+        DELETE FROM budgets
+        WHERE workation_id = #{workationId}
+    </delete>
+
+    <delete id="deleteSurveysByWorkationId">
+        DELETE FROM user_surveys
+        WHERE workation_id = #{workationId}
+    </delete>
+
+    <!-- 결제 원본(transactions)은 삭제하지 않고 워케이션 연결만 끊는다 -->
+    <update id="unlinkTransactions">
+        UPDATE transactions
+        SET workation_id = NULL
+        WHERE workation_id = #{workationId}
+    </update>
+
+    <!-- 정산 완료 건이 삭제되지 않도록 SQL 에도 상태 조건을 둔다 -->
+    <delete id="deleteWorkation">
+        DELETE FROM workations
+        WHERE id     = #{id}
+          AND status = 'ACTIVE'
+    </delete>
+
+    <update id="settleWorkation">
+        UPDATE workations
+        SET status     = 'SETTLED',
+            settled_at = NOW(),
+            updated_at = NOW()
+        WHERE id     = #{id}
+          AND status = 'ACTIVE'
+    </update>
+</mapper>

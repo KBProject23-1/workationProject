@@ -35,7 +35,6 @@ public class ServletConfig implements WebMvcConfigurer {
         return resolver;
     }
 
-
     @Override
     public void configureMessageConverters(List<HttpMessageConverter<?>> converters) {
         ObjectMapper objectMapper = new ObjectMapper();
