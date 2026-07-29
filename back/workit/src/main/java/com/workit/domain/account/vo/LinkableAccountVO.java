@@ -11,4 +11,6 @@ public class LinkableAccountVO {
     private String accountNumber;
     private String productName;
     private Boolean isLinked;
+    private String bankName;
+    private String bankLogoUrl;
 }

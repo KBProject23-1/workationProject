@@ -11,7 +11,7 @@ public class CardVO {
     private Long userId;
     private String cardCompanyCode;
     private String cardName;
-    private String number;
+    private String cardNumber;
     private String cardClassification;  // CREDIT, DEBIT
     private String cardType;            // CORPORATE, PERSONAL
     private Boolean isPrimary;

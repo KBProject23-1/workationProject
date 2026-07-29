@@ -12,10 +12,11 @@ public class BankAccountVO {
     private String bankCode;
     private String accountNumber;
     private String productName;
+    private String bankName;
     private BigDecimal balance;
     private Boolean isPrimary;
-    private Boolean isWithdrawlAgreed;
-    private LocalDateTime withdrawlAgreedAt;
+    private Boolean isWithdrawalAgreed;
+    private LocalDateTime withdrawalAgreedAt;
     private LocalDateTime balanceUpdatedAt;
     private Boolean isDeleted;
 }
