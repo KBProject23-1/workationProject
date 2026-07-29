@@ -18,7 +18,9 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import javax.sql.DataSource;
 
 @Configuration
-@PropertySource({"classpath:/application.properties"})
+@PropertySource({"classpath:/application.properties",
+        "classpath:/application-secret.properties"
+})
 @MapperScan(basePackages = {"com.workit.domain.**.mapper"})
 @ComponentScan(basePackages = {"com.workit.domain", "com.workit.exception"})
 
