@@ -5,8 +5,9 @@ import com.workit.domain.workation.domain.WorkationVO;
 import com.workit.domain.workation.dto.WorkationCreateRequestDTO;
 import com.workit.domain.workation.dto.WorkationCurrentResponseDTO;
 import com.workit.domain.workation.dto.WorkationResponseDTO;
-import com.workit.domain.workation.exception.WorkationConflictException;
+import com.workit.domain.workation.exception.WorkationErrorCode;
 import com.workit.domain.workation.mapper.WorkationMapper;
+import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
@@ -30,7 +31,7 @@ public class WorkationServiceImpl implements WorkationService {
 
         // 진행 중인 워케이션 중복 검증
         if (workationMapper.countActiveWorkation(userId) > 0) {
-            throw new WorkationConflictException("이미 진행 중인 워케이션이 있습니다. 정산 완료 후 등록할 수 있습니다.");
+            throw new BusinessException(WorkationErrorCode.ALREADY_ACTIVE);
         }
 
         WorkationVO vo = dto.toVO(userId);
@@ -73,7 +74,7 @@ public class WorkationServiceImpl implements WorkationService {
             throw new IllegalArgumentException("종료일은 시작일 이후여야 합니다.");
         }
         if (dto.getRegionId() == null || workationMapper.countRegion(dto.getRegionId()) == 0) {
-            throw new IllegalArgumentException("존재하지 않는 지역입니다.");
+            throw new BusinessException(WorkationErrorCode.REGION_NOT_FOUND);
         }
         validateBudget(dto.getBusinessBudgetTotal(), "법인 예산");
         validateBudget(dto.getPersonalBudgetTotal(), "개인 예산");

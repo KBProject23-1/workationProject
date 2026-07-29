@@ -1,0 +1,30 @@
+package com.workit.domain.workation.exception;
+
+import com.workit.exception.ErrorCode;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+
+
+// 워케이션 도메인 에러 코드
+// 새로운 에러가 필요하면 예외 클래스를 만들지 말고 여기에 한 줄 추가한다.
+@Getter
+@RequiredArgsConstructor
+public enum WorkationErrorCode implements ErrorCode {
+
+    /* 400 */
+    REGION_NOT_FOUND   (HttpStatus.BAD_REQUEST, "존재하지 않는 지역입니다."),
+
+    /* 403 */
+    ACCESS_DENIED      (HttpStatus.FORBIDDEN,   "본인의 워케이션만 접근할 수 있습니다."),
+
+    /* 404 */
+    WORKATION_NOT_FOUND(HttpStatus.NOT_FOUND,   "워케이션을 찾을 수 없습니다."),
+
+    /* 409 */
+    ALREADY_ACTIVE     (HttpStatus.CONFLICT,    "이미 진행 중인 워케이션이 있습니다. 정산 완료 후 등록할 수 있습니다."),
+    ALREADY_SETTLED    (HttpStatus.CONFLICT,    "이미 정산이 완료된 워케이션입니다.");
+
+    private final HttpStatus status;
+    private final String message;
+}
