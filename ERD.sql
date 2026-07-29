@@ -2,6 +2,39 @@ CREATE DATABASE workit;
 
 USE workit;
 
+CREATE TABLE `users` (
+                         `id`            BIGINT          NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
+                         `email`         VARCHAR(100)    NOT NULL                COMMENT '유저 이메일 (로그인 ID)',
+                         `password`      VARCHAR(255)    NOT NULL                COMMENT '유저 비밀번호 (BCrypt 암호화)',
+                         `name`          VARCHAR(50)     NOT NULL                COMMENT '유저 이름 (PASS 실명 암호화 가능)',
+                         `phone_number`  VARCHAR(255)    NOT NULL                COMMENT '유저 핸드폰 번호 (양방향 암호화)',
+                         `pass_ci`       VARCHAR(255)    NOT NULL                COMMENT '유저 PASS 인증 식별값 (1인1계정 검증)',
+                         `birth_date`    DATE            NULL                    COMMENT '유저 생년월일 (YYYY-MM-DD)',
+                         `status`        VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
+                         `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
+
+    -- 제약 조건 설정 (자물쇠 채우기)
+                         PRIMARY KEY (`id`),
+                         UNIQUE KEY `ux_users_email` (`email`),          -- 로그인 ID 중복 방지
+                         UNIQUE KEY `ux_users_phone` (`phone_number`),   -- 휴대폰 번호 중복 가입 방지
+                         UNIQUE KEY `ux_users_pass_ci` (`pass_ci`)       -- PASS CI값 중복 가입 방지 (원천 차단)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 기본 계정 정보 테이블';
+
+CREATE TABLE `user_profile` (
+                                `id`            BIGINT          NOT NULL AUTO_INCREMENT COMMENT '프로필 고유 번호(PK)',
+                                `user_id`       BIGINT          NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+                                `nickname`      VARCHAR(50)     NOT NULL                COMMENT '유저 닉네임',
+                                `company_name`  VARCHAR(100)    NULL                    COMMENT '소속 회사명 (선택 입력 가능)',
+                                `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '프로필 최초 생성 일시',
+                                `updated_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '프로필 최종 수정 일시',
+
+    -- 제약 조건 설정 (철통 보안 자물쇠)
+                                PRIMARY KEY (`id`),
+                                UNIQUE KEY `ux_user_profile_user_id` (`user_id`),   -- 1:1 관계 강제 (한 유저당 프로필은 단 하나)
+                                UNIQUE KEY `ux_user_profile_nickname` (`nickname`), -- 닉네임 중복 원천 차단
+                                CONSTRAINT `fk_user_profile_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 부가 프로필 정보 테이블 (비식별 관계)';
+
 CREATE TABLE `restaurants` (
                                `id`	BIGINT	NOT NULL,
                                `id2`	BIGINT	NOT NULL,
@@ -103,24 +136,6 @@ CREATE TABLE `tags` (
                         `id`	BIGINT	NOT NULL,
                         `name`	VARCHAR(50)	NOT NULL
 );
-
-CREATE TABLE `users` (
-                         `id`            BIGINT          NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
-                         `email`         VARCHAR(100)    NOT NULL                COMMENT '유저 이메일 (로그인 ID)',
-                         `password`      VARCHAR(255)    NOT NULL                COMMENT '유저 비밀번호 (BCrypt 암호화)',
-                         `name`          VARCHAR(50)     NOT NULL                COMMENT '유저 이름 (PASS 실명 암호화 가능)',
-                         `phone_number`  VARCHAR(255)    NOT NULL                COMMENT '유저 핸드폰 번호 (양방향 암호화)',
-                         `pass_ci`       VARCHAR(255)    NOT NULL                COMMENT '유저 PASS 인증 식별값 (1인1계정 검증)',
-                         `birth_date`    DATE            NULL                    COMMENT '유저 생년월일 (YYYY-MM-DD)',
-                         `status`        VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
-                         `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
-
-    -- 제약 조건 설정 (자물쇠 채우기)
-                         PRIMARY KEY (`id`),
-                         UNIQUE KEY `ux_users_email` (`email`),          -- 로그인 ID 중복 방지
-                         UNIQUE KEY `ux_users_phone` (`phone_number`),   -- 휴대폰 번호 중복 가입 방지
-                         UNIQUE KEY `ux_users_pass_ci` (`pass_ci`)       -- PASS CI값 중복 가입 방지 (원천 차단)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 기본 계정 정보 테이블';
 
 CREATE TABLE `reservation_daily_inventories` (
                                                  `id`	BIGINT	NOT NULL	COMMENT '예약 재고 연결 고유번호(PK)',
