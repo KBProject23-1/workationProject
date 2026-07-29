@@ -23,6 +23,22 @@
         </association>
     </resultMap>
 
+    <resultMap id="workationHistoryMap"
+               type="com.workit.domain.workation.domain.WorkationHistoryVO">
+        <id     property="id"                 column="id"/>
+        <result property="title"              column="title"/>
+        <result property="startDate"          column="start_date"/>
+        <result property="endDate"            column="end_date"/>
+        <result property="businessSpentTotal" column="business_spent_total"/>
+        <result property="personalSpentTotal" column="personal_spent_total"/>
+        <result property="status"             column="status"/>
+        <result property="settledAt"          column="settled_at"/>
+        <association property="region" javaType="com.workit.domain.workation.domain.Region">
+            <id     property="id"   column="region_id"/>
+            <result property="name" column="region_name"/>
+        </association>
+    </resultMap>
+
     <sql id="workationColumns">
         w.id,
         w.user_id,
@@ -46,9 +62,9 @@
             user_id, region_id, title, start_date, end_date,
             business_budget_total, personal_budget_total, status
         ) VALUES (
-            #{userId}, #{regionId}, #{title}, #{startDate}, #{endDate},
-            #{businessBudgetTotal}, #{personalBudgetTotal}, 'ACTIVE'
-        )
+                     #{userId}, #{regionId}, #{title}, #{startDate}, #{endDate},
+                     #{businessBudgetTotal}, #{personalBudgetTotal}, 'ACTIVE'
+                 )
     </insert>
 
     <select id="selectWorkationById" resultMap="workationMap">
@@ -65,7 +81,7 @@
         FROM workations w
         JOIN region r ON r.id = w.region_id
         WHERE w.user_id = #{userId}
-          AND w.status = 'ACTIVE'
+        AND w.status = 'ACTIVE'
         ORDER BY w.created_at DESC
         LIMIT 1
     </select>
@@ -97,6 +113,36 @@
         SELECT COUNT(*)
         FROM region
         WHERE id = #{regionId}
+    </select>
+
+    <select id="selectSettledWorkationList" resultMap="workationHistoryMap">
+        SELECT
+            w.id,
+            w.title,
+            w.start_date,
+            w.end_date,
+            w.status,
+            w.settled_at,
+            w.region_id,
+            r.name AS region_name,
+            COALESCE(SUM(CASE WHEN e.budget_type = 'WORK'     THEN e.amount END), 0) AS business_spent_total,
+            COALESCE(SUM(CASE WHEN e.budget_type = 'PERSONAL' THEN e.amount END), 0) AS personal_spent_total
+        FROM workations w
+                 JOIN region r ON r.id = w.region_id
+                 LEFT JOIN workation_expenses e ON e.workation_id = w.id
+        WHERE w.user_id = #{userId}
+          AND w.status = 'SETTLED'
+        GROUP BY w.id, w.title, w.start_date, w.end_date,
+                 w.status, w.settled_at, w.region_id, r.name
+        ORDER BY w.settled_at DESC
+            LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countSettledWorkation" resultType="long">
+        SELECT COUNT(*)
+        FROM workations
+        WHERE user_id = #{userId}
+          AND status = 'SETTLED'
     </select>
 
 </mapper>

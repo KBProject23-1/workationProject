@@ -2,9 +2,7 @@ package com.workit.domain.workation.service;
 
 import com.workit.domain.workation.domain.BudgetSpentVO;
 import com.workit.domain.workation.domain.WorkationVO;
-import com.workit.domain.workation.dto.WorkationCreateRequestDTO;
-import com.workit.domain.workation.dto.WorkationCurrentResponseDTO;
-import com.workit.domain.workation.dto.WorkationResponseDTO;
+import com.workit.domain.workation.dto.*;
 import com.workit.domain.workation.exception.WorkationErrorCode;
 import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.exception.BusinessException;
@@ -14,12 +12,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Log4j2
 public class WorkationServiceImpl implements WorkationService {
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 50;
 
     private final WorkationMapper workationMapper;
 
@@ -57,6 +60,32 @@ public class WorkationServiceImpl implements WorkationService {
         int uncheckedCount = workationMapper.countUncheckedExpenses(vo.getId());
 
         return WorkationCurrentResponseDTO.of(vo, spentList, uncheckedCount);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponseDTO<WorkationHistoryResponseDTO> getWorkationHistory(Long userId, int page, int size) {
+
+        // 잘못된 페이징 값이 들어와도 목록이 깨지지 않도록 보정
+        int safePage = Math.max(page, 0);
+        int safeSize = (size < 1 || size > MAX_PAGE_SIZE) ? DEFAULT_PAGE_SIZE : size;
+        int offset = safePage * safeSize;
+
+        long totalElements = workationMapper.countSettledWorkation(userId);
+
+        // 조회 결과가 없으면 집계가 포함된 무거운 목록 쿼리를 실행하지 않는다
+        if (totalElements == 0) {
+            return PageResponseDTO.of(Collections.emptyList(), safePage, safeSize, 0);
+        }
+
+        // DB 조회 결과(VO)를 응답 형식(DTO)으로 변환
+        List<WorkationHistoryResponseDTO> content = workationMapper
+                .selectSettledWorkationList(userId, offset, safeSize)
+                .stream()
+                .map(WorkationHistoryResponseDTO::from)
+                .collect(Collectors.toList());
+
+        return PageResponseDTO.of(content, safePage, safeSize, totalElements);
     }
 
     private void validateRequest(WorkationCreateRequestDTO dto) {

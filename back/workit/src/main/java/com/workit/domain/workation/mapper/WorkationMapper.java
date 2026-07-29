@@ -1,6 +1,7 @@
 package com.workit.domain.workation.mapper;
 
 import com.workit.domain.workation.domain.BudgetSpentVO;
+import com.workit.domain.workation.domain.WorkationHistoryVO;
 import com.workit.domain.workation.domain.WorkationVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -24,4 +25,12 @@ public interface WorkationMapper {
     int countActiveWorkation(@Param("userId") Long userId);
 
     int countRegion(@Param("regionId") Long regionId);
+
+    /** 정산 완료된 워케이션 목록 (최신순, 페이징) */
+    List<WorkationHistoryVO> selectSettledWorkationList(@Param("userId") Long userId,
+                                                        @Param("offset") int offset,
+                                                        @Param("size") int size);
+
+    /** 정산 완료된 워케이션 총 건수 */
+    long countSettledWorkation(@Param("userId") Long userId);
 }
