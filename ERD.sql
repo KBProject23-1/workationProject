@@ -13,7 +13,7 @@ CREATE TABLE `users` (
                          `status`        VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
                          `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
 
-    -- 제약 조건 설정 (자물쇠 채우기)
+    -- 제약 조건 설정
                          PRIMARY KEY (`id`),
                          UNIQUE KEY `ux_users_email` (`email`),          -- 로그인 ID 중복 방지
                          UNIQUE KEY `ux_users_phone` (`phone_number`),   -- 휴대폰 번호 중복 가입 방지
@@ -28,12 +28,42 @@ CREATE TABLE `user_profile` (
                                 `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '프로필 최초 생성 일시',
                                 `updated_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '프로필 최종 수정 일시',
 
-    -- 제약 조건 설정 (철통 보안 자물쇠)
+    -- 제약 조건 설정
                                 PRIMARY KEY (`id`),
                                 UNIQUE KEY `ux_user_profile_user_id` (`user_id`),   -- 1:1 관계 강제 (한 유저당 프로필은 단 하나)
                                 UNIQUE KEY `ux_user_profile_nickname` (`nickname`), -- 닉네임 중복 원천 차단
                                 CONSTRAINT `fk_user_profile_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 부가 프로필 정보 테이블 (비식별 관계)';
+
+CREATE TABLE `notification_histories` (
+                                          `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '알림 이력 고유 번호(PK)',
+                                          `user_id`     BIGINT        NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+                                          `type`        ENUM('SYSTEM', 'BUDGET', 'TRANSFER', 'PAYMENT', 'EVENT', 'RESERVATION', 'REVIEW') NOT NULL COMMENT '알림 카테고리 타입',
+                                          `important`   TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '중요 알림 여부 (0:일반, 1:중요)',
+                                          `title`       VARCHAR(100)  NOT NULL                COMMENT '알림 제목',
+                                          `content`     TEXT          NOT NULL                COMMENT '알림 본문 내용',
+                                          `read`        TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',
+                                          `created_at`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '알림 수신 일시',
+
+    -- 제약 조건 설정
+                                          PRIMARY KEY (`id`),
+                                          CONSTRAINT `fk_notification_histories_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자별 수신 알림 목록 이력 테이블 (비식별 관계)';
+
+CREATE TABLE `user_notification_settings` (
+                                              `user_id`             BIGINT        NOT NULL                COMMENT '회원 고유번호 (PK 겸 FK, users.id 참조)',
+                                              `system_notify`       TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '시스템 알림 ON(1) / OFF(0)',
+                                              `budget_warning`      TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '예산 경고 알림 ON(1) / OFF(0)',
+                                              `transfer_notify`     TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '송금(입출금) 알림 ON(1) / OFF(0)',
+                                              `payment_notify`      TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '결제 알림 ON(1) / OFF(0)',
+                                              `event_notify`        TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '이벤트/광고 알림 ON(1) / OFF(0)',
+                                              `reservation_notify`  TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '예약 알림 ON(1) / OFF(0)',
+                                              `review_notify`       TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '리뷰 작성 요청 알림 ON(1) / OFF(0)',
+
+    -- 제약 조건 설정
+                                              PRIMARY KEY (`user_id`),
+                                              CONSTRAINT `fk_user_notification_settings_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 카테고리별 알림 ON/OFF 설정 테이블 (식별 관계)';
 
 CREATE TABLE `restaurants` (
                                `id`	BIGINT	NOT NULL,
@@ -119,17 +149,6 @@ CREATE TABLE `user_survey_answers` (
                                        `id`	BIGINT	NOT NULL,
                                        `survey_id`	BIGINT	NOT NULL,
                                        `option_id`	BIGINT	NOT NULL
-);
-
-CREATE TABLE `notification_histories` (
-                                          `id`	BIGINT	NOT NULL,
-                                          `user_id`	BIGINT	NOT NULL,
-                                          `type`	ENUM('SYSTEM', 'BUDGET', 'WALLET', 'PAYMENT', 'EVENT', 'RESERVATION', 'REVIEW')	NOT NULL	COMMENT '알림 타입 (시스템 / 예산 / 출입금 / 결제 / 이벤트 / 예약/리뷰)',
-                                          `is_important`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '중요 알림 탭 분류용',
-                                          `title`	VARCHAR(150)	NOT NULL	COMMENT '알림 제목',
-                                          `content`	TEXT	NOT NULL	COMMENT '알림 내용',
-                                          `is_read`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '읽음 처리 분류용',
-                                          `created_at`	TIMESTAMP	NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '알림 생성 시간'
 );
 
 CREATE TABLE `tags` (
@@ -222,17 +241,6 @@ CREATE TABLE `product_daily_inventories` (
                                              `total_capacity`	INT	NOT NULL	COMMENT '전체 재고 수',
                                              `remaining_capacity`	INT	NOT NULL	COMMENT '남은 재고 수',
                                              `is_available`	TINYINT(1)	NOT NULL	DEFAULT 1	COMMENT '해당 날짜 예약 접수 여부'
-);
-
-CREATE TABLE `user_notification_settings` (
-                                              `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유번호(PK, FK)',
-                                              `is_system_notify`	TINYINT(1)	NULL	DEFAULT 1	COMMENT '시스템 알림 on / off',
-                                              `is_budget_warning`	TINYINT(1)	NULL	DEFAULT 1	COMMENT '예산 경고 알림 on / off',
-                                              `is_transfer_notify`	TINYINT(1)	NULL	DEFAULT 1	COMMENT '입금 / 출금 알림 on / off',
-                                              `is_payment_notify`	TINYINT(1)	NULL	DEFAULT 1	COMMENT '결제 알림 on / off',
-                                              `is_event_notify`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '이벤트 알림 on / off',
-                                              `is_reservation_notify`	TINYINT(1)	NULL	DEFAULT 1	COMMENT '예약 알림 on / off',
-                                              `is_review_notify`	TINYINT(1)	NULL	COMMENT '예약 완료되면 사용자에게 리뷰 작성해달라는 알림 ON/OFF'
 );
 
 CREATE TABLE `cards` (
@@ -447,10 +455,6 @@ ALTER TABLE `user_survey_answers` ADD CONSTRAINT `PK_USER_SURVEY_ANSWERS` PRIMAR
                                                                                        `id`
     );
 
-ALTER TABLE `notification_histories` ADD CONSTRAINT `PK_NOTIFICATION_HISTORIES` PRIMARY KEY (
-                                                                                             `id`
-    );
-
 ALTER TABLE `tags` ADD CONSTRAINT `PK_TAGS` PRIMARY KEY (
                                                          `id`
     );
@@ -562,13 +566,6 @@ ALTER TABLE `offices` ADD CONSTRAINT `FK_merchants_TO_offices_1` FOREIGN KEY (
     )
     REFERENCES `merchants` (
                             `id`
-        );
-
-ALTER TABLE `user_notification_settings` ADD CONSTRAINT `FK_users_TO_user_notification_settings_1` FOREIGN KEY (
-                                                                                                                `user_id`
-    )
-    REFERENCES `users` (
-                        `id`
         );
 
 ALTER TABLE `accommodations` ADD CONSTRAINT `FK_merchants_TO_accommodations_1` FOREIGN KEY (
