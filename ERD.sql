@@ -35,20 +35,27 @@ CREATE TABLE `user_profile` (
                                 CONSTRAINT `fk_user_profile_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 부가 프로필 정보 테이블 (비식별 관계)';
 
-CREATE TABLE `notification_histories` (
-                                          `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '알림 이력 고유 번호(PK)',
-                                          `user_id`     BIGINT        NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
-                                          `type`        ENUM('SYSTEM', 'BUDGET', 'TRANSFER', 'PAYMENT', 'EVENT', 'RESERVATION', 'REVIEW') NOT NULL COMMENT '알림 카테고리 타입',
-                                          `important`   TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '중요 알림 여부 (0:일반, 1:중요)',
-                                          `title`       VARCHAR(100)  NOT NULL                COMMENT '알림 제목',
-                                          `content`     TEXT          NOT NULL                COMMENT '알림 본문 내용',
-                                          `read`        TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',
-                                          `created_at`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '알림 수신 일시',
+CREATE TABLE `terms` (
+                         `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '약관 고유 번호(PK)',
+                         `title`       VARCHAR(100)  NOT NULL                COMMENT '약관 제목',
+                         `content`     TEXT          NOT NULL                COMMENT '약관 본문 상세 내용',
+                         `required`    TINYINT(1)    NOT NULL                COMMENT '필수 여부 (0:선택, 1:필수)',
+                         `created_at`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '약관 등록 일시',
+
+                         PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='서비스 약관 종류 마스터 테이블';
+
+CREATE TABLE `user_terms_agreements` (
+                                         `id`         BIGINT    NOT NULL AUTO_INCREMENT COMMENT '동의 내역 고유 번호(PK)',
+                                         `user_id`    BIGINT    NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+                                         `term_id`    BIGINT    NOT NULL                COMMENT '약관 고유 번호 (FK, terms.id 참조)',
+                                         `agreed_at`  DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '약관 동의 일시',
 
     -- 제약 조건 설정
-                                          PRIMARY KEY (`id`),
-                                          CONSTRAINT `fk_notification_histories_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자별 수신 알림 목록 이력 테이블 (비식별 관계)';
+                                         PRIMARY KEY (`id`),
+                                         CONSTRAINT `fk_user_terms_agreements_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+                                         CONSTRAINT `fk_user_terms_agreements_term_id` FOREIGN KEY (`term_id`) REFERENCES `terms` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 약관 동의 이력 매핑 테이블 (비식별 관계)';
 
 CREATE TABLE `user_notification_settings` (
                                               `user_id`             BIGINT        NOT NULL                COMMENT '회원 고유번호 (PK 겸 FK, users.id 참조)',
@@ -64,6 +71,21 @@ CREATE TABLE `user_notification_settings` (
                                               PRIMARY KEY (`user_id`),
                                               CONSTRAINT `fk_user_notification_settings_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 카테고리별 알림 ON/OFF 설정 테이블 (식별 관계)';
+
+CREATE TABLE `notification_histories` (
+                                          `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '알림 이력 고유 번호(PK)',
+                                          `user_id`     BIGINT        NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+                                          `type`        ENUM('SYSTEM', 'BUDGET', 'TRANSFER', 'PAYMENT', 'EVENT', 'RESERVATION', 'REVIEW') NOT NULL COMMENT '알림 카테고리 타입',
+                                          `important`   TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '중요 알림 여부 (0:일반, 1:중요)',
+                                          `title`       VARCHAR(100)  NOT NULL                COMMENT '알림 제목',
+                                          `content`     TEXT          NOT NULL                COMMENT '알림 본문 내용',
+                                          `read`        TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',
+                                          `created_at`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '알림 수신 일시',
+
+    -- 제약 조건 설정
+                                          PRIMARY KEY (`id`),
+                                          CONSTRAINT `fk_notification_histories_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자별 수신 알림 목록 이력 테이블 (비식별 관계)';
 
 CREATE TABLE `restaurants` (
                                `id`	BIGINT	NOT NULL,
@@ -227,13 +249,6 @@ CREATE TABLE `merchants` (
                              `thumbnail_url`	VARCHAR(255)	NULL
 );
 
-CREATE TABLE `user_terms_agreements` (
-                                         `id`	BIGINT	NOT NULL,
-                                         `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유 번호(FK)',
-                                         `term_id`	BIGINT	NOT NULL,
-                                         `agreed_at`	TIMESTAMP	NULL
-);
-
 CREATE TABLE `product_daily_inventories` (
                                              `id`	BIGINT	NOT NULL	COMMENT '일별 재고 고유번호(PK)',
                                              `product_id`	BIGINT	NOT NULL	COMMENT '예약 상품 고유번호(FK)',
@@ -281,14 +296,6 @@ CREATE TABLE `accommodations` (
                                   `check_in_time`	TIME	NULL,
                                   `check_out_time`	TIME	NULL,
                                   `noise_level`	ENUM( 'QUIET', 'NORMAL', 'BUSY' )	NULL	DEFAULT 'NORMAL'
-);
-
-CREATE TABLE `terms` (
-                         `id`	BIGINT	NOT NULL,
-                         `title`	VARCHAR(150)	NULL,
-                         `content`	TEXT	NULL,
-                         `is_required`	TINYINT(1)	NULL	COMMENT '필수 약관 여부',
-                         `created_at`	TIMESTAMP	NULL	COMMENT '약관 등록일'
 );
 
 CREATE TABLE `user_category_rules` (
@@ -476,18 +483,9 @@ ALTER TABLE `merchants` ADD CONSTRAINT `PK_MERCHANTS` PRIMARY KEY (
                                                                    `id`
     );
 
-ALTER TABLE `user_terms_agreements` ADD CONSTRAINT `PK_USER_TERMS_AGREEMENTS` PRIMARY KEY (
-                                                                                           `id`
-    );
-
 ALTER TABLE `product_daily_inventories` ADD CONSTRAINT `PK_PRODUCT_DAILY_INVENTORIES` PRIMARY KEY (
                                                                                                    `id`
     );
-
-ALTER TABLE `user_notification_settings` ADD CONSTRAINT `PK_USER_NOTIFICATION_SETTINGS` PRIMARY KEY (
-                                                                                                     `user_id`
-    );
-
 
 ALTER TABLE `survey_options` ADD CONSTRAINT `PK_SURVEY_OPTIONS` PRIMARY KEY (
                                                                              `id`
@@ -500,10 +498,6 @@ ALTER TABLE `user_surveys` ADD CONSTRAINT `PK_USER_SURVEYS` PRIMARY KEY (
 ALTER TABLE `accommodations` ADD CONSTRAINT `PK_ACCOMMODATIONS` PRIMARY KEY (
                                                                              `id`,
                                                                              `id2`
-    );
-
-ALTER TABLE `terms` ADD CONSTRAINT `PK_TERMS` PRIMARY KEY (
-                                                           `id`
     );
 
 ALTER TABLE `user_category_rules` ADD CONSTRAINT `PK_USER_CATEGORY_RULES` PRIMARY KEY (
