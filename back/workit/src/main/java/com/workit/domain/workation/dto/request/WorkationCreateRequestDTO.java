@@ -1,6 +1,6 @@
-package com.workit.domain.workation.dto;
+package com.workit.domain.workation.dto.request;
 
-import com.workit.domain.workation.domain.WorkationVO;
+import com.workit.domain.workation.vo.WorkationVO;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
@@ -8,11 +8,10 @@ import lombok.ToString;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-// 1.4 워케이션 수정 요청(PUT으로 전체 필드 덮어씀)
 @Getter
 @Setter
 @ToString
-public class WorkationUpdateRequestDTO {
+public class WorkationCreateRequestDTO {
 
     private String title;
     private Long regionId;
@@ -21,12 +20,11 @@ public class WorkationUpdateRequestDTO {
     private BigDecimal businessBudgetTotal;
     private BigDecimal personalBudgetTotal;
 
-    // 수정 대상 id 와 함께 VO 로 변환
-    public WorkationVO toVO(Long workationId) {
+    public WorkationVO toVO(Long userId) {
         WorkationVO vo = new WorkationVO();
-        vo.setId(workationId);
-        vo.setTitle(title);
+        vo.setUserId(userId);
         vo.setRegionId(regionId);
+        vo.setTitle(title);
         vo.setStartDate(startDate);
         vo.setEndDate(endDate);
         vo.setBusinessBudgetTotal(businessBudgetTotal);

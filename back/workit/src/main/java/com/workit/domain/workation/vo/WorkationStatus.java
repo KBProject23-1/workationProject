@@ -1,4 +1,4 @@
-package com.workit.domain.workation.domain;
+package com.workit.domain.workation.vo;
 
 public enum WorkationStatus {
     ACTIVE, SETTLED

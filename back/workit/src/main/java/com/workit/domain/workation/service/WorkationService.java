@@ -1,6 +1,9 @@
 package com.workit.domain.workation.service;
 
-import com.workit.domain.workation.dto.*;
+import com.workit.domain.workation.dto.request.WorkationCreateRequestDTO;
+import com.workit.domain.workation.dto.request.WorkationUpdateRequestDTO;
+import com.workit.domain.workation.dto.response.*;
+import com.workit.global.dto.PageResponseDTO;
 
 public interface WorkationService {
 

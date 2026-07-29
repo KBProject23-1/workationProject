@@ -1,7 +1,7 @@
-package com.workit.domain.workation.dto;
+package com.workit.domain.workation.dto.response;
 
-import com.workit.domain.workation.domain.WorkationHistoryVO;
-import com.workit.domain.workation.domain.WorkationStatus;
+import com.workit.domain.workation.vo.WorkationHistoryVO;
+import com.workit.domain.workation.vo.WorkationStatus;
 import lombok.Builder;
 import lombok.Getter;
 

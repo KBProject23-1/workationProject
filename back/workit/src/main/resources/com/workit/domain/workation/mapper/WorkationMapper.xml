@@ -4,7 +4,7 @@
 
 <mapper namespace="com.workit.domain.workation.mapper.WorkationMapper">
 
-    <resultMap id="workationMap" type="com.workit.domain.workation.domain.WorkationVO">
+    <resultMap id="workationMap" type="com.workit.domain.workation.vo.WorkationVO">
         <id     property="id"                  column="id"/>
         <result property="userId"              column="user_id"/>
         <result property="regionId"            column="region_id"/>
@@ -17,14 +17,14 @@
         <result property="settledAt"           column="settled_at"/>
         <result property="createdAt"           column="created_at"/>
         <result property="updatedAt"           column="updated_at"/>
-        <association property="region" javaType="com.workit.domain.workation.domain.Region">
+        <association property="region" javaType="com.workit.domain.workation.vo.Region">
             <id     property="id"   column="region_id"/>
             <result property="name" column="region_name"/>
         </association>
     </resultMap>
 
     <resultMap id="workationHistoryMap"
-               type="com.workit.domain.workation.domain.WorkationHistoryVO">
+               type="com.workit.domain.workation.vo.WorkationHistoryVO">
         <id     property="id"                 column="id"/>
         <result property="title"              column="title"/>
         <result property="startDate"          column="start_date"/>
@@ -33,7 +33,7 @@
         <result property="personalSpentTotal" column="personal_spent_total"/>
         <result property="status"             column="status"/>
         <result property="settledAt"          column="settled_at"/>
-        <association property="region" javaType="com.workit.domain.workation.domain.Region">
+        <association property="region" javaType="com.workit.domain.workation.vo.Region">
             <id     property="id"   column="region_id"/>
             <result property="name" column="region_name"/>
         </association>
@@ -56,7 +56,7 @@
     </sql>
 
     <insert id="insertWorkation"
-            parameterType="com.workit.domain.workation.domain.WorkationVO"
+            parameterType="com.workit.domain.workation.vo.WorkationVO"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO workations (
             user_id, region_id, title, start_date, end_date,
@@ -87,7 +87,7 @@
     </select>
 
     <select id="selectBudgetSpentList"
-            resultType="com.workit.domain.workation.domain.BudgetSpentVO">
+            resultType="com.workit.domain.workation.vo.BudgetSpentVO">
         SELECT budget_type   AS budgetType,
                SUM(amount)   AS spentTotal
         FROM workation_expenses
@@ -146,7 +146,7 @@
     </select>
 
     <update id="updateWorkation"
-            parameterType="com.workit.domain.workation.domain.WorkationVO">
+            parameterType="com.workit.domain.workation.vo.WorkationVO">
         UPDATE workations
         SET title                 = #{title},
             region_id             = #{regionId},

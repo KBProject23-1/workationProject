@@ -1,7 +1,10 @@
 package com.workit.domain.workation.controller;
 
-import com.workit.domain.workation.dto.*;
+import com.workit.domain.workation.dto.request.WorkationCreateRequestDTO;
+import com.workit.domain.workation.dto.request.WorkationUpdateRequestDTO;
+import com.workit.domain.workation.dto.response.*;
 import com.workit.domain.workation.service.WorkationService;
+import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;

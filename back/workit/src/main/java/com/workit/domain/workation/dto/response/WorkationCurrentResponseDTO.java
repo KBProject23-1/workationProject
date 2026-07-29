@@ -1,10 +1,10 @@
-package com.workit.domain.workation.dto;
+package com.workit.domain.workation.dto.response;
 
-import com.workit.domain.workation.domain.BudgetSpentVO;
-import com.workit.domain.workation.domain.BudgetType;
-import com.workit.domain.workation.domain.Region;
-import com.workit.domain.workation.domain.WorkationStatus;
-import com.workit.domain.workation.domain.WorkationVO;
+import com.workit.domain.workation.vo.BudgetSpentVO;
+import com.workit.domain.workation.vo.BudgetType;
+import com.workit.domain.workation.vo.Region;
+import com.workit.domain.workation.vo.WorkationStatus;
+import com.workit.domain.workation.vo.WorkationVO;
 import lombok.Builder;
 import lombok.Getter;
 

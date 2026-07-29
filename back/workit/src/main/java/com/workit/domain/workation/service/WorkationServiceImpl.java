@@ -1,12 +1,15 @@
 package com.workit.domain.workation.service;
 
-import com.workit.domain.workation.domain.BudgetSpentVO;
-import com.workit.domain.workation.domain.WorkationStatus;
-import com.workit.domain.workation.domain.WorkationVO;
-import com.workit.domain.workation.dto.*;
+import com.workit.domain.workation.vo.BudgetSpentVO;
+import com.workit.domain.workation.vo.WorkationStatus;
+import com.workit.domain.workation.vo.WorkationVO;
+import com.workit.domain.workation.dto.request.WorkationCreateRequestDTO;
+import com.workit.domain.workation.dto.request.WorkationUpdateRequestDTO;
+import com.workit.domain.workation.dto.response.*;
 import com.workit.domain.workation.exception.WorkationErrorCode;
 import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.exception.BusinessException;
+import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

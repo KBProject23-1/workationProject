@@ -1,8 +1,8 @@
 package com.workit.domain.workation.mapper;
 
-import com.workit.domain.workation.domain.BudgetSpentVO;
-import com.workit.domain.workation.domain.WorkationHistoryVO;
-import com.workit.domain.workation.domain.WorkationVO;
+import com.workit.domain.workation.vo.BudgetSpentVO;
+import com.workit.domain.workation.vo.WorkationHistoryVO;
+import com.workit.domain.workation.vo.WorkationVO;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDate;
