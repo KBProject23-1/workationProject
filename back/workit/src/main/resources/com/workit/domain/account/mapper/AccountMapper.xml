@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.workit.domain.account.mapper.AccountMapper">
+
+    <resultMap id="LinkableAccountResultMap" type="com.workit.domain.account.vo.LinkableAccountVO">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="bank_code" property="bankCode"/>
+        <result column="bank_name" property="bankName"/>
+        <result column="bank_logo_url" property="bankLogoUrl"/>
+        <result column="account_number" property="accountNumber"/>
+        <result column="product_name" property="productName"/>
+        <result column="is_linked" property="isLinked"/>
+    </resultMap>
+
+    <resultMap id="BankAccountResultMap" type="com.workit.domain.account.vo.BankAccountVO">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="bank_code" property="bankCode"/>
+        <result column="bank_name" property="bankName"/>
+        <result column="account_number" property="accountNumber"/>
+        <result column="product_name" property="productName"/>
+        <result column="balance" property="balance"/>
+        <result column="is_primary" property="isPrimary"/>
+        <result column="is_withdrawal_agreed" property="isWithdrawalAgreed"/>
+        <result column="withdrawal_agreed_at" property="withdrawalAgreedAt"/>
+        <result column="balance_updated_at" property="balanceUpdatedAt"/>
+        <result column="is_deleted" property="isDeleted"/>
+    </resultMap>
+
+    <select id="findAvailableAccounts" resultMap="LinkableAccountResultMap">
+        SELECT la.id, la.user_id, la.bank_code, b.name AS bank_name, b.logo_url AS bank_logo_url,
+        la.account_number, la.product_name, la.is_linked
+        FROM linkable_accounts la
+        JOIN banks b ON la.bank_code = b.code
+        WHERE la.user_id = #{userId} AND la.is_linked = 0
+    </select>
+
+    <select id="findLinkableAccountById" resultMap="LinkableAccountResultMap">
+        SELECT la.id, la.user_id, la.bank_code, b.name AS bank_name, b.logo_url AS bank_logo_url,
+        la.account_number, la.product_name, la.is_linked
+        FROM linkable_accounts la
+        JOIN banks b ON la.bank_code = b.code
+        WHERE la.id = #{linkableAccountId} AND la.user_id = #{userId}
+    </select>
+
+    <update id="markLinkableAccountAsLinked">
+        UPDATE linkable_accounts
+        SET is_linked = 1
+        WHERE id = #{linkableAccountId}
+    </update>
+
+    <select id="findMyAccounts" resultMap="BankAccountResultMap">
+        SELECT ba.id, ba.user_id, ba.bank_code, b.name AS bank_name,
+        ba.account_number, ba.product_name, ba.balance,
+        ba.is_primary, ba.is_withdrawal_agreed, ba.withdrawal_agreed_at,
+        ba.balance_updated_at, ba.is_deleted
+        FROM bank_accounts ba
+        JOIN banks b ON ba.bank_code = b.code
+        WHERE ba.user_id = #{userId} AND ba.is_deleted = 0
+        ORDER BY ba.is_primary DESC, ba.id ASC
+    </select>
+
+    <select id="findAccountById" resultMap="BankAccountResultMap">
+        SELECT ba.id, ba.user_id, ba.bank_code, b.name AS bank_name,
+        ba.account_number, ba.product_name, ba.balance,
+        ba.is_primary, ba.is_withdrawal_agreed, ba.withdrawal_agreed_at,
+        ba.balance_updated_at, ba.is_deleted
+        FROM bank_accounts ba
+        JOIN banks b ON ba.bank_code = b.code
+        WHERE ba.id = #{accountId} AND ba.user_id = #{userId} AND ba.is_deleted = 0
+    </select>
+
+    <select id="countActiveAccounts" resultType="int">
+        SELECT COUNT(*) FROM bank_accounts
+        WHERE user_id = #{userId} AND is_deleted = 0
+    </select>
+
+    <insert id="insertAccount" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO bank_accounts (
+        user_id, bank_code, account_number, product_name, balance,
+        is_primary, is_withdrawal_agreed, withdrawal_agreed_at, balance_updated_at, is_deleted
+        ) VALUES (
+        #{userId}, #{bankCode}, #{accountNumber}, #{productName}, #{balance},
+        #{isPrimary}, 1, NOW(), NOW(), 0
+        )
+    </insert>
+
+    <update id="clearPrimaryAccount">
+        UPDATE bank_accounts
+        SET is_primary = 0
+        WHERE user_id = #{userId} AND is_primary = 1
+    </update>
+
+    <update id="setPrimaryAccount">
+        UPDATE bank_accounts
+        SET is_primary = 1
+        WHERE id = #{accountId} AND user_id = #{userId}
+    </update>
+
+    <update id="deleteAccount">
+        UPDATE bank_accounts
+        SET is_deleted = 1
+        WHERE id = #{accountId} AND user_id = #{userId}
+    </update>
+
+    <update id="restoreLinkableAccount">
+        UPDATE linkable_accounts
+        SET is_linked = 0
+        WHERE user_id = #{userId}
+        AND bank_code = #{bankCode}
+        AND account_number = #{accountNumber}
+    </update>
+
+</mapper>

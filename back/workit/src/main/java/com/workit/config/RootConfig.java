@@ -18,7 +18,8 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import javax.sql.DataSource;
 
 @Configuration
-@PropertySource({"classpath:/application.properties",
+@PropertySource({
+        "classpath:/application.properties",
         "classpath:/application-secret.properties"
 })
 @MapperScan(basePackages = {"com.workit.domain.**.mapper"})
@@ -45,6 +46,7 @@ public class RootConfig {
         config.setJdbcUrl(url);
         config.setUsername(username);
         config.setPassword(password);
+        config.setAutoCommit(false);  // Transactional 설정 전환용
 
         HikariDataSource dataSource = new HikariDataSource(config);
         return dataSource;
