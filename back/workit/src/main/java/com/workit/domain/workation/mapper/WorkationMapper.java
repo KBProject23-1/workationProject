@@ -53,4 +53,7 @@ public interface WorkationMapper {
 
     // 결제 원본은 보존하고 워케이션 연결만 해제
     int unlinkTransactions(@Param("workationId") Long workationId);
+
+    // 워케이션 종료 (ACTIVE → SETTLED)
+    int settleWorkation(@Param("id") Long id);
 }

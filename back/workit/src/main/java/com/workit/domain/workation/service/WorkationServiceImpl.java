@@ -94,14 +94,20 @@ public class WorkationServiceImpl implements WorkationService {
     @Transactional
     public WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto) {
 
-        // 1) 존재 여부 + 소유자 검증 (상태와 무관하게 삭제 가능)
-        getOwnedWorkation(userId, workationId);
+        // 1) 존재 여부 + 소유자 검증
+        WorkationVO target = getOwnedWorkation(userId, workationId);
 
-        // 2) 입력값 검증 (등록과 동일한 규칙)
+        // 2) 정산 완료된 워케이션은 수정 불가
+        if (target.getStatus() == WorkationStatus.SETTLED) {
+            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED,
+                    "정산 완료된 워케이션은 수정할 수 없습니다.");
+        }
+
+        // 3) 입력값 검증 (등록과 동일한 규칙)
         validateWorkationInput(dto.getTitle(), dto.getStartDate(), dto.getEndDate(),
                 dto.getRegionId(), dto.getBusinessBudgetTotal(), dto.getPersonalBudgetTotal());
 
-        // 3) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
+        // 4) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
         int outOfPeriod = workationMapper.countExpensesOutOfPeriod(
                 workationId, dto.getStartDate(), dto.getEndDate());
 
@@ -139,6 +145,25 @@ public class WorkationServiceImpl implements WorkationService {
 
         workationMapper.deleteWorkation(workationId);
         log.info("워케이션 삭제 완료 - id: {}, userId: {}", workationId, userId);
+    }
+
+    @Override
+    @Transactional
+    public WorkationSettleResponseDTO settleWorkation(Long userId, Long workationId) {
+
+        // 1) 존재 여부 + 소유자 검증
+        WorkationVO target = getOwnedWorkation(userId, workationId);
+
+        // 2) 이미 종료된 워케이션은 다시 종료할 수 없다
+        if (target.getStatus() == WorkationStatus.SETTLED) {
+            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED);
+        }
+
+        workationMapper.settleWorkation(workationId);
+        log.info("워케이션 종료 완료 - id: {}, userId: {}", workationId, userId);
+
+        // settled_at 은 DB 에서 채워지므로 재조회해서 응답한다
+        return WorkationSettleResponseDTO.from(workationMapper.selectWorkationById(workationId));
     }
 
     // 워케이션 존재 여부와 소유자를 함께 검증

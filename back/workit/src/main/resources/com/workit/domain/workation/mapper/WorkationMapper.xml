@@ -194,4 +194,13 @@
         WHERE id     = #{id}
           AND status = 'ACTIVE'
     </delete>
+
+    <update id="settleWorkation">
+        UPDATE workations
+        SET status     = 'SETTLED',
+            settled_at = NOW(),
+            updated_at = NOW()
+        WHERE id     = #{id}
+          AND status = 'ACTIVE'
+    </update>
 </mapper>

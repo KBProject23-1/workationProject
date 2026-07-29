@@ -18,4 +18,7 @@ public interface WorkationService {
 
     // 1.5 워케이션 삭제
     void removeWorkation(Long userId, Long workationId);
+
+    // 1.6 워케이션 종료
+    WorkationSettleResponseDTO settleWorkation(Long userId, Long workationId);
 }
