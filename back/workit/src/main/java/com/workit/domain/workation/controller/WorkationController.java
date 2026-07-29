@@ -61,4 +61,16 @@ public class WorkationController {
 
         return ResponseEntity.ok(workationService.modifyWorkation(userId, workationId, dto));
     }
+
+    // 1.5 워케이션 삭제
+    @DeleteMapping("/{workationId}")
+    public ResponseEntity<Void> workationRemove(
+            @PathVariable("workationId") Long workationId) {
+
+        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
+        Long userId = 1L;
+
+        workationService.removeWorkation(userId, workationId);
+        return ResponseEntity.noContent().build();
+    }
 }

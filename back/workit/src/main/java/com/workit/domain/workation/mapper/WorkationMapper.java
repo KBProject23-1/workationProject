@@ -42,4 +42,15 @@ public interface WorkationMapper {
     int countExpensesOutOfPeriod(@Param("workationId") Long workationId,
                                  @Param("startDate") LocalDate startDate,
                                  @Param("endDate") LocalDate endDate);
+
+    // 워케이션 삭제 (하위 데이터 정리 후 호출)
+    int deleteWorkation(@Param("id") Long id);
+
+    // 하위 데이터 삭제
+    int deleteExpensesByWorkationId(@Param("workationId") Long workationId);
+    int deleteBudgetsByWorkationId(@Param("workationId") Long workationId);
+    int deleteSurveysByWorkationId(@Param("workationId") Long workationId);
+
+    // 결제 원본은 보존하고 워케이션 연결만 해제
+    int unlinkTransactions(@Param("workationId") Long workationId);
 }

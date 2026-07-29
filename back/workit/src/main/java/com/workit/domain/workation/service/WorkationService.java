@@ -15,4 +15,7 @@ public interface WorkationService {
 
     // 1.4 워케이션 수정
     WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto);
+
+    // 1.5 워케이션 삭제
+    void removeWorkation(Long userId, Long workationId);
 }

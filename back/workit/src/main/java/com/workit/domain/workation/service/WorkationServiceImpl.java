@@ -94,20 +94,14 @@ public class WorkationServiceImpl implements WorkationService {
     @Transactional
     public WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto) {
 
-        // 1) 존재 여부 + 소유자 검증
-        WorkationVO target = getOwnedWorkation(userId, workationId);
+        // 1) 존재 여부 + 소유자 검증 (상태와 무관하게 삭제 가능)
+        getOwnedWorkation(userId, workationId);
 
-        // 2) 정산 완료된 워케이션은 수정 불가
-        if (target.getStatus() == WorkationStatus.SETTLED) {
-            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED,
-                    "정산 완료된 워케이션은 수정할 수 없습니다.");
-        }
-
-        // 3) 입력값 검증 (등록과 동일한 규칙)
+        // 2) 입력값 검증 (등록과 동일한 규칙)
         validateWorkationInput(dto.getTitle(), dto.getStartDate(), dto.getEndDate(),
                 dto.getRegionId(), dto.getBusinessBudgetTotal(), dto.getPersonalBudgetTotal());
 
-        // 4) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
+        // 3) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
         int outOfPeriod = workationMapper.countExpensesOutOfPeriod(
                 workationId, dto.getStartDate(), dto.getEndDate());
 
@@ -120,6 +114,31 @@ public class WorkationServiceImpl implements WorkationService {
         log.info("워케이션 수정 완료 - id: {}, userId: {}", workationId, userId);
 
         return WorkationResponseDTO.from(workationMapper.selectWorkationById(workationId));
+    }
+
+    @Override
+    @Transactional
+    public void removeWorkation(Long userId, Long workationId) {
+
+        // 1) 존재 여부 + 소유자 검증
+        WorkationVO target = getOwnedWorkation(userId, workationId);
+
+        // 2) 정산 완료된 워케이션은 정산 근거 자료이므로 삭제 불가
+        if (target.getStatus() == WorkationStatus.SETTLED) {
+            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED,
+                    "정산 완료된 워케이션은 삭제할 수 없습니다.");
+        }
+
+        // 3) 결제 원본은 보존하고 워케이션 연결만 해제
+        workationMapper.unlinkTransactions(workationId);
+
+        // 4) FK 제약 때문에 하위 데이터부터 삭제
+        workationMapper.deleteExpensesByWorkationId(workationId);
+        workationMapper.deleteBudgetsByWorkationId(workationId);
+        workationMapper.deleteSurveysByWorkationId(workationId);
+
+        workationMapper.deleteWorkation(workationId);
+        log.info("워케이션 삭제 완료 - id: {}, userId: {}", workationId, userId);
     }
 
     // 워케이션 존재 여부와 소유자를 함께 검증
