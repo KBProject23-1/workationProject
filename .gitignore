@@ -23,6 +23,6 @@
 hs_err_pid*
 replay_pid*
 
-# === Aider AI Coding Tool ===
+# === Aider AI Coding Tool === git rm -r --cached . 적용
 .aider*
 .env
