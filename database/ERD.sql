@@ -54,7 +54,7 @@ CREATE TABLE `user_device` (
 CREATE TABLE `terms` (
                          `id`          BIGINT        NOT NULL AUTO_INCREMENT COMMENT '약관 고유 번호(PK)',
                          `title`       VARCHAR(100)  NOT NULL                COMMENT '약관 제목',
-                         `content`     TEXT          NOT NULL                COMMENT '약관 본문 상세 내용',
+                         `content`     LONGTEXT          NOT NULL                COMMENT '약관 본문 상세 내용',
                          `required`    TINYINT(1)    NOT NULL                COMMENT '필수 여부 (0:선택, 1:필수)',
                          `created_at`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '약관 등록 일시',
 
