@@ -1,0 +1,28 @@
+package com.workit.domain.transaction.mapper;
+
+import com.workit.domain.transaction.vo.TransactionVO;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+
+public interface TransactionMapper {
+
+    // 목록 조회 (필터링, 최신순)
+    List<TransactionVO> findTransactions(@Param("userId") Long userId,
+                                         @Param("startDate") String startDate,
+                                         @Param("endDate") String endDate,
+                                         @Param("paymentSourceType") String paymentSourceType,
+                                         @Param("transactionType") String transactionType,
+                                         @Param("cardId") Long cardId);
+
+    // 단건 상세 조회 (좌표 포함, merchants 조인)
+    TransactionVO findTransactionDetailById(@Param("transactionId") Long transactionId,
+                                            @Param("userId") Long userId);
+
+    // 매출전표용 조회 (merchants + cards 조인)
+    TransactionVO findTransactionForReceipt(@Param("transactionId") Long transactionId,
+                                            @Param("userId") Long userId);
+
+    // 거래 생성 (충전/환불/카드결제 공용)
+    void insertTransaction(TransactionVO transaction);
+}
