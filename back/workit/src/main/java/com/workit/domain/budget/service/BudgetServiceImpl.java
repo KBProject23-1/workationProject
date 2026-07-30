@@ -9,11 +9,10 @@ import com.workit.domain.budget.dto.response.BudgetSummaryResponseDTO;
 import com.workit.domain.budget.exception.BudgetErrorCode;
 import com.workit.domain.budget.mapper.BudgetMapper;
 import com.workit.domain.budget.vo.BudgetItemVO;
-import com.workit.domain.workation.exception.WorkationErrorCode;
-import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.domain.workation.vo.WorkationVO;
 import com.workit.exception.BusinessException;
+import com.workit.domain.workation.service.WorkationOwnershipValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -36,8 +35,8 @@ public class BudgetServiceImpl implements BudgetService {
 
     private final BudgetMapper budgetMapper;
 
-    // 총예산(budgetTotal)이 workations 테이블에 있어 워케이션 매퍼를 함께 사용한다
-    private final WorkationMapper workationMapper;
+    // 예산은 워케이션에 딸린 데이터이므로 접근 전에 소유자를 확인한다
+    private final WorkationOwnershipValidator ownershipValidator;
 
     // =====================================================================================
     // 3.1 예산 사용현황 조회
@@ -48,7 +47,7 @@ public class BudgetServiceImpl implements BudgetService {
     public BudgetStatusResponseDTO getBudgetStatus(Long userId, Long workationId, BudgetType budgetType) {
 
         // 1) 워케이션 존재 여부 + 소유자 검증
-        WorkationVO workation = getOwnedWorkation(userId, workationId);
+        WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
 
         // 2) 카테고리별 예산 + 지출 집계 조회
         List<BudgetItemVO> items = budgetMapper.selectBudgetItemList(workationId, userId, budgetType);
@@ -85,7 +84,7 @@ public class BudgetServiceImpl implements BudgetService {
     @Transactional
     public BudgetSummaryResponseDTO setupBudget(Long userId, Long workationId, BudgetSetupRequestDTO dto) {
 
-        WorkationVO workation = getOwnedWorkation(userId, workationId);
+        WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
 
         BudgetType budgetType = requireBudgetType(dto.getBudgetType());
         List<BudgetItemRequestDTO> items = dto.getItems();
@@ -115,7 +114,7 @@ public class BudgetServiceImpl implements BudgetService {
     @Transactional
     public BudgetSummaryResponseDTO modifyBudget(Long userId, Long workationId, BudgetSetupRequestDTO dto) {
 
-        WorkationVO workation = getOwnedWorkation(userId, workationId);
+        WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
 
         BudgetType budgetType = requireBudgetType(dto.getBudgetType());
         List<BudgetItemRequestDTO> items = dto.getItems();
@@ -158,7 +157,7 @@ public class BudgetServiceImpl implements BudgetService {
     @Transactional
     public BudgetItemResponseDTO addBudgetItem(Long userId, Long workationId, BudgetItemAddRequestDTO dto) {
 
-        getOwnedWorkation(userId, workationId);
+        ownershipValidator.getOwned(userId, workationId);
 
         BudgetType budgetType = requireBudgetType(dto.getBudgetType());
         Long categoryId = dto.getExpenseCategoryId();
@@ -204,7 +203,7 @@ public class BudgetServiceImpl implements BudgetService {
     @Transactional
     public void removeBudgetItem(Long userId, Long workationId, Long budgetId, boolean force) {
 
-        getOwnedWorkation(userId, workationId);
+        ownershipValidator.getOwned(userId, workationId);
 
         // 1) 예산 배정 존재 여부 확인
         BudgetItemVO budget = budgetMapper.selectBudgetItemById(budgetId, userId);
@@ -335,21 +334,5 @@ public class BudgetServiceImpl implements BudgetService {
         return (type == BudgetType.WORK)
                 ? workation.getBusinessBudgetTotal()
                 : workation.getPersonalBudgetTotal();
-    }
-
-    // 워케이션 존재 여부와 소유자를 함께 검증
-    // 예산·지출·정산에서 반복되므로 이후 공통 컴포넌트로 분리 예정
-    private WorkationVO getOwnedWorkation(Long userId, Long workationId) {
-
-        WorkationVO vo = workationMapper.selectWorkationById(workationId);
-
-        if (vo == null) {
-            throw new BusinessException(WorkationErrorCode.WORKATION_NOT_FOUND);
-        }
-        // Long 은 객체이므로 == 이 아닌 equals 로 비교해야 한다
-        if (!vo.getUserId().equals(userId)) {
-            throw new BusinessException(WorkationErrorCode.ACCESS_DENIED);
-        }
-        return vo;
     }
 }
