@@ -1,7 +1,6 @@
 package com.workit.domain.workation.service;
 
 import com.workit.domain.workation.vo.BudgetSpentVO;
-import com.workit.domain.workation.vo.WorkationStatus;
 import com.workit.domain.workation.vo.WorkationVO;
 import com.workit.domain.workation.dto.request.WorkationCreateRequestDTO;
 import com.workit.domain.workation.dto.request.WorkationUpdateRequestDTO;
@@ -30,6 +29,7 @@ public class WorkationServiceImpl implements WorkationService {
     private static final int MAX_PAGE_SIZE = 50;
 
     private final WorkationMapper workationMapper;
+    private final WorkationOwnershipValidator ownershipValidator;
 
     @Override
     @Transactional
@@ -97,20 +97,14 @@ public class WorkationServiceImpl implements WorkationService {
     @Transactional
     public WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto) {
 
-        // 1) 존재 여부 + 소유자 검증
-        WorkationVO target = getOwnedWorkation(userId, workationId);
+        // 1) 존재 여부 + 소유자 + 정산 완료 여부 검증
+        ownershipValidator.getOwnedActive(userId, workationId, "수정");
 
-        // 2) 정산 완료된 워케이션은 수정 불가
-        if (target.getStatus() == WorkationStatus.SETTLED) {
-            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED,
-                    "정산 완료된 워케이션은 수정할 수 없습니다.");
-        }
-
-        // 3) 입력값 검증 (등록과 동일한 규칙)
+        // 2) 입력값 검증 (등록과 동일한 규칙)
         validateWorkationInput(dto.getTitle(), dto.getStartDate(), dto.getEndDate(),
                 dto.getRegionId(), dto.getBusinessBudgetTotal(), dto.getPersonalBudgetTotal());
 
-        // 4) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
+        // 3) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
         int outOfPeriod = workationMapper.countExpensesOutOfPeriod(
                 workationId, dto.getStartDate(), dto.getEndDate());
 
@@ -129,19 +123,14 @@ public class WorkationServiceImpl implements WorkationService {
     @Transactional
     public void removeWorkation(Long userId, Long workationId) {
 
-        // 1) 존재 여부 + 소유자 검증
-        WorkationVO target = getOwnedWorkation(userId, workationId);
+        // 1) 존재 여부 + 소유자 + 정산 완료 여부 검증
+        //    정산 완료된 워케이션은 정산 근거 자료이므로 삭제 불가
+        ownershipValidator.getOwnedActive(userId, workationId, "삭제");
 
-        // 2) 정산 완료된 워케이션은 정산 근거 자료이므로 삭제 불가
-        if (target.getStatus() == WorkationStatus.SETTLED) {
-            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED,
-                    "정산 완료된 워케이션은 삭제할 수 없습니다.");
-        }
-
-        // 3) 결제 원본은 보존하고 워케이션 연결만 해제
+        // 2) 결제 원본은 보존하고 워케이션 연결만 해제
         workationMapper.unlinkTransactions(workationId);
 
-        // 4) FK 제약 때문에 하위 데이터부터 삭제
+        // 3) FK 제약 때문에 하위 데이터부터 삭제
         workationMapper.deleteExpensesByWorkationId(workationId);
         workationMapper.deleteBudgetsByWorkationId(workationId);
         workationMapper.deleteSurveysByWorkationId(workationId);
@@ -154,35 +143,15 @@ public class WorkationServiceImpl implements WorkationService {
     @Transactional
     public WorkationSettleResponseDTO settleWorkation(Long userId, Long workationId) {
 
-        // 1) 존재 여부 + 소유자 검증
-        WorkationVO target = getOwnedWorkation(userId, workationId);
-
-        // 2) 이미 종료된 워케이션은 다시 종료할 수 없다
-        if (target.getStatus() == WorkationStatus.SETTLED) {
-            throw new BusinessException(WorkationErrorCode.ALREADY_SETTLED);
-        }
+        // 존재 여부 + 소유자 + 정산 완료 여부 검증
+        // 이미 종료된 워케이션은 다시 종료할 수 없다
+        ownershipValidator.getOwnedActive(userId, workationId, "종료");
 
         workationMapper.settleWorkation(workationId);
         log.info("워케이션 종료 완료 - id: {}, userId: {}", workationId, userId);
 
         // settled_at 은 DB 에서 채워지므로 재조회해서 응답한다
         return WorkationSettleResponseDTO.from(workationMapper.selectWorkationById(workationId));
-    }
-
-    // 워케이션 존재 여부와 소유자를 함께 검증
-    // 1.4 수정 / 1.5 삭제 / 1.6 종료에서 공통 사용
-    private WorkationVO getOwnedWorkation(Long userId, Long workationId) {
-
-        WorkationVO vo = workationMapper.selectWorkationById(workationId);
-
-        if (vo == null) {
-            throw new BusinessException(WorkationErrorCode.WORKATION_NOT_FOUND);
-        }
-        // Long 은 객체이므로 == 이 아닌 equals 로 비교해야 한다
-        if (!vo.getUserId().equals(userId)) {
-            throw new BusinessException(WorkationErrorCode.ACCESS_DENIED);
-        }
-        return vo;
     }
 
     // 등록 요청 검증
