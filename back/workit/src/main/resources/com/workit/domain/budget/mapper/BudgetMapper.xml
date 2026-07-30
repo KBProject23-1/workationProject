@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.budget.mapper.BudgetMapper">
+
+    <!--
+        카테고리별 예산과 실제 지출을 함께 조회한다.
+
+        지출을 서브쿼리에서 먼저 카테고리 단위로 집계하는 것이 핵심이다.
+        workation_expenses 를 직접 조인하면 지출 건수만큼 budgets 행이 복제되고,
+        여기에 user_category_labels 까지 조인되면 SUM 결과가 부풀려진다.
+        서브쿼리로 카테고리당 1행으로 접어두면 budgets 와 1:1 로 붙는다.
+    -->
+    <select id="selectBudgetItemList"
+            resultType="com.workit.domain.budget.vo.BudgetItemVO">
+        SELECT
+            b.id                         AS budget_id,
+            b.workation_id,
+            b.budget_type,
+            b.expense_category_id,
+            b.target_amount,
+            ec.name                      AS category_name,
+            ec.description,
+            ec.is_deletable,
+            ec.sort_order,
+            ucl.custom_name,
+            COALESCE(e.spent_amount, 0)  AS spent_amount,
+            COALESCE(e.expense_count, 0) AS expense_count
+        FROM budgets b
+        JOIN expense_categories ec
+          ON ec.id = b.expense_category_id
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        LEFT JOIN (
+            SELECT workation_id,
+                   budget_type,
+                   expense_category_id,
+                   SUM(amount) AS spent_amount,
+                   COUNT(*)    AS expense_count
+              FROM workation_expenses
+             WHERE workation_id = #{workationId}
+             GROUP BY workation_id, budget_type, expense_category_id
+        ) e
+               ON e.workation_id        = b.workation_id
+              AND e.budget_type         = b.budget_type
+              AND e.expense_category_id = b.expense_category_id
+        WHERE b.workation_id = #{workationId}
+        <if test="budgetType != null">
+            AND b.budget_type = #{budgetType}
+        </if>
+        ORDER BY b.budget_type, ec.sort_order
+    </select>
+
+    <!-- 예산 배정 단건 조회. 삭제·수정 대상 확인용이라 지출 집계는 하지 않는다 -->
+    <select id="selectBudgetItemById"
+            resultType="com.workit.domain.budget.vo.BudgetItemVO">
+        SELECT
+            b.id                 AS budget_id,
+            b.workation_id,
+            b.budget_type,
+            b.expense_category_id,
+            b.target_amount,
+            ec.name              AS category_name,
+            ec.description,
+            ec.is_deletable,
+            ec.sort_order,
+            ucl.custom_name
+        FROM budgets b
+        JOIN expense_categories ec
+          ON ec.id = b.expense_category_id
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        WHERE b.id = #{budgetId}
+    </select>
+
+    <select id="countBudgetByType" resultType="int">
+        SELECT COUNT(*)
+          FROM budgets
+         WHERE workation_id = #{workationId}
+           AND budget_type  = #{budgetType}
+    </select>
+
+    <select id="countBudgetItem" resultType="int">
+        SELECT COUNT(*)
+          FROM budgets
+         WHERE workation_id        = #{workationId}
+           AND budget_type         = #{budgetType}
+           AND expense_category_id = #{expenseCategoryId}
+    </select>
+
+    <!--
+        여러 행을 한 번의 INSERT 로 저장한다.
+        건당 INSERT 를 반복하면 DB 왕복이 카테고리 수만큼 늘어난다.
+
+        ON DUPLICATE KEY UPDATE 를 붙여 수정에도 같은 쿼리를 쓴다.
+        UNIQUE(workation_id, budget_type, expense_category_id) 가 있어
+        기존 카테고리는 금액만 갱신되고 budgetId 가 유지된다.
+        전체 삭제 후 재삽입하면 budgetId 가 바뀌어 프론트가 들고 있던 id 가 무효가 된다.
+    -->
+    <insert id="upsertBudgetList">
+        INSERT INTO budgets (workation_id, expense_category_id, budget_type, target_amount)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{workationId}, #{item.expenseCategoryId}, #{budgetType}, #{item.targetAmount})
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            target_amount = VALUES(target_amount),
+            updated_at    = NOW()
+    </insert>
+
+    <insert id="insertBudgetItem" useGeneratedKeys="true" keyProperty="budgetId">
+        INSERT INTO budgets (workation_id, expense_category_id, budget_type, target_amount)
+        VALUES (#{workationId}, #{expenseCategoryId}, #{budgetType}, #{targetAmount})
+    </insert>
+
+    <!-- 수정 요청 목록에 없는 카테고리의 배정을 제거한다 -->
+    <delete id="deleteBudgetsNotIn">
+        DELETE FROM budgets
+         WHERE workation_id = #{workationId}
+           AND budget_type  = #{budgetType}
+           AND expense_category_id NOT IN
+        <foreach collection="categoryIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <delete id="deleteBudgetItem">
+        DELETE FROM budgets
+         WHERE id = #{budgetId}
+    </delete>
+
+    <!--
+        수정 시 목록에서 빠지는 카테고리에 이미 지출이 있는지 확인한다.
+        그대로 삭제하면 그 지출이 예산 없는 카테고리에 남아 정산 합계가 어긋난다.
+    -->
+    <select id="countExpenseNotIn" resultType="int">
+        SELECT COUNT(*)
+          FROM workation_expenses
+         WHERE workation_id = #{workationId}
+           AND budget_type  = #{budgetType}
+           AND expense_category_id NOT IN
+        <foreach collection="categoryIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+    <select id="countExpenseByCategory" resultType="int">
+        SELECT COUNT(*)
+          FROM workation_expenses
+         WHERE workation_id        = #{workationId}
+           AND budget_type         = #{budgetType}
+           AND expense_category_id = #{expenseCategoryId}
+    </select>
+
+    <!--
+        요청한 카테고리 중 해당 예산 유형에 속하는 것의 개수를 센다.
+        id 를 하나씩 확인하면 쿼리가 카테고리 수만큼 나가므로 한 번에 세서 요청 개수와 비교한다.
+        user_id 가 NULL 이면 전체 공용 카테고리, 값이 있으면 본인이 만든 것만 허용한다.
+    -->
+    <select id="countValidCategories" resultType="int">
+        SELECT COUNT(*)
+          FROM expense_categories
+         WHERE budget_type = #{budgetType}
+           AND (user_id IS NULL OR user_id = #{userId})
+           AND id IN
+        <foreach collection="categoryIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+    <!-- 기타 카테고리는 분류되지 않은 지출이 모이는 곳이므로 시스템 기본(user_id IS NULL)만 조회한다 -->
+    <select id="selectEtcCategoryId" resultType="long">
+        SELECT id
+          FROM expense_categories
+         WHERE budget_type = #{budgetType}
+           AND code = 'ETC'
+           AND user_id IS NULL
+    </select>
+
+</mapper>
