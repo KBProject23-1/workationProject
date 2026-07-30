@@ -1,8 +1,9 @@
 package com.workit.domain.wallet.service;
 
 import com.workit.domain.account.mapper.AccountMapper;
-import com.workit.domain.account.util.AccountNumberMasker;
 import com.workit.domain.account.vo.BankAccountVO;
+import com.workit.domain.transaction.mapper.TransactionMapper;
+import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.wallet.dto.request.ChargeRequest;
 import com.workit.domain.wallet.dto.request.RefundRequest;
 import com.workit.domain.wallet.dto.response.ChargeResponse;
@@ -16,8 +17,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import static com.workit.global.constant.PaymentPolicy.MIN_CHARGE_AMOUNT;
+import static com.workit.global.constant.PaymentPolicy.MAX_TRANSACTION_AMOUNT;
+
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -25,9 +28,7 @@ public class WalletServiceImpl implements WalletService {
 
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
-
-    private static final BigDecimal MIN_CHARGE_AMOUNT = BigDecimal.valueOf(10_000);
-    private static final BigDecimal MAX_TRANSACTION_AMOUNT = BigDecimal.valueOf(2_000_000);
+    private final TransactionMapper transactionMapper;
 
     @Override
     public void createWallet(Long userId) {
@@ -74,14 +75,10 @@ public class WalletServiceImpl implements WalletService {
         walletMapper.increaseBalance(userId, amount);
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
-        // TODO: transactionMapper.insert(...) — transaction 도메인 완성 후 연결
-        ChargeResponse response = new ChargeResponse();
-        response.setChargedAmount(amount);
-        response.setCurrentBalance(updatedWallet.getBalance());
-        response.setPaymentSourceType("WALLET");
-        response.setTransactionType("DEPOSIT");
-        response.setApprovedAt(LocalDateTime.now());
-        return response;
+        TransactionVO chargeTx = TransactionVO.forWalletCharge(userId, wallet, account, amount);
+        transactionMapper.insertTransaction(chargeTx);
+
+        return ChargeResponse.of(chargeTx, updatedWallet.getBalance());
     }
 
     @Override
@@ -92,6 +89,11 @@ public class WalletServiceImpl implements WalletService {
         validatePin(userId, request.getPinNumber());
 
         BigDecimal amount = request.getAmount();
+
+        WalletVO wallet = walletMapper.findByUserId(userId);
+        if (wallet == null) {
+            throw new BusinessException(WalletErrorCode.WALLET_NOT_FOUND);
+        }
 
         BankAccountVO primaryAccount = accountMapper.findPrimaryAccount(userId);
         if (primaryAccount == null) {
@@ -110,20 +112,10 @@ public class WalletServiceImpl implements WalletService {
 
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
-        // TODO: transactionMapper.insert(...) — transaction 도메인 완성 후 연결
-        RefundResponse response = new RefundResponse();
-        response.setRefundedAmount(amount);
-        response.setRemainingBalance(updatedWallet.getBalance());
+        TransactionVO refundTx = TransactionVO.forWalletRefund(userId, wallet, primaryAccount, amount);
+        transactionMapper.insertTransaction(refundTx);
 
-        RefundResponse.TargetAccountInfo targetAccount = new RefundResponse.TargetAccountInfo();
-        targetAccount.setBankCode(primaryAccount.getBankCode());
-        targetAccount.setMaskedAccountNumber(AccountNumberMasker.mask(primaryAccount.getAccountNumber()));
-        response.setTargetAccount(targetAccount);
-
-        response.setPaymentSourceType("WALLET");
-        response.setTransactionType("WITHDRAWAL");
-        response.setApprovedAt(LocalDateTime.now());
-        return response;
+        return RefundResponse.of(refundTx, updatedWallet.getBalance(), primaryAccount);
     }
 
     private void validateChargeRequest(ChargeRequest request) {

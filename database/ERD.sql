@@ -49,7 +49,7 @@ CREATE TABLE `user_device` (
 
     -- 제약 조건 설정 (금융권 표준 자물쇠)
                                PRIMARY KEY (`id`),
-                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), -- 한 유저가 동일 기기를 중복 등록하는 것 방지
+                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), --q 한 유저가 동일 기기를 중복 등록하는 것 방지
                                CONSTRAINT `fk_user_device_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 보안 핀번호 및 로그인 기기 관리 테이블 (비식별 관계)';
 
@@ -751,3 +751,9 @@ SELECT 'PERSONAL', 'CAFE', id FROM `expense_categories` WHERE `budget_type` = 'P
 
 INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
 SELECT 'PERSONAL', 'ACTIVITY', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'LEISURE';
+
+ALTER TABLE merchants ADD COLUMN address VARCHAR(255) NULL COMMENT '가맹점 주소';
+ALTER TABLE merchants ADD COLUMN taxpayer_identification_number VARCHAR(10) NULL COMMENT '사업자등록번호(하이픈 없이 숫자만)';
+
+-- 전자지갑 wallet_id도 카드결제 하면 필요 없으니 null이어야 함.
+ALTER TABLE `transactions` MODIFY COLUMN `wallet_id` BIGINT NULL COMMENT '전자지갑 계좌 id';
