@@ -4,6 +4,7 @@ import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.account.vo.LinkableAccountVO;
 import org.apache.ibatis.annotations.Param;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public interface AccountMapper {
@@ -38,4 +39,10 @@ public interface AccountMapper {
     // 계좌 삭제
     void deleteAccount(@Param("accountId") Long accountId, @Param("userId") Long userId);
 
+    // 계좌 잔액 변경
+    int decreaseBalance(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
+
+    int  increaseBalance(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
+
+    BankAccountVO findPrimaryAccount(@Param("userId") Long userId);
 }
