@@ -1,3 +1,5 @@
+DROP DATABASE IF EXISTS workit;
+
 CREATE DATABASE workit;
 
 USE workit;
@@ -47,7 +49,7 @@ CREATE TABLE `user_device` (
 
     -- 제약 조건 설정 (금융권 표준 자물쇠)
                                PRIMARY KEY (`id`),
-                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), --q 한 유저가 동일 기기를 중복 등록하는 것 방지
+                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), -- 한 유저가 동일 기기를 중복 등록하는 것 방지
                                CONSTRAINT `fk_user_device_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 보안 핀번호 및 로그인 기기 관리 테이블 (비식별 관계)';
 
@@ -103,6 +105,186 @@ CREATE TABLE `notification_histories` (
                                           CONSTRAINT `fk_notification_histories_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자별 수신 알림 목록 이력 테이블 (비식별 관계)';
 
+-- =========================================================================================
+-- 1. 워케이션 거점 지역
+-- =========================================================================================
+
+CREATE TABLE `region` (
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '지역 코드 번호(PK)',
+    `name`        VARCHAR(50)  NOT NULL                COMMENT '지역 이름 (예: 부산, 제주특별자치도)',
+    `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '지역 등록 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_region_name` (`name`)   -- 동일 지역 중복 등록 방지
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='워케이션 거점 지역 마스터 테이블';
+
+
+-- =========================================================================================
+-- 2. 지출 카테고리 마스터
+-- =========================================================================================
+
+CREATE TABLE `expense_categories` (
+    `id`            BIGINT        NOT NULL AUTO_INCREMENT COMMENT '지출 카테고리 고유 번호(PK)',
+    `user_id`       BIGINT        NULL                    COMMENT '회원 고유 번호 (FK, users.id 참조). NULL=시스템 기본',
+    `budget_type`   ENUM('WORK', 'PERSONAL') NOT NULL     COMMENT '법인용(WORK) / 개인용(PERSONAL) 구분',
+    `code`          VARCHAR(30)   NOT NULL                COMMENT '카테고리 코드 (예: ACCOMMODATION)',
+    `name`          VARCHAR(30)   NOT NULL                COMMENT '화면 표시명 (기본 이름)',
+    `description`   VARCHAR(100)  NULL                    COMMENT '화면에 노출할 설명문',
+    `is_default`    TINYINT(1)    NOT NULL DEFAULT 0      COMMENT '예산 화면 기본 표출 여부 (1:처음부터 표출, 0:＋ 목록에만)',
+    `is_deletable`  TINYINT(1)    NOT NULL DEFAULT 1      COMMENT '삭제 가능 여부 (0:삭제 불가 - 기타 카테고리)',
+    `sort_order`    INT           NOT NULL DEFAULT 0      COMMENT '화면 노출 순서',
+    `created_at`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '카테고리 생성 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_expense_categories_type_code` (`budget_type`, `code`),  -- 예산 유형별 코드 중복 방지
+    KEY `ix_expense_categories_lookup` (`budget_type`, `is_default`, `sort_order`),  -- 목록 조회 성능
+    CONSTRAINT `fk_expense_categories_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='지출 카테고리 마스터 테이블 (기존 category ENUM 대체)';
+
+
+-- =========================================================================================
+-- 3. 카테고리 표시명 별칭
+-- =========================================================================================
+
+CREATE TABLE `user_category_labels` (
+    `user_id`              BIGINT       NOT NULL COMMENT '회원 고유 번호 (PK 겸 FK, users.id 참조)',
+    `expense_category_id`  BIGINT       NOT NULL COMMENT '지출 카테고리 고유 번호 (PK 겸 FK, expense_categories.id 참조)',
+    `custom_name`          VARCHAR(50)  NOT NULL COMMENT '사용자가 지정한 표시명 (최대 10자 제한은 애플리케이션에서 검증)',
+    `updated_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '별칭 최종 수정 일시',
+
+    -- 제약 조건 설정 (식별 관계 - 두 FK 가 모두 PK 를 구성)
+    PRIMARY KEY (`user_id`, `expense_category_id`),
+    KEY `ix_user_category_labels_category` (`expense_category_id`),
+    CONSTRAINT `fk_user_category_labels_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_category_labels_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='카테고리 표시명 사용자 별칭 테이블 (식별 관계)';
+
+
+-- =========================================================================================
+-- 4. 워케이션 등록 폼
+-- =========================================================================================
+
+CREATE TABLE `workations` (
+    `id`                     BIGINT         NOT NULL AUTO_INCREMENT COMMENT '워케이션 고유 번호(PK)',
+    `user_id`                BIGINT         NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+    `region_id`              BIGINT         NOT NULL                COMMENT '지역 코드 번호 (FK, region.id 참조)',
+    `title`                  VARCHAR(100)   NOT NULL                COMMENT '워케이션 제목',
+    `start_date`             DATE           NOT NULL                COMMENT '워케이션 시작일',
+    `end_date`               DATE           NOT NULL                COMMENT '워케이션 종료일',
+    `business_budget_total`  DECIMAL(15,2)  NOT NULL DEFAULT 0.00   COMMENT '법인 총예산',
+    `personal_budget_total`  DECIMAL(15,2)  NOT NULL DEFAULT 0.00   COMMENT '개인 총예산',
+    `status`                 ENUM('ACTIVE', 'SETTLED') NOT NULL DEFAULT 'ACTIVE' COMMENT '진행 상태 (ACTIVE:진행 중, SETTLED:정산 완료)',
+    `settled_at`             DATETIME       NULL                    COMMENT '정산 완료 일시',
+    `created_at`             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '워케이션 생성 일시',
+    `updated_at`             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '워케이션 최종 수정 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    KEY `ix_workations_user_status` (`user_id`, `status`),        -- 진행 중 워케이션 조회 / 중복 등록 검증
+    KEY `ix_workations_user_settled` (`user_id`, `settled_at`),   -- 기록 목록 최신순 정렬
+    CONSTRAINT `fk_workations_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_workations_region_id` FOREIGN KEY (`region_id`) REFERENCES `region` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='워케이션 일정 및 총예산 테이블 (비식별 관계)';
+
+
+-- =========================================================================================
+-- 5. 카테고리별 예산 배정
+-- =========================================================================================
+
+CREATE TABLE `budgets` (
+    `id`                   BIGINT         NOT NULL AUTO_INCREMENT COMMENT '예산 배정 고유 번호(PK)',
+    `workation_id`         BIGINT         NOT NULL                COMMENT '워케이션 고유 번호 (FK, workations.id 참조)',
+    `expense_category_id`  BIGINT         NOT NULL                COMMENT '지출 카테고리 고유 번호 (FK, expense_categories.id 참조)',
+    `budget_type`          ENUM('WORK', 'PERSONAL') NOT NULL      COMMENT '예산 유형 (WORK:법인, PERSONAL:개인)',
+    `target_amount`        DECIMAL(15,2)  NOT NULL DEFAULT 0.00   COMMENT '카테고리에 배정한 예산',
+    `created_at`           DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '예산 배정 일시',
+    `updated_at`           DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '예산 최종 수정 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_budgets_workation_type_category` (`workation_id`, `budget_type`, `expense_category_id`),  -- 같은 카테고리 중복 배정 방지
+    KEY `ix_budgets_category` (`expense_category_id`),
+    CONSTRAINT `fk_budgets_workation_id` FOREIGN KEY (`workation_id`) REFERENCES `workations` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_budgets_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='워케이션 카테고리별 예산 배정 테이블 (비식별 관계)';
+
+
+-- =========================================================================================
+-- 6. 워케이션 지출 내역
+-- =========================================================================================
+
+CREATE TABLE `workation_expenses` (
+    `id`                   BIGINT         NOT NULL AUTO_INCREMENT COMMENT '지출 내역 고유 번호(PK)',
+    `workation_id`         BIGINT         NOT NULL                COMMENT '워케이션 고유 번호 (FK, workations.id 참조)',
+    `transaction_id`       BIGINT         NULL                    COMMENT '거래내역 고유 번호 (FK, transactions.id 참조). 앱 내 결제만 값 존재',
+    `expense_category_id`  BIGINT         NOT NULL                COMMENT '지출 카테고리 고유 번호 (FK, expense_categories.id 참조)',
+    `card_id`              BIGINT         NULL                    COMMENT '결제 카드 고유 번호 (FK, cards.id 참조). 지갑 밖 법인카드 결제 시 선택',
+    `budget_type`          ENUM('WORK', 'PERSONAL') NOT NULL      COMMENT '업무/개인 경비 구분. 정산 필터 기준',
+    `amount`               DECIMAL(15,2)  NOT NULL                COMMENT '지출 금액',
+    `merchant_name`        VARCHAR(150)   NULL                    COMMENT '가맹점명 (외부 결제 수기 입력용)',
+    `spent_at`             DATETIME       NOT NULL                COMMENT '지출 일시',
+    `memo`                 VARCHAR(255)   NULL                    COMMENT '지출 간단 메모',
+    `is_auto_categorized`  TINYINT(1)     NOT NULL DEFAULT 1      COMMENT '자동분류 상태 (1:자동분류 유지, 0:사용자 확정)',
+    `created_at`           DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '지출 등록 일시',
+    `updated_at`           DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '지출 최종 수정 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_workation_expenses_transaction` (`transaction_id`),  -- 같은 결제가 두 번 등록되는 것 방지
+    KEY `ix_workation_expenses_workation_spent` (`workation_id`, `spent_at`),  -- 지출 목록 기간 조회
+    KEY `ix_workation_expenses_settlement` (`workation_id`, `budget_type`, `expense_category_id`),  -- 예산·정산 집계
+    KEY `ix_workation_expenses_card` (`card_id`),
+    CONSTRAINT `fk_workation_expenses_workation_id` FOREIGN KEY (`workation_id`) REFERENCES `workations` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_workation_expenses_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='워케이션 지출 내역 테이블 (비식별 관계)';
+
+
+
+-- =========================================================================================
+-- 7. 가맹점 업종
+-- =========================================================================================
+
+CREATE TABLE `merchant_category_mappings` (
+    `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '매핑 고유 번호(PK)',
+    `budget_type`          ENUM('WORK', 'PERSONAL') NOT NULL    COMMENT '법인용 / 개인용 구분',
+    `merchant_category`    VARCHAR(30)  NOT NULL                COMMENT '가맹점 업종 코드 (merchants.category 값)',
+    `expense_category_id`  BIGINT       NOT NULL                COMMENT '지출 카테고리 고유 번호 (FK, expense_categories.id 참조)',
+    `created_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '매핑 등록 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_merchant_category_mappings_type_category` (`budget_type`, `merchant_category`),  -- 업종당 기본 매핑은 유형별 1건
+    KEY `ix_merchant_category_mappings_category` (`expense_category_id`),
+    CONSTRAINT `fk_merchant_category_mappings_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='가맹점 업종별 카테고리 기본 매핑 테이블 (자동분류 기준)';
+
+
+-- =========================================================================================
+-- 8. 사용자 정정 규칙 (자동분류 1단계)
+--    사용자가 특정 가맹점의 분류를 직접 바꾸면 이후 같은 가맹점 결제에 우선 적용
+-- =========================================================================================
+
+CREATE TABLE `user_category_rules` (
+    `id`                   BIGINT     NOT NULL AUTO_INCREMENT COMMENT '정정 규칙 고유 번호(PK)',
+    `user_id`              BIGINT     NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+    `merchant_id`          BIGINT     NOT NULL                COMMENT '가맹점 고유 번호 (FK, merchants.id 참조)',
+    `expense_category_id`  BIGINT     NOT NULL                COMMENT '사용자가 지정한 카테고리 (FK, expense_categories.id 참조)',
+    `budget_type`          ENUM('WORK', 'PERSONAL') NOT NULL  COMMENT '법인용 / 개인용 구분',
+    `created_at`           DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '최초 정정 일시',
+    `updated_at`           DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '최종 정정 일시',
+
+    -- 제약 조건 설정
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_user_category_rules_user_merchant_type` (`user_id`, `merchant_id`, `budget_type`),  -- 동일 가맹점 규칙 중복 방지
+    KEY `ix_user_category_rules_category` (`expense_category_id`),
+    CONSTRAINT `fk_user_category_rules_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_user_category_rules_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자별 가맹점 카테고리 정정 규칙 테이블 (자동분류 최우선)';
+
+
+
 CREATE TABLE `restaurants` (
                                `id`	BIGINT	NOT NULL,
                                `id2`	BIGINT	NOT NULL,
@@ -119,34 +301,6 @@ CREATE TABLE `survey_questions` (
                                     `id`	BIGINT	NOT NULL,
                                     `question`	VARCHAR(200)	NOT NULL,
                                     `category`	ENUM( 'COMMON', 'ACCOMMODATION', 'RESTAURANT', 'OFFICE', 'ACTIVITY' )	NOT NULL
-);
-
-CREATE TABLE `expense_categories` (
-                                      `id`	BIGINT	NOT NULL,
-                                      `budget_type`	ENUM('WORK', 'PERSONAL')	NOT NULL	COMMENT '법인용/개인용 구분',
-                                      `code`	VARCHAR(30)	NOT NULL	COMMENT '카테고리 코드',
-                                      `name`	VARCHAR(30)	NOT NULL	COMMENT '화면 표시명',
-                                      `description`	VARCHAR(100)	NULL	COMMENT '화면에 노출할 설명문',
-                                      `is_default`	TINYINT(1)	NOT NULL	COMMENT '1=처음부터 표출, 0=＋ 목록에만',
-                                      `is_deletable`	TINYINT(1)	NOT NULL	COMMENT '0=삭제 불가(기타)',
-                                      `sort_order`	INT	NOT NULL	COMMENT '노출 순서',
-                                      `user_id`	BIGINT	NULL	COMMENT 'NULL=시스템 기본, 값=사용자가 만든 것',
-                                      `created_at`	TIMESTAMP	NULL	COMMENT '생성 일시'
-);
-
-CREATE TABLE `workations` (
-                              `id`	BIGINT	NOT NULL	COMMENT '워케이션 고유 번호(PK)',
-                              `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유 번호(FK)',
-                              `region_id`	BIGINT	NOT NULL	COMMENT '지역 코드',
-                              `title`	VARCHAR(100)	NOT NULL	COMMENT '워케이션 등록 제목',
-                              `start_date`	DATE	NOT NULL	COMMENT '워케이션 시작일',
-                              `end_date`	DATE	NOT NULL	COMMENT '워케이션 종료일',
-                              `business_budget_total`	DECIMAL(15,2)	NULL	COMMENT '법인 총예산',
-                              `personal_budget_total`	DECIMAL(15,2)	NULL	COMMENT '개인 총예산',
-                              `status`	ENUM('ACTIVE', 'SETTLED')	NOT NULL	DEFAULT 'ACTIVE'	COMMENT '최종페이지에서 워케이션 완료 누르면 첫페이지 기록에 쌓임',
-                              `settled_at`	TIMESTAMP	NULL,
-                              `created_at`	TIMESTAMP	NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '생성일',
-                              `updated_at`	TIMESTAMP	NULL
 );
 
 CREATE TABLE `reviews` (
@@ -224,11 +378,6 @@ CREATE TABLE `transactions` (
                                 `created_at`	TIMESTAMP	NULL	COMMENT '생성일시',
                                 `updated_at`	TIMESTAMP	NULL	COMMENT '수정 일시',
                                 `cancelled_at`	TIMESTAMP	NULL	COMMENT '결제 취소 일시'
-);
-
-CREATE TABLE `region` (
-                          `id`	BIGINT	NOT NULL	COMMENT '지역 코드 번호(PK)',
-                          `name`	VARCHAR(5)	NULL COMMENT '지역 이름'
 );
 
 CREATE TABLE `wallets` (
@@ -314,48 +463,12 @@ CREATE TABLE `accommodations` (
                                   `noise_level`	ENUM( 'QUIET', 'NORMAL', 'BUSY' )	NULL	DEFAULT 'NORMAL'
 );
 
-CREATE TABLE `user_category_rules` (
-                                       `id`	BIGINT	NOT NULL,
-                                       `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유 번호(FK)',
-                                       `merchant_id`	BIGINT	NOT NULL	COMMENT '가맹점 고유 번호(FK)',
-                                       `expense_category_id`	BIGINT	NOT NULL	COMMENT '사용자가 지정한 카테고리(FK)',
-                                       `budget_type`	ENUM('WORK','PERSONAL')	NOT NULL	COMMENT '법인용/개인용 구분',
-                                       `created_at`	TIMESTAMP	NULL	COMMENT '최초 정정 일시',
-                                       `updated_at`	TIMESTAMP	NULL	COMMENT '최종 정정 일시'
-);
-
 CREATE TABLE `activities` (
                               `id`	BIGINT	NOT NULL,
                               `merchant_id`	BIGINT	NOT NULL,
                               `activity_type`	ENUM( 'MARINE', 'SPORTS', 'HEALING', 'CULTURE', 'FESTIVAL', 'SHOPPING', 'ETC' )	NOT NULL,
                               `difficulty`	ENUM( 'EASY', 'NORMAL', 'HARD' )	NULL	DEFAULT 'NORMAL',
                               `duration_minutes`	INT	NULL
-);
-
-CREATE TABLE `user_device` (
-                               `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유 번호(FK)',
-                               `device_id`	VARCHAR(100)	NULL	COMMENT '사용자 기기 id',
-                               `pin_number`	VARCHAR(100)	NULL	COMMENT '사용자 핀번호',
-                               `device_name`	VARCHAR(100)	NULL	COMMENT '사용자 기기 이름',
-                               `Field`	TIMESTAMP	NULL	COMMENT '마지막 로그인 일자',
-                               `fail_count`	INT	NULL	COMMENT '비밀번호 틀린 횟수'
-);
-
-CREATE TABLE `merchant_category_mappings` (
-                                              `id`	BIGINT	NOT NULL,
-                                              `budget_type`	ENUM('WORK','PERSONAL')	NOT NULL	COMMENT '법인용/개인용 구분',
-                                              `merchant_category`	VARCHAR(30)	NOT NULL	COMMENT 'merchants.category 값',
-                                              `expense_category_id`	BIGINT	NOT NULL	COMMENT '지출 카테고리 고유 번호(FK)'
-);
-
-CREATE TABLE `budgets` (
-                           `id`	BIGINT	NOT NULL,
-                           `workation_id`	BIGINT	NOT NULL	COMMENT '워케이션 고유 번호(FK)',
-                           `expense_category_id`	BIGINT	NOT NULL,
-                           `budget_type`	ENUM('PERSONAL', 'WORK')	NOT NULL	COMMENT '예산 유형(법인/개인)',
-                           `target_amount`	DECIMAL(15, 2)	NOT NULL	COMMENT '카테고리 배정 예산',
-                           `created_at`	TIMESTAMP	NULL,
-                           `updated_at`	TIMESTAMP	NULL
 );
 
 CREATE TABLE `reservation_products` (
@@ -380,26 +493,6 @@ CREATE TABLE `card_companies` (
                                   `logo_url`	VARCHAR(255)	NULL	COMMENT '카드사 로고 이미지 경로'
 );
 
-CREATE TABLE `workation_expenses` (
-                                      `id`	BIGINT	NOT NULL,
-                                      `workation_id`	BIGINT	NOT NULL	COMMENT '워케이션 고유 번호(FK)',
-                                      `transaction_id`	BIGINT	NULL	COMMENT '거래내역 고유 번호(FK)
-앱 내 결제만 값 존재',
-                                      `merchant_id`	BIGINT	NULL	COMMENT '가맹점 고유 번호(FK)
-자동분류 근거',
-                                      `expense_category_id`	BIGINT	NOT NULL	COMMENT '지출 카테고리 고유 번호(FK)',
-                                      `card_id`	BIGINT	NULL	COMMENT 'card_id FK',
-                                      `budget_type`	ENUM('WORK','PERSONAL')	NOT NULL	COMMENT '업무/개인 경비 구분. 정산 필터 기준',
-                                      `amount`	DECIMAL(15,2)	NOT NULL	COMMENT '지출 금액',
-                                      `merchant_name`	VARCHAR(150)	NULL	COMMENT '가맹점명 (외부결제·수기 입력용)',
-                                      `spent_at`	TIMESTAMP	NOT NULL	COMMENT '지출 일시',
-                                      `memo`	VARCHAR(255)	NULL	COMMENT '지출 간단 메모',
-                                      `is_auto_categorized`	TINYINT(1)	NOT NULL	COMMENT '1=자동분류 유지
-0=사용자 확정',
-                                      `created_at`	TIMESTAMP	NOT NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '생성 일시',
-                                      `updated_at`	TIMESTAMP	NULL	COMMENT '수정 일시'
-);
-
 CREATE TABLE `reservation_cancels` (
                                        `id`	BIGINT	NOT NULL	COMMENT '예약 취소 고유번호(PK)',
                                        `reservation_id`	BIGINT	NOT NULL	COMMENT '예약 고유번호(FK)',
@@ -407,13 +500,6 @@ CREATE TABLE `reservation_cancels` (
                                        `refund_amount`	DECIMAL(15, 2)	NOT NULL	DEFAULT 0	COMMENT '환불 금액',
                                        `canceled_at`	TIMESTAMP	NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '취소 시각',
                                        `refunded_at`	TIMESTAMP	NULL	COMMENT '환불 완료 시각'
-);
-
-CREATE TABLE `user_category_labels` (
-                                        `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유 번호(PK, FK)',
-                                        `expense_category_id`	BIGINT	NOT NULL	COMMENT '지출 카테고리 고유 번호(PK, FK)',
-                                        `custom_name`	VARCHAR(50)	NOT NULL	COMMENT '사용자가 지정한 표시명',
-                                        `updated_at`	TIMESTAMP	NULL	COMMENT '수정 일시'
 );
 
 CREATE TABLE `banks` (
@@ -457,14 +543,6 @@ ALTER TABLE `survey_questions` ADD CONSTRAINT `PK_SURVEY_QUESTIONS` PRIMARY KEY 
                                                                                  `id`
     );
 
-ALTER TABLE `expense_categories` ADD CONSTRAINT `PK_EXPENSE_CATEGORIES` PRIMARY KEY (
-                                                                                     `id`
-    );
-
-ALTER TABLE `workations` ADD CONSTRAINT `PK_WORKATIONS` PRIMARY KEY (
-                                                                     `id`
-    );
-
 ALTER TABLE `reviews` ADD CONSTRAINT `PK_REVIEWS` PRIMARY KEY (
                                                                `review_id`
     );
@@ -484,10 +562,6 @@ ALTER TABLE `tags` ADD CONSTRAINT `PK_TAGS` PRIMARY KEY (
 
 ALTER TABLE `reservation_daily_inventories` ADD CONSTRAINT `PK_RESERVATION_DAILY_INVENTORIES` PRIMARY KEY (
                                                                                                            `id`
-    );
-
-ALTER TABLE `region` ADD CONSTRAINT `PK_REGION` PRIMARY KEY (
-                                                             `id`
     );
 
 
@@ -516,38 +590,17 @@ ALTER TABLE `accommodations` ADD CONSTRAINT `PK_ACCOMMODATIONS` PRIMARY KEY (
                                                                              `id2`
     );
 
-ALTER TABLE `user_category_rules` ADD CONSTRAINT `PK_USER_CATEGORY_RULES` PRIMARY KEY (
-                                                                                       `id`
-    );
-
 ALTER TABLE `activities` ADD CONSTRAINT `PK_ACTIVITIES` PRIMARY KEY (
                                                                      `id`,
                                                                      `merchant_id`
-    );
-
-ALTER TABLE `merchant_category_mappings` ADD CONSTRAINT `PK_MERCHANT_CATEGORY_MAPPINGS` PRIMARY KEY (
-                                                                                                     `id`
-    );
-
-ALTER TABLE `budgets` ADD CONSTRAINT `PK_BUDGETS` PRIMARY KEY (
-                                                               `id`
     );
 
 ALTER TABLE `reservation_products` ADD CONSTRAINT `PK_RESERVATION_PRODUCTS` PRIMARY KEY (
                                                                                          `id`
     );
 
-ALTER TABLE `workation_expenses` ADD CONSTRAINT `PK_WORKATION_EXPENSES` PRIMARY KEY (
-                                                                                     `id`
-    );
-
 ALTER TABLE `reservation_cancels` ADD CONSTRAINT `PK_RESERVATION_CANCELS` PRIMARY KEY (
                                                                                        `id`
-    );
-
-ALTER TABLE `user_category_labels` ADD CONSTRAINT `PK_USER_CATEGORY_LABELS` PRIMARY KEY (
-                                                                                         `user_id`,
-                                                                                         `expense_category_id`
     );
 
 ALTER TABLE `restaurants` ADD CONSTRAINT `FK_merchants_TO_restaurants_1` FOREIGN KEY (
@@ -592,20 +645,6 @@ ALTER TABLE `activities` ADD CONSTRAINT `FK_merchants_TO_activities_1` FOREIGN K
                             `id`
         );
 
-ALTER TABLE `user_category_labels` ADD CONSTRAINT `FK_users_TO_user_category_labels_1` FOREIGN KEY (
-                                                                                                    `user_id`
-    )
-    REFERENCES `users` (
-                        `id`
-        );
-
-ALTER TABLE `user_category_labels` ADD CONSTRAINT `FK_expense_categories_TO_user_category_labels_1` FOREIGN KEY (
-                                                                                                                 `expense_category_id`
-    )
-    REFERENCES `expense_categories` (
-                                     `id`
-        );
-
 ALTER TABLE `transactions` ADD CONSTRAINT `FK_wallets_TO_transactions` FOREIGN KEY (`wallet_id`) REFERENCES wallets(`id`);
 ALTER TABLE `transactions` ADD CONSTRAINT `FK_cards_TO_transactions` FOREIGN KEY (`card_id`) REFERENCES cards(`id`);
 ALTER TABLE `transactions` ADD CONSTRAINT `FK_bank_accounts_TO_transactions` FOREIGN KEY (`bank_account_id`) REFERENCES bank_accounts(`id`);
@@ -617,3 +656,98 @@ ALTER TABLE `banks` ADD CONSTRAINT `PK_BANKS` PRIMARY KEY (`code`);
 
 -- 2. 기존 외래키(FK) 설정 재실행
 ALTER TABLE `cards` ADD CONSTRAINT `FK_card_companies_TO_cards` FOREIGN KEY (`card_company_code`) REFERENCES card_companies(`code`);
+
+
+
+
+-- ========================================================================================
+-- 워케이션 파트 외래키 (담당: 김태균)
+-- transactions / cards / merchants 가 위에서 생성된 이후에 실행되어야 하므로 하단에 배치했습니다.
+-- =========================================================================================
+ALTER TABLE `workation_expenses` ADD CONSTRAINT `fk_workation_expenses_transaction_id` FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`);
+ALTER TABLE `workation_expenses` ADD CONSTRAINT `fk_workation_expenses_card_id`        FOREIGN KEY (`card_id`)        REFERENCES `cards` (`id`);
+ALTER TABLE `user_category_rules` ADD CONSTRAINT `fk_user_category_rules_merchant_id`  FOREIGN KEY (`merchant_id`)    REFERENCES `merchants` (`id`);
+-- =========================================================================================
+-- 워케이션 파트 기본 데이터 (담당: 김태균)
+-- expense_categories 는 서비스 동작에 필수인 마스터 데이터입니다.
+-- 이 데이터가 없으면 카테고리 조회 / 예산 배분 / 지출 자동분류가 모두 동작하지 않습니다.
+-- =========================================================================================
+
+-- =========================================================================================
+-- 1. 워케이션 거점 지역
+-- =========================================================================================
+INSERT INTO `region` (`name`) VALUES
+    ('부산'),
+    ('강릉'),
+    ('여수'),
+    ('제주');
+-- =========================================================================================
+-- 2. 지출 카테고리 마스터 - 법인용 12건
+--    is_default = 1 : 예산 화면에 처음부터 표출 (6건)
+--    is_default = 0 : ＋ 버튼을 눌렀을 때 목록에만 표시
+--    is_deletable = 0 : 기타 카테고리는 분류되지 않은 지출이 모이는 곳이라 삭제 불가
+--    user_id = NULL : 전체 사용자 공통 기본 카테고리
+-- =========================================================================================
+INSERT INTO `expense_categories`
+    (`user_id`, `budget_type`, `code`, `name`, `description`, `is_default`, `is_deletable`, `sort_order`)
+VALUES
+    (NULL, 'WORK', 'ACCOMMODATION',  '숙박비',     '호텔·에어비앤비 등 숙소 요금',      1, 1,  1),
+    (NULL, 'WORK', 'TRANSPORTATION', '교통비',     '항공·철도·버스·현지 이동',          1, 1,  2),
+    (NULL, 'WORK', 'RENT',           '임차료',     '공유오피스·회의실 대여 등',         1, 1,  3),
+    (NULL, 'WORK', 'MEETING',        '회의비',     '업무 미팅 중 식음료·다과',          1, 1,  4),
+    (NULL, 'WORK', 'FOOD',           '식비',       '근무일 식대',                       1, 1,  5),
+    (NULL, 'WORK', 'ETC',            '기타',       '위 항목에 없는 지출',               1, 0,  6),
+    (NULL, 'WORK', 'COMMUNICATION',  '통신비',     '데이터·와이파이 등 업무 통신',      0, 1,  7),
+    (NULL, 'WORK', 'SUPPLIES',       '소모품비',   '업무용 소모품 구입',                0, 1,  8),
+    (NULL, 'WORK', 'ENTERTAINMENT',  '접대비',     '거래처 접대 비용',                  0, 1,  9),
+    (NULL, 'WORK', 'VEHICLE',        '차량유지비', '렌터카·주유·주차 등',               0, 1, 10),
+    (NULL, 'WORK', 'EDUCATION',      '교육·도서비','업무 관련 교육·도서 구입',          0, 1, 11),
+    (NULL, 'WORK', 'INSURANCE',      '보험료',     '여행자보험 등',                     0, 1, 12);
+-- =========================================================================================
+-- 3. 지출 카테고리 마스터 - 개인용 11건
+-- =========================================================================================
+INSERT INTO `expense_categories`
+    (`user_id`, `budget_type`, `code`, `name`, `description`, `is_default`, `is_deletable`, `sort_order`)
+VALUES
+    (NULL, 'PERSONAL', 'ACCOMMODATION',  '숙박비',           '개인 부담 숙소 요금',        1, 1,  1),
+    (NULL, 'PERSONAL', 'TRANSPORTATION', '교통비',           '개인 이동 비용',             1, 1,  2),
+    (NULL, 'PERSONAL', 'FOOD',           '식비',             '식사 비용',                  1, 1,  3),
+    (NULL, 'PERSONAL', 'LEISURE',        '여가비',           '관광·액티비티·문화생활',     1, 1,  4),
+    (NULL, 'PERSONAL', 'SHOPPING',       '쇼핑',             '기념품·의류 등 구매',        1, 1,  5),
+    (NULL, 'PERSONAL', 'ETC',            '기타',             '위 항목에 없는 지출',        1, 0,  6),
+    (NULL, 'PERSONAL', 'CAFE',           '카페·간식',        '커피·디저트·간식',           0, 1,  7),
+    (NULL, 'PERSONAL', 'GATHERING',      '모임비',           '지인·동료와의 모임 비용',    0, 1,  8),
+    (NULL, 'PERSONAL', 'HEALTH',         '건강·의료',        '약국·병원·운동',             0, 1,  9),
+    (NULL, 'PERSONAL', 'LAUNDRY',        '세탁·생활서비스',  '세탁·생활 편의 서비스',      0, 1, 10),
+    (NULL, 'PERSONAL', 'COMMUNICATION',  '통신비',           '개인 데이터·로밍',           0, 1, 11);
+-- =========================================================================================
+-- 4. 가맹점 업종 - 카테고리 기본 매핑 (자동분류 2단계)
+--    merchants.category 값을 기준으로 지출을 어느 카테고리로 분류할지 정한다
+--    merchants 테이블의 category 값이 확정되면 매핑을 추가·조정합니다
+-- =========================================================================================
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'WORK', 'ACCOMMODATION', id FROM `expense_categories` WHERE `budget_type` = 'WORK' AND `code` = 'ACCOMMODATION';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'WORK', 'TRANSPORT', id FROM `expense_categories` WHERE `budget_type` = 'WORK' AND `code` = 'TRANSPORTATION';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'WORK', 'OFFICE', id FROM `expense_categories` WHERE `budget_type` = 'WORK' AND `code` = 'RENT';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'WORK', 'RESTAURANT', id FROM `expense_categories` WHERE `budget_type` = 'WORK' AND `code` = 'FOOD';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'PERSONAL', 'ACCOMMODATION', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'ACCOMMODATION';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'PERSONAL', 'TRANSPORT', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'TRANSPORTATION';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'PERSONAL', 'RESTAURANT', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'FOOD';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'PERSONAL', 'CAFE', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'CAFE';
+
+INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
+SELECT 'PERSONAL', 'ACTIVITY', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'LEISURE';
