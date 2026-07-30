@@ -4,16 +4,17 @@ import com.workit.domain.card.dto.response.AvailableCardResponse;
 import com.workit.domain.card.dto.response.CardResponse;
 import com.workit.domain.card.dto.response.NicknameUpdateResponse;
 import com.workit.domain.card.dto.response.PrimaryCardResponse;
+import com.workit.domain.card.exception.CardErrorCode;
 import com.workit.domain.card.mapper.CardMapper;
 import com.workit.domain.card.vo.CardVO;
 import com.workit.domain.card.vo.LinkableCardVO;
+import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
 
 @Service
@@ -50,7 +51,7 @@ public class CardServiceImpl implements CardService {
 
             LinkableCardVO linkable = cardMapper.findLinkableCardById(linkableId, userId);
             if (linkable == null) {
-                throw new NoSuchElementException("존재하지 않는 연동 가능 카드입니다.");
+                throw new BusinessException(CardErrorCode.LINKABLE_CARD_NOT_FOUND);
             }
 
             boolean isPrimary = !hasExistingCard && i == 0;
@@ -95,7 +96,7 @@ public class CardServiceImpl implements CardService {
     public PrimaryCardResponse setPrimaryCard(Long userId, Long cardId) {
         CardVO card = cardMapper.findCardById(cardId, userId);
         if (card == null) {
-            throw new NoSuchElementException("존재하지 않는 카드입니다.");
+            throw new BusinessException(CardErrorCode.CARD_NOT_FOUND);
         }
 
         cardMapper.clearPrimaryCard(userId);
@@ -111,15 +112,15 @@ public class CardServiceImpl implements CardService {
     @Transactional
     public NicknameUpdateResponse updateNickname(Long userId, Long cardId, String cardNickname) {
         if (cardNickname == null || cardNickname.trim().isEmpty()) {
-            throw new IllegalArgumentException("별칭을 입력해주세요.");
+            throw new BusinessException(CardErrorCode.NICKNAME_REQUIRED);
         }
         if (cardNickname.length() > 100) {
-            throw new IllegalArgumentException("별칭은 100자를 초과할 수 없습니다.");
+            throw new BusinessException(CardErrorCode.NICKNAME_TOO_LONG);
         }
 
         CardVO card = cardMapper.findCardById(cardId, userId);
         if (card == null) {
-            throw new NoSuchElementException("존재하지 않는 카드입니다.");
+            throw new BusinessException(CardErrorCode.CARD_NOT_FOUND);
         }
 
         cardMapper.updateCardNickname(cardId, userId, cardNickname);
@@ -137,7 +138,7 @@ public class CardServiceImpl implements CardService {
     public void deleteCard(Long userId, Long cardId) {
         CardVO card = cardMapper.findCardById(cardId, userId);
         if (card == null) {
-            throw new NoSuchElementException("존재하지 않는 카드입니다.");
+            throw new BusinessException(CardErrorCode.CARD_NOT_FOUND);
         }
 
         boolean wasPrimary = Boolean.TRUE.equals(card.getIsPrimary());

@@ -4,9 +4,11 @@ import com.workit.domain.account.dto.response.AccountResponse;
 import com.workit.domain.account.dto.response.AvailableAccountResponse;
 import com.workit.domain.account.dto.response.DeleteAccountResponse;
 import com.workit.domain.account.dto.response.PrimaryAccountResponse;
+import com.workit.domain.account.exception.AccountErrorCode;
 import com.workit.domain.account.mapper.AccountMapper;
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.account.vo.LinkableAccountVO;
+import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -52,7 +53,7 @@ public class AccountServiceImpl implements AccountService {
 
             LinkableAccountVO linkable = accountMapper.findLinkableAccountById(linkableId, userId);
             if (linkable == null) {
-                throw new NoSuchElementException("존재하지 않는 연동 가능 계좌입니다.");
+                throw new BusinessException(AccountErrorCode.LINKABLE_ACCOUNT_NOT_FOUND);
             }
 
             boolean isPrimary = !hasExistingAccount && i == 0;
@@ -80,7 +81,7 @@ public class AccountServiceImpl implements AccountService {
     public PrimaryAccountResponse setPrimaryAccount(Long userId, Long accountId) {
         BankAccountVO account = accountMapper.findAccountById(accountId, userId);
         if (account == null) {
-            throw new NoSuchElementException("존재하지 않는 계좌입니다.");
+            throw new BusinessException(AccountErrorCode.ACCOUNT_NOT_FOUND);
         }
 
         accountMapper.clearPrimaryAccount(userId);
@@ -97,10 +98,10 @@ public class AccountServiceImpl implements AccountService {
     public DeleteAccountResponse deleteAccount(Long userId, Long accountId) {
         BankAccountVO account = accountMapper.findAccountById(accountId, userId);
         if (account == null) {
-            throw new NoSuchElementException("존재하지 않는 계좌입니다.");
+            throw new BusinessException(AccountErrorCode.ACCOUNT_NOT_FOUND);
         }
         if (Boolean.TRUE.equals(account.getIsPrimary())) {
-            throw new IllegalStateException("주 계좌는 삭제할 수 없습니다. 다른 계좌를 먼저 주 계좌로 설정해주세요.");
+            throw new BusinessException(AccountErrorCode.PRIMARY_ACCOUNT_DELETE_NOT_ALLOWED);
         }
 
         accountMapper.deleteAccount(accountId, userId);
