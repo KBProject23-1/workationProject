@@ -21,7 +21,9 @@ public class TransactionDetailResponse {
     private String categoryAssigned;
     private Boolean isBusinessExpense;
     private String approvedNumber;
+    private String status;
     private LocalDateTime approvedAt;
+    private LocalDateTime cancelledAt;
     private Long reservationId;
 
     public static TransactionDetailResponse from(TransactionVO vo) {
@@ -39,7 +41,9 @@ public class TransactionDetailResponse {
         response.setCategoryAssigned(vo.getCategoryAssigned());
         response.setIsBusinessExpense(vo.getIsBusinessExpense());
         response.setApprovedNumber(vo.getApprovedNumber());
+        response.setStatus(vo.getStatus());
         response.setApprovedAt(vo.getApprovedAt());
+        response.setCancelledAt(vo.getCancelledAt());
         response.setReservationId(vo.getReservationId());
         return response;
     }

@@ -25,4 +25,11 @@ public interface TransactionMapper {
 
     // 거래 생성 (충전/환불/카드결제 공용)
     void insertTransaction(TransactionVO transaction);
+
+    // 취소 대상 조회
+    TransactionVO findTransactionForCancel(@Param("transactionId") Long transactionId,
+                                           @Param("userId") Long userId);
+
+    // 거래 취소 처리
+    void cancelTransaction(@Param("transactionId") Long transactionId);
 }

@@ -1,10 +1,7 @@
 package com.workit.domain.transaction.controller;
 
 import com.workit.domain.transaction.dto.request.PaymentRequest;
-import com.workit.domain.transaction.dto.response.PaymentResponse;
-import com.workit.domain.transaction.dto.response.ReceiptResponse;
-import com.workit.domain.transaction.dto.response.TransactionDetailResponse;
-import com.workit.domain.transaction.dto.response.TransactionListItemResponse;
+import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.transaction.service.TransactionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -71,5 +68,16 @@ public class TransactionController {
         Long userId = 1L;
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(transactionService.pay(userId, requestBody));
+    }
+
+    /** 거래 내역 취소(환불) */
+    @PatchMapping("/api/v1/transactions/{transactionId}/cancel")
+    public ResponseEntity<CancelResponse> cancelTransaction(
+            @PathVariable Long transactionId,
+            HttpServletRequest request
+    ) {
+        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
+        Long userId = 1L;
+        return ResponseEntity.ok(transactionService.cancelTransaction(userId, transactionId));
     }
 }

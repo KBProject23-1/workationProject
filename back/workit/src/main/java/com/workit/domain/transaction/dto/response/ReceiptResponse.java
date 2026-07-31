@@ -17,6 +17,7 @@ public class ReceiptResponse {
 
     public static ReceiptResponse from(TransactionVO vo) {
         boolean isCard = "CARD".equals(vo.getPaymentSourceType());
+        boolean isCanceled = "CANCELED".equals(vo.getStatus());
 
         BigDecimal totalAmount = vo.getAmount();
         BigDecimal supplyAmount = totalAmount.divide(BigDecimal.valueOf(1.1), 0, RoundingMode.DOWN);
@@ -37,7 +38,7 @@ public class ReceiptResponse {
         txInfo.setCardCompanyName(isCard ? vo.getCardCompanyName() : null);   // cardName → cardCompanyName
         txInfo.setMaskedCardNumber(isCard ? CardNumberMasker.mask(vo.getCardNumber()) : null);
         txInfo.setCardClassification(isCard ? vo.getCardClassification() : null);  // 새로 추가
-        txInfo.setApprovalStatus(isCard ? "매입" : null);
+        txInfo.setApprovalStatus(isCanceled ? "취소" : (isCard ? "매입" : null));
         txInfo.setApprovedAt(vo.getApprovedAt());
         txInfo.setApprovalNumber(isCard ? vo.getApprovedNumber() : null);
         response.setTransaction(txInfo);
