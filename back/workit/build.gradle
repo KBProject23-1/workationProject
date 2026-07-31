@@ -19,6 +19,10 @@ ext {
     aspectjVersion = '1.9.20'
     mybatisVersion = '3.5.10'
     log4j2Version = '2.18.0'
+    springDataRedisVersion = '2.7.18'
+    lettuceVersion = '6.2.7.RELEASE'
+    springSecurityVersion = '5.7.11'
+    jjwtVersion = '0.11.5'
 }
 
 sourceCompatibility = '1.8'
@@ -52,6 +56,18 @@ dependencies {
 
     // HikariCP
     implementation("com.zaxxer:HikariCP:${hikariVersion}")
+
+    // Spring Data Redis (Lettuce 클라이언트)
+    implementation("org.springframework.data:spring-data-redis:${springDataRedisVersion}")
+    implementation("io.lettuce:lettuce-core:${lettuceVersion}")
+
+    // Spring Security Crypto (BCrypt - 비밀번호/PIN 단방향 해시)
+    implementation("org.springframework.security:spring-security-crypto:${springSecurityVersion}")
+
+    // JWT (jjwt)
+    implementation("io.jsonwebtoken:jjwt-api:${jjwtVersion}")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:${jjwtVersion}")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:${jjwtVersion}")
 
     // Jackson
     implementation("com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}")
