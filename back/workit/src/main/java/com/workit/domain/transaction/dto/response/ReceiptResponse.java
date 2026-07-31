@@ -34,8 +34,9 @@ public class ReceiptResponse {
 
         TransactionInfo txInfo = new TransactionInfo();
         txInfo.setPaymentMethod(vo.getPaymentSourceType());
-        txInfo.setCardName(isCard ? vo.getCardName() : null);
+        txInfo.setCardCompanyName(isCard ? vo.getCardCompanyName() : null);   // cardName → cardCompanyName
         txInfo.setMaskedCardNumber(isCard ? CardNumberMasker.mask(vo.getCardNumber()) : null);
+        txInfo.setCardClassification(isCard ? vo.getCardClassification() : null);  // 새로 추가
         txInfo.setApprovalStatus(isCard ? "매입" : null);
         txInfo.setApprovedAt(vo.getApprovedAt());
         txInfo.setApprovalNumber(isCard ? vo.getApprovedNumber() : null);
@@ -61,8 +62,9 @@ public class ReceiptResponse {
     @lombok.Data
     public static class TransactionInfo {
         private String paymentMethod;
-        private String cardName;
+        private String cardCompanyName;
         private String maskedCardNumber;
+        private String cardClassification;
         private String approvalStatus;
         private LocalDateTime approvedAt;
         private String approvalNumber;

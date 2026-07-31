@@ -30,6 +30,7 @@
         <result column="card_company_name" property="cardCompanyName"/>
         <result column="card_name" property="cardName"/>
         <result column="card_number" property="cardNumber"/>
+        <result column="card_classification" property="cardClassification"/>
     </resultMap>
 
     <select id="findTransactions" resultMap="TransactionResultMap">
@@ -69,7 +70,8 @@
         m.phone_number AS merchant_phone_number,
         cc.name AS card_company_name,
         c.card_name AS card_name,
-        c.card_number AS card_number
+        c.card_number AS card_number,
+        c.card_classification AS card_classification
         FROM transactions t
         LEFT JOIN merchants m ON t.merchant_id = m.id
         LEFT JOIN cards c ON t.card_id = c.id
