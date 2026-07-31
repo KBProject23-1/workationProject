@@ -17,6 +17,7 @@ public class TransactionListItemResponse {
     private String categoryAssigned;
     private Boolean isBusinessExpense;
     private String approvedNumber;
+    private String status;
     private LocalDateTime approvedAt;
 
     public static TransactionListItemResponse from(TransactionVO vo) {
@@ -30,6 +31,7 @@ public class TransactionListItemResponse {
         response.setCategoryAssigned(vo.getCategoryAssigned());
         response.setIsBusinessExpense(vo.getIsBusinessExpense());
         response.setApprovedNumber(vo.getApprovedNumber());
+        response.setStatus(vo.getStatus());
         response.setApprovedAt(vo.getApprovedAt());
         return response;
     }

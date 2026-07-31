@@ -30,11 +30,12 @@
         <result column="card_company_name" property="cardCompanyName"/>
         <result column="card_name" property="cardName"/>
         <result column="card_number" property="cardNumber"/>
+        <result column="card_classification" property="cardClassification"/>
     </resultMap>
 
     <select id="findTransactions" resultMap="TransactionResultMap">
         SELECT id, user_id, workation_id, payment_source_type, merchant_name, amount,
-        transaction_type, category_assigned, is_business_expense, approved_number, approved_at
+        transaction_type, category_assigned, is_business_expense, approved_number, status, approved_at
         FROM transactions
         WHERE user_id = #{userId}
         <if test="startDate != null and startDate != ''">
@@ -69,7 +70,8 @@
         m.phone_number AS merchant_phone_number,
         cc.name AS card_company_name,
         c.card_name AS card_name,
-        c.card_number AS card_number
+        c.card_number AS card_number,
+        c.card_classification AS card_classification
         FROM transactions t
         LEFT JOIN merchants m ON t.merchant_id = m.id
         LEFT JOIN cards c ON t.card_id = c.id
@@ -91,4 +93,16 @@
         )
     </insert>
 
+    <select id="findTransactionForCancel" resultMap="TransactionResultMap">
+        SELECT t.*, c.card_classification AS card_classification
+        FROM transactions t
+                 LEFT JOIN cards c ON t.card_id = c.id
+        WHERE t.id = #{transactionId} AND t.user_id = #{userId}
+    </select>
+
+    <update id="cancelTransaction">
+        UPDATE transactions
+        SET status = 'CANCELED', cancelled_at = NOW()
+        WHERE id = #{transactionId}
+    </update>
 </mapper>

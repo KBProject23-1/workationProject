@@ -5,10 +5,7 @@ import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.card.mapper.CardMapper;
 import com.workit.domain.card.vo.CardVO;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
-import com.workit.domain.transaction.dto.response.PaymentResponse;
-import com.workit.domain.transaction.dto.response.ReceiptResponse;
-import com.workit.domain.transaction.dto.response.TransactionDetailResponse;
-import com.workit.domain.transaction.dto.response.TransactionListItemResponse;
+import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.util.TransactionNumberGenerator;
@@ -176,5 +173,40 @@ public class TransactionServiceImpl implements TransactionService {
         if (pinNumber == null || pinNumber.length() != 6) {
             throw new BusinessException(TransactionErrorCode.PIN_INVALID);
         }
+    }
+
+    @Override
+    @Transactional
+    public CancelResponse cancelTransaction(Long userId, Long transactionId) {
+
+        TransactionVO transaction = transactionMapper.findTransactionForCancel(transactionId, userId);
+        if (transaction == null) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
+        }
+        if ("CANCELED".equals(transaction.getStatus())) {
+            throw new BusinessException(TransactionErrorCode.ALREADY_CANCELED);
+        }
+        if (!"PAYMENT".equals(transaction.getTransactionType())) {
+            throw new BusinessException(TransactionErrorCode.CANCEL_NOT_ALLOWED);
+        }
+
+        BigDecimal refundedAmount = BigDecimal.ZERO;
+        String refundedTo = null;
+
+        boolean isWallet = "WALLET".equals(transaction.getPaymentSourceType());
+        boolean isDebitCard = "CARD".equals(transaction.getPaymentSourceType())
+                && "DEBIT".equals(transaction.getCardClassification());
+
+        if (isWallet || isDebitCard) {
+            walletMapper.increaseBalance(userId, transaction.getAmount());
+            refundedAmount = transaction.getAmount();
+            refundedTo = "WALLET";
+        }
+
+        transactionMapper.cancelTransaction(transactionId);
+
+        TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
+
+        return CancelResponse.of(cancelled, refundedAmount, refundedTo);
     }
 }

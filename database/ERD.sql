@@ -49,7 +49,7 @@ CREATE TABLE `user_device` (
 
     -- 제약 조건 설정 (금융권 표준 자물쇠)
                                PRIMARY KEY (`id`),
-                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), --q 한 유저가 동일 기기를 중복 등록하는 것 방지
+                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), --  한 유저가 동일 기기를 중복 등록하는 것 방지
                                CONSTRAINT `fk_user_device_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 보안 핀번호 및 로그인 기기 관리 테이블 (비식별 관계)';
 
@@ -283,7 +283,119 @@ CREATE TABLE `user_category_rules` (
     CONSTRAINT `fk_user_category_rules_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='사용자별 가맹점 카테고리 정정 규칙 테이블 (자동분류 최우선)';
 
+-- ================================================================
+-- 외래키 제약 조건 검사 일시 비활성화 (선택 사항 - 테이블 생성 순서 무관하게 실행 가능)
+SET FOREIGN_KEY_CHECKS = 0;
 
+-- 1. 은행 기본 정보 테이블
+CREATE TABLE `banks` (
+                         `code` VARCHAR(10) PRIMARY KEY COMMENT '은행 코드 (PK)',
+                         `name` VARCHAR(50) NOT NULL COMMENT '은행명',
+                         `logo_url` VARCHAR(255) NULL COMMENT '은행 로고 이미지 경로'
+);
+
+-- 2. 카드사 기본 정보 테이블
+CREATE TABLE `card_companies` (
+                                  `code` VARCHAR(10) PRIMARY KEY COMMENT '카드사 코드 (PK)',
+                                  `name` VARCHAR(50) NOT NULL COMMENT '카드사명',
+                                  `logo_url` VARCHAR(255) NULL COMMENT '카드사 로고 이미지 경로'
+);
+
+-- 3. 지갑 테이블
+CREATE TABLE `wallets` (
+                           `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+                           `user_id` BIGINT NOT NULL,
+                           `balance` DECIMAL(15, 2) NULL DEFAULT 0.00 COMMENT '시스템 계좌 충전금',
+                           `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP COMMENT '지갑 업데이트 시간'
+);
+
+-- 4. 계좌 테이블
+CREATE TABLE `bank_accounts` (
+                                 `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                 `user_id` BIGINT NOT NULL,
+                                 `bank_code` VARCHAR(10) NOT NULL COMMENT '은행 코드',
+                                 `account_number` VARCHAR(50) NOT NULL COMMENT '계좌번호',
+                                 `product_name` VARCHAR(100) NOT NULL COMMENT '계좌 이름',
+                                 `balance` DECIMAL(15, 2) NULL DEFAULT 0.00 COMMENT '계좌 잔액',
+                                 `is_primary` TINYINT(1) NULL DEFAULT 0 COMMENT '주거래 계좌 여부',
+                                 `is_withdrawal_agreed` TINYINT(1) NULL COMMENT '계좌 입출금 동의 여부',
+                                 `withdrawal_agreed_at` TIMESTAMP NULL COMMENT '오픈 뱅킹 약관 동의 시간',
+                                 `balance_updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP COMMENT '계좌 잔액 업데이트 시간',
+                                 `is_deleted` TINYINT(1) NULL DEFAULT 0 COMMENT '등록 계좌 삭제 여부'
+);
+
+-- 5. 카드 테이블 (card_companies 외래키 포함)
+CREATE TABLE `cards` (
+                         `id` BIGINT PRIMARY KEY AUTO_INCREMENT,
+                         `user_id` BIGINT NOT NULL,
+                         `card_company_code` VARCHAR(10) NOT NULL COMMENT '카드 회사 코드(카드사 구분)',
+                         `card_name` VARCHAR(100) NOT NULL COMMENT '카드 이름(사용자가 지정한 카드 별칭 - 없을때 기본 카드 이름)',
+                         `card_number` VARCHAR(16) NULL COMMENT '카드 번호',
+                         `card_classification` ENUM('CREDIT', 'DEBIT') NULL COMMENT '신용 / 체크 구분용',
+                         `card_type` ENUM('WORK', 'PERSONAL') NOT NULL COMMENT '법인 / 개인 구분용',
+                         `is_primary` TINYINT(1) NULL DEFAULT 0 COMMENT '주 거래 카드 여부',
+                         `is_agreed` TINYINT(1) NULL COMMENT '카드 이용 동의 여부',
+                         `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP COMMENT '카드 등록 시간(카드 이용 동의 시간)',
+                         `is_deleted` TINYINT(1) NULL DEFAULT 0 COMMENT '등록 카드 삭제 여부',
+                         `updated_at` TIMESTAMP NULL COMMENT '수정 일시',
+                         `deleted_at` TIMESTAMP NULL COMMENT '삭제 일시',
+                         CONSTRAINT `FK_card_companies_TO_cards` FOREIGN KEY (`card_company_code`) REFERENCES `card_companies` (`code`)
+);
+
+-- 6. 거래 내역 테이블 (wallets, cards, bank_accounts, merchants 외래키 포함)
+CREATE TABLE `transactions` (
+                                `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '거래내역 고유 번호(PK)',
+                                `user_id` BIGINT NOT NULL COMMENT '회원 고유 번호(FK)',
+                                `wallet_id` BIGINT NULL COMMENT '전자지갑 ID',
+                                `bank_account_id` BIGINT NULL COMMENT '주거래 계좌 ID 충전 / 환불 기록용',
+                                `card_id` BIGINT NULL COMMENT '카드 고유 번호(FK)',
+                                `workation_id` BIGINT NULL COMMENT '워케이션 고유 번호(FK)',
+                                `reservation_id` BIGINT NULL COMMENT '예약과 관련된 거래인 경우 연결되는 예약 고유번호(FK)',
+                                `merchant_id` BIGINT NULL COMMENT '결제한 가맹점 고유 번호(FK)',
+                                `payment_source_type` ENUM('CARD', 'WALLET') NOT NULL COMMENT '결제 수단',
+                                `merchant_name` VARCHAR(150) NOT NULL COMMENT '가맹점명',
+                                `amount` DECIMAL(15, 2) NOT NULL COMMENT '거래 금액',
+                                `transaction_type` ENUM('DEPOSIT', 'WITHDRAWAL', 'PAYMENT') NOT NULL COMMENT '입금/출금 유형',
+                                `category_assigned` VARCHAR(150) NULL DEFAULT '기타' COMMENT '자동 분류된 지출 카테고리',
+                                `is_business_expense` TINYINT(1) NULL DEFAULT 1 COMMENT '업무 경비 여부',
+                                `approved_number` VARCHAR(50) NULL COMMENT '카드 승인 번호',
+                                `transaction_number` VARCHAR(50) NULL COMMENT '우리 서비스 거래번호',
+                                `status` ENUM('PAID', 'FAILED', 'CANCELED') NULL COMMENT '결제 상태',
+                                `approved_at` TIMESTAMP NOT NULL COMMENT '승인 시각',
+                                `created_at` TIMESTAMP NULL COMMENT '생성일시',
+                                `updated_at` TIMESTAMP NULL COMMENT '수정 일시',
+                                `cancelled_at` TIMESTAMP NULL COMMENT '결제 취소 일시',
+                                CONSTRAINT `FK_wallets_TO_transactions` FOREIGN KEY (`wallet_id`) REFERENCES `wallets` (`id`),
+                                CONSTRAINT `FK_cards_TO_transactions` FOREIGN KEY (`card_id`) REFERENCES `cards` (`id`),
+                                CONSTRAINT `FK_bank_accounts_TO_transactions` FOREIGN KEY (`bank_account_id`) REFERENCES `bank_accounts` (`id`),
+                                CONSTRAINT `FK_merchants_TO_transactions` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`)
+);
+
+-- 7. 연동 가능 계좌 테이블
+CREATE TABLE `linkable_accounts` (
+                                     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '연동 가능 계좌 고유 번호(PK)',
+                                     `user_id` BIGINT NOT NULL COMMENT '회원 고유 번호(FK)',
+                                     `bank_code` VARCHAR(10) NOT NULL COMMENT '은행 코드(FK)',
+                                     `account_number` VARCHAR(50) NOT NULL COMMENT '계좌번호(Mock)',
+                                     `product_name` VARCHAR(100) NOT NULL COMMENT '계좌 상품명',
+                                     `is_linked` TINYINT(1) NULL DEFAULT 0 COMMENT '이미 연동(등록) 완료했는지 여부'
+);
+
+-- 8. 연동 가능 카드 테이블
+CREATE TABLE `linkable_cards` (
+                                  `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '연동 가능 카드 고유 번호(PK)',
+                                  `user_id` BIGINT NOT NULL COMMENT '회원 고유 번호(FK)',
+                                  `card_company_code` VARCHAR(10) NOT NULL COMMENT '카드사 코드(FK)',
+                                  `card_number` VARCHAR(16) NOT NULL COMMENT '카드번호(Mock)',
+                                  `card_name` VARCHAR(100) NOT NULL COMMENT '카드 기본 이름(카드사 제공명)',
+                                  `card_classification` ENUM('CREDIT', 'DEBIT') NULL COMMENT '신용/체크 구분',
+                                  `card_type` ENUM('WORK', 'PERSONAL') NOT NULL COMMENT '법인/개인 구분',
+                                  `is_linked` TINYINT(1) NULL DEFAULT 0 COMMENT '이미 연동 완료했는지 여부'
+);
+
+-- 외래키 제약 조건 검사 재활성화
+SET FOREIGN_KEY_CHECKS = 1;
+-- ================================================================
 
 CREATE TABLE `restaurants` (
                                `id`	BIGINT	NOT NULL,
@@ -323,19 +435,7 @@ CREATE TABLE `offices` (
                            `noise_level`	ENUM( 'QUIET', 'NORMAL', 'BUSY' )	NULL	DEFAULT 'NORMAL'
 );
 
-CREATE TABLE `bank_accounts` (
-                                 `id`	BIGINT	PRIMARY KEY AUTO_INCREMENT,
-                                 `user_id`	BIGINT	NOT NULL,
-                                 `bank_code`	VARCHAR(10)	NOT NULL	COMMENT '은행 코드',
-                                 `account_number`	VARCHAR(50)	NOT NULL	COMMENT '계좌번호',
-                                 `product_name`	VARCHAR(100)	NOT NULL	COMMENT '계좌 이름',
-                                 `balance`	DECIMAL(15, 2)	NULL	DEFAULT 0.00	COMMENT '계좌 잔액',
-                                 `is_primary`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '주거래 계좌 여부',
-                                 `is_withdrawal_agreed`	TINYINT(1)	NULL	COMMENT '계좌 입출금 동의 여부',
-                                 `withdrawal_agreed_at`	TIMESTAMP	NULL	COMMENT '오픈 뱅킹 약관 동의 시간',
-                                 `balance_updated_at`	TIMESTAMP	NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '계좌 잔액 업데이트 시간',
-                                 `is_deleted`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '등록 계좌 삭제 여부'
-);
+
 
 CREATE TABLE `user_survey_answers` (
                                        `id`	BIGINT	NOT NULL,
@@ -355,38 +455,6 @@ CREATE TABLE `reservation_daily_inventories` (
                                                  `reserved_count`	INT	NOT NULL	DEFAULT 1	COMMENT '예약한 객실 또는 좌석 수'
 );
 
-CREATE TABLE `transactions` (
-                                `id`	BIGINT	PRIMARY KEY AUTO_INCREMENT	COMMENT '거래내역 고유 번호(PK)',
-                                `user_id`	BIGINT	NOT NULL	COMMENT '회원 고유 번호(FK)',
-                                `wallet_id`	BIGINT	NOT NULL	COMMENT '전자지갑 계좌 잔액',
-                                `bank_account_id`	BIGINT	NULL	COMMENT '주거래 계좌 ID
-충전 / 환불 기록용',
-                                `card_id`	BIGINT	NULL	COMMENT '카드 고유 번호(FK)',
-                                `workation_id`	BIGINT	NULL	COMMENT '워케이션 고유 번호(FK)',
-                                `reservation_id`	BIGINT	NULL	COMMENT '예약과 관련된 거래인 경우 연결되는 예약 고유번호(FK)',
-                                `merchant_id` BIGINT NULL COMMENT '결제한 가맹점 고유 번호(FK)',
-                                `payment_source_type`	ENUM('CARD', 'WALLET')	NOT NULL	COMMENT '결제 수단',
-                                `merchant_name`	VARCHAR(150)	NOT NULL	COMMENT '가맹점명',
-                                `amount`	DECIMAL(15, 2)	NOT NULL	COMMENT '거래 금액',
-                                `transaction_type`	ENUM('DEPOSIT', 'WITHDRAWAL', 'PAYMENT')	NOT NULL	COMMENT '입금/출금 유형',
-                                `category_assigned`	VARCHAR(150)	NULL	DEFAULT '기타'	COMMENT '자동 분류된 지출 카테고리',
-                                `is_business_expense`	TINYINT(1)	NULL	DEFAULT 1	COMMENT '업무 경비 여부',
-                                `approved_number`	VARCHAR(50)	NULL	COMMENT '카드 승인 번호',
-                                `transaction_number`	VARCHAR(50)	NULL	COMMENT '우리 서비스 거래번호',
-                                `status`	ENUM('PAID', 'FAILED', 'CANCELED')	NULL	COMMENT '결제 상태',
-                                `approved_at`	TIMESTAMP	NOT NULL	COMMENT '승인 시각',
-                                `created_at`	TIMESTAMP	NULL	COMMENT '생성일시',
-                                `updated_at`	TIMESTAMP	NULL	COMMENT '수정 일시',
-                                `cancelled_at`	TIMESTAMP	NULL	COMMENT '결제 취소 일시'
-);
-
-CREATE TABLE `wallets` (
-                           `id`	BIGINT	PRIMARY KEY AUTO_INCREMENT,
-                           `user_id`	BIGINT	NOT NULL,
-                           `balance`	DECIMAL(15, 2)	NULL	DEFAULT 0.00	COMMENT '시스템 계좌 충전금',
-                           `updated_at`	TIMESTAMP	NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '지갑 업데이트 시간'
-);
-
 CREATE TABLE `reservations` (
                                 `id`	BIGINT	NOT NULL	COMMENT '예약 고유번호(PK)',
                                 `product_id`	BIGINT	NOT NULL	COMMENT '예약 상품 고유번호(FK)',
@@ -403,9 +471,11 @@ CREATE TABLE `reservations` (
 );
 
 CREATE TABLE `merchants` (
-                             `id`	BIGINT	NOT NULL,
+                             `id`	BIGINT	PRIMARY KEY,
                              `id2`	BIGINT	NOT NULL,
                              `name`	VARCHAR(150)	NOT NULL,
+                             `address`  VARCHAR(255) NOT NULL,
+                             `taxpayer_identification_number` VARCHAR(10) NULL COMMENT '사업자등록번호(하이픈 없이 숫자만)',
                              `category`	ENUM( 'ACCOMMODATION', 'RESTAURANT', 'OFFICE', 'ACTIVITY' )	NOT NULL,
                              `latitude`	DOUBLE	NOT NULL,
                              `longitude`	DOUBLE	NOT NULL,
@@ -421,22 +491,6 @@ CREATE TABLE `product_daily_inventories` (
                                              `total_capacity`	INT	NOT NULL	COMMENT '전체 재고 수',
                                              `remaining_capacity`	INT	NOT NULL	COMMENT '남은 재고 수',
                                              `is_available`	TINYINT(1)	NOT NULL	DEFAULT 1	COMMENT '해당 날짜 예약 접수 여부'
-);
-
-CREATE TABLE `cards` (
-                         `id`	BIGINT	PRIMARY KEY AUTO_INCREMENT,
-                         `user_id`	BIGINT	NOT NULL,
-                         `card_company_code`	VARCHAR(10)	NOT NULL	COMMENT '카드 회사 코드(카드사 구분)',
-                         `card_name`	VARCHAR(100)	NOT NULL	COMMENT '카드 이름(사용자가 지정한 카드 별칭 - 없을때 기본 카드 이름)',
-                         `card_number`	VARCHAR(16)	NULL	COMMENT '카드 번호',
-                         `card_classification`	ENUM('CREDIT', 'DEBIT')	NULL	COMMENT '신용 / 체크 구분용',
-                         `card_type`	ENUM('WORK', 'PERSONAL')	NOT NULL	COMMENT '법인 / 개인 구분용',
-                         `is_primary`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '주 거래 카드 여부',
-                         `is_agreed`	TINYINT(1)	NULL	COMMENT '카드 이용 동의 여부',
-                         `created_at`	TIMESTAMP	NULL	DEFAULT CURRENT_TIMESTAMP	COMMENT '카드 등록 시간(카드 이용 동의 시간)',
-                         `is_deleted`	TINYINT(1)	NULL	DEFAULT 0	COMMENT '등록 카드 삭제 여부',
-                         `updated_at`	TIMESTAMP	NULL	COMMENT '수정 일시',
-                         `deleted_at`	TIMESTAMP	NULL	COMMENT '삭제 일시'
 );
 
 CREATE TABLE `survey_options` (
@@ -487,12 +541,6 @@ SEAT, MEETING_ROOM(공유오피스)',
                                         `merchant_id`	BIGINT	NOT NULL
 );
 
-CREATE TABLE `card_companies` (
-                                  `code`	VARCHAR(10)	NOT NULL	COMMENT '카드사 코드 (PK)',
-                                  `name`	VARCHAR(50)	NOT NULL	COMMENT '카드사명',
-                                  `logo_url`	VARCHAR(255)	NULL	COMMENT '카드사 로고 이미지 경로'
-);
-
 CREATE TABLE `reservation_cancels` (
                                        `id`	BIGINT	NOT NULL	COMMENT '예약 취소 고유번호(PK)',
                                        `reservation_id`	BIGINT	NOT NULL	COMMENT '예약 고유번호(FK)',
@@ -502,36 +550,10 @@ CREATE TABLE `reservation_cancels` (
                                        `refunded_at`	TIMESTAMP	NULL	COMMENT '환불 완료 시각'
 );
 
-CREATE TABLE `banks` (
-                         `code`	VARCHAR(10)	NOT NULL	COMMENT '은행 코드 (PK)',
-                         `name`	VARCHAR(50)	NOT NULL	COMMENT '은행명',
-                         `logo_url`	VARCHAR(255)	NULL	COMMENT '은행 로고 이미지 경로'
-);
-
-CREATE TABLE `linkable_accounts` (
-                                     `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '연동 가능 계좌 고유 번호(PK)',
-                                     `user_id` BIGINT NOT NULL COMMENT '회원 고유 번호(FK)',
-                                     `bank_code` VARCHAR(10) NOT NULL COMMENT '은행 코드(FK)',
-                                     `account_number` VARCHAR(50) NOT NULL COMMENT '계좌번호(Mock)',
-                                     `product_name` VARCHAR(100) NOT NULL COMMENT '계좌 상품명',
-                                     `is_linked` TINYINT(1) NULL DEFAULT 0 COMMENT '이미 연동(등록) 완료했는지 여부'
-);
-
-CREATE TABLE `linkable_cards` (
-                                  `id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '연동 가능 카드 고유 번호(PK)',
-                                  `user_id` BIGINT NOT NULL COMMENT '회원 고유 번호(FK)',
-                                  `card_company_code` VARCHAR(10) NOT NULL COMMENT '카드사 코드(FK)',
-                                  `card_number` VARCHAR(16) NOT NULL COMMENT '카드번호(Mock)',
-                                  `card_name` VARCHAR(100) NOT NULL COMMENT '카드 기본 이름(카드사 제공명)',
-                                  `card_classification` ENUM('CREDIT', 'DEBIT') NULL COMMENT '신용/체크 구분',
-                                  `card_type` ENUM('WORK', 'PERSONAL') NOT NULL COMMENT '법인/개인 구분',
-                                  `is_linked` TINYINT(1) NULL DEFAULT 0 COMMENT '이미 연동 완료했는지 여부'
-);
-
 
 ALTER TABLE `restaurants` ADD CONSTRAINT `PK_RESTAURANTS` PRIMARY KEY (
-                                                                       `id`,
-                                                                       `id2`
+                                                                       `id`
+
     );
 
 ALTER TABLE `merchant_tags` ADD CONSTRAINT `PK_MERCHANT_TAGS` PRIMARY KEY (
@@ -569,9 +591,6 @@ ALTER TABLE `reservations` ADD CONSTRAINT `PK_RESERVATIONS` PRIMARY KEY (
                                                                          `id`
     );
 
-ALTER TABLE `merchants` ADD CONSTRAINT `PK_MERCHANTS` PRIMARY KEY (
-                                                                   `id`
-    );
 
 ALTER TABLE `product_daily_inventories` ADD CONSTRAINT `PK_PRODUCT_DAILY_INVENTORIES` PRIMARY KEY (
                                                                                                    `id`
@@ -586,8 +605,7 @@ ALTER TABLE `user_surveys` ADD CONSTRAINT `PK_USER_SURVEYS` PRIMARY KEY (
     );
 
 ALTER TABLE `accommodations` ADD CONSTRAINT `PK_ACCOMMODATIONS` PRIMARY KEY (
-                                                                             `id`,
-                                                                             `id2`
+                                                                             `id`
     );
 
 ALTER TABLE `activities` ADD CONSTRAINT `PK_ACTIVITIES` PRIMARY KEY (
@@ -644,21 +662,6 @@ ALTER TABLE `activities` ADD CONSTRAINT `FK_merchants_TO_activities_1` FOREIGN K
     REFERENCES `merchants` (
                             `id`
         );
-
-ALTER TABLE `transactions` ADD CONSTRAINT `FK_wallets_TO_transactions` FOREIGN KEY (`wallet_id`) REFERENCES wallets(`id`);
-ALTER TABLE `transactions` ADD CONSTRAINT `FK_cards_TO_transactions` FOREIGN KEY (`card_id`) REFERENCES cards(`id`);
-ALTER TABLE `transactions` ADD CONSTRAINT `FK_bank_accounts_TO_transactions` FOREIGN KEY (`bank_account_id`) REFERENCES bank_accounts(`id`);
-ALTER TABLE `transactions` ADD CONSTRAINT `FK_merchants_TO_transactions` FOREIGN KEY (`merchant_id`) REFERENCES merchants(`id`);
-
--- 1. 참조 대상 테이블들에 기본키(PK) 추가
-ALTER TABLE `card_companies` ADD CONSTRAINT `PK_CARD_COMPANIES` PRIMARY KEY (`code`);
-ALTER TABLE `banks` ADD CONSTRAINT `PK_BANKS` PRIMARY KEY (`code`);
-
--- 2. 기존 외래키(FK) 설정 재실행
-ALTER TABLE `cards` ADD CONSTRAINT `FK_card_companies_TO_cards` FOREIGN KEY (`card_company_code`) REFERENCES card_companies(`code`);
-
-
-
 
 -- ========================================================================================
 -- 워케이션 파트 외래키 (담당: 김태균)
@@ -751,9 +754,3 @@ SELECT 'PERSONAL', 'CAFE', id FROM `expense_categories` WHERE `budget_type` = 'P
 
 INSERT INTO `merchant_category_mappings` (`budget_type`, `merchant_category`, `expense_category_id`)
 SELECT 'PERSONAL', 'ACTIVITY', id FROM `expense_categories` WHERE `budget_type` = 'PERSONAL' AND `code` = 'LEISURE';
-
-ALTER TABLE merchants ADD COLUMN address VARCHAR(255) NULL COMMENT '가맹점 주소';
-ALTER TABLE merchants ADD COLUMN taxpayer_identification_number VARCHAR(10) NULL COMMENT '사업자등록번호(하이픈 없이 숫자만)';
-
--- 전자지갑 wallet_id도 카드결제 하면 필요 없으니 null이어야 함.
-ALTER TABLE `transactions` MODIFY COLUMN `wallet_id` BIGINT NULL COMMENT '전자지갑 계좌 id';

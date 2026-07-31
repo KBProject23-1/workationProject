@@ -7,6 +7,8 @@ public enum TransactionErrorCode implements ErrorCode {
 
     TRANSACTION_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 거래 내역입니다."),
     RECEIPT_NOT_AVAILABLE(HttpStatus.BAD_REQUEST, "매출전표를 조회할 수 없는 거래입니다."),
+    ALREADY_CANCELED(HttpStatus.BAD_REQUEST, "이미 취소된 거래입니다."),
+    CANCEL_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "취소할 수 없는 거래입니다."),
 
     // 결제(payment) 관련
     MERCHANT_NAME_REQUIRED(HttpStatus.BAD_REQUEST, "가맹점명을 입력해주세요."),

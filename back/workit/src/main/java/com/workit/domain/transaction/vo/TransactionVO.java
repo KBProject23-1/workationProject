@@ -42,6 +42,7 @@ public class TransactionVO {
     private String cardCompanyName;
     private String cardName;
     private String cardNumber;
+    private String cardClassification;
 
     public static TransactionVO forCardPayment(Long userId, CardVO card, PaymentRequest request,
                                                boolean isBusinessExpense, String approvalNumber) {
