@@ -44,6 +44,12 @@ public class WorkationExpenseVO {
     private Long merchantId;
     private String merchantCategory; // ACCOMMODATION, RESTAURANT, OFFICE, ACTIVITY
 
+    // 거래 조인. 앱 내 결제 건만 값이 있고, 증빙자료(매출전표) 출력에 사용한다
+    private String approvedNumber;
+    private LocalDateTime approvedAt;
+    private String paymentSourceType;    // CARD, WALLET
+    private String merchantPhoneNumber;
+
     // 화면에 보여줄 카테고리 이름. 별칭이 있으면 별칭이 우선한다
     public String getDisplayCategoryName() {
         return (customName != null && !customName.trim().isEmpty()) ? customName : categoryName;
@@ -51,26 +57,5 @@ public class WorkationExpenseVO {
 
     public ExpenseSourceType getSourceType() {
         return (transactionId != null) ? ExpenseSourceType.APP_PAYMENT : ExpenseSourceType.MANUAL;
-    }
-
-    // 증빙 판정은 저장하지 않고 매번 계산한다
-    // 컬럼으로 두면 카드나 가맹점명이 바뀔 때 갱신을 빠뜨려 정산 경고가 틀어진다
-    public ProofSource getProofSource() {
-
-        if (transactionId != null) {
-            return ProofSource.TRANSACTION;
-        }
-        // 법인 지출은 카드와 가맹점명이 모두 있어야 증빙으로 인정한다
-        if (budgetType == BudgetType.WORK
-                && cardId != null
-                && merchantName != null && !merchantName.trim().isEmpty()) {
-            return ProofSource.CARD_RECORD;
-        }
-        return ProofSource.NONE;
-    }
-
-    // 개인 지출은 법인 정산 대상이 아니므로 증빙 완료로 간주한다
-    public boolean isProofCompleted() {
-        return getProofSource() != ProofSource.NONE || budgetType == BudgetType.PERSONAL;
     }
 }

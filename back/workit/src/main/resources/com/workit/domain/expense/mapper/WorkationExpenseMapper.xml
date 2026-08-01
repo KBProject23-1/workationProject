@@ -85,21 +85,12 @@
     <!--
         요약은 필터와 무관하게 워케이션 전체를 집계한다.
         건수마다 쿼리를 따로 날리지 않고 CASE WHEN 으로 한 번에 센다.
-
-        unproofedCount 판정 기준은 VO 의 getProofSource 와 같아야 한다.
-        법인 지출인데 앱 결제도 아니고 카드·가맹점명도 없으면 증빙 미완료다.
     -->
     <select id="selectExpenseSummary" resultType="com.workit.domain.expense.vo.ExpenseSummaryVO">
         SELECT
-            COUNT(*)                                      AS total_count,
-            COALESCE(SUM(amount), 0)                      AS total_amount,
-            COALESCE(SUM(CASE WHEN is_auto_categorized = 1 THEN 1 ELSE 0 END), 0) AS unchecked_count,
-            COALESCE(SUM(
-                CASE WHEN budget_type = 'WORK'
-                      AND transaction_id IS NULL
-                      AND (card_id IS NULL OR merchant_name IS NULL OR merchant_name = '')
-                     THEN 1 ELSE 0 END
-            ), 0)                                         AS unproofed_count
+            COUNT(*)                 AS total_count,
+            COALESCE(SUM(amount), 0) AS total_amount,
+            COALESCE(SUM(CASE WHEN is_auto_categorized = 1 THEN 1 ELSE 0 END), 0) AS unchecked_count
           FROM workation_expenses
          WHERE workation_id = #{workationId}
     </select>

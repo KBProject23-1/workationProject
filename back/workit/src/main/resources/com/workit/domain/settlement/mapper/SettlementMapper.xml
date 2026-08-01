@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.settlement.mapper.SettlementMapper">
+
+    <!--
+        카테고리별 배정 예산과 집행 실적.
+
+        budgets 를 기준으로 삼고 지출을 LEFT JOIN 한다.
+        지출을 기준으로 하면 예산만 배정하고 쓰지 않은 카테고리가 목록에서 빠져
+        미집행 항목을 확인할 수 없다.
+
+        지출은 서브쿼리에서 카테고리 단위로 먼저 집계한다.
+        직접 조인하면 지출 건수만큼 budgets 행이 복제되어 targetAmount 가 중복 계산된다.
+    -->
+    <select id="selectSettlementCategories"
+            resultType="com.workit.domain.settlement.vo.SettlementCategoryVO">
+        SELECT
+            b.budget_type,
+            b.expense_category_id,
+            ec.name                      AS category_name,
+            ucl.custom_name,
+            b.target_amount,
+            COALESCE(e.spent_amount, 0)  AS spent_amount,
+            COALESCE(e.expense_count, 0) AS expense_count
+        FROM budgets b
+        JOIN expense_categories ec
+          ON ec.id = b.expense_category_id
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        LEFT JOIN (
+            SELECT budget_type,
+                   expense_category_id,
+                   SUM(amount) AS spent_amount,
+                   COUNT(*)    AS expense_count
+              FROM workation_expenses
+             WHERE workation_id = #{workationId}
+             GROUP BY budget_type, expense_category_id
+        ) e
+               ON e.budget_type         = b.budget_type
+              AND e.expense_category_id = b.expense_category_id
+        WHERE b.workation_id = #{workationId}
+        <if test="budgetType != null">
+            AND b.budget_type = #{budgetType}
+        </if>
+        ORDER BY b.budget_type, ec.sort_order
+    </select>
+
+    <!--
+        정산 전 확인이 필요한 건수.
+        자동분류한 계정과목을 사용자가 확정하지 않은 건을 센다.
+    -->
+    <select id="selectValidation"
+            resultType="com.workit.domain.settlement.vo.SettlementValidationVO">
+        SELECT COALESCE(SUM(
+                   CASE WHEN is_auto_categorized = 1 THEN 1 ELSE 0 END
+               ), 0) AS unchecked_count
+          FROM workation_expenses
+         WHERE workation_id = #{workationId}
+        <if test="budgetType != null">
+            AND budget_type = #{budgetType}
+        </if>
+    </select>
+
+    <!-- Excel / PDF 출력용 상세. 사용 카드와 가맹점까지 붙여서 한 번에 가져온다 -->
+    <select id="selectExpenseDetails"
+            resultType="com.workit.domain.expense.vo.WorkationExpenseVO">
+        SELECT
+            we.id,
+            we.workation_id,
+            we.transaction_id,
+            we.expense_category_id,
+            we.card_id,
+            we.budget_type,
+            we.amount,
+            we.merchant_name,
+            we.spent_at      AS spent_date,
+            we.memo,
+            we.is_auto_categorized,
+            we.created_at,
+            we.updated_at,
+            ec.name          AS category_name,
+            ucl.custom_name,
+            c.card_name,
+            c.card_number,
+            c.card_type,
+            t.merchant_id,
+            t.approved_number,
+            t.approved_at,
+            t.payment_source_type,
+            m.phone_number AS merchant_phone_number
+        FROM workation_expenses we
+        JOIN expense_categories ec
+          ON ec.id = we.expense_category_id
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        LEFT JOIN cards c
+               ON c.id = we.card_id
+        LEFT JOIN transactions t
+               ON t.id = we.transaction_id
+        <!--
+            매출전표에 넣을 가맹점 정보.
+            사업자등록번호·주소는 merchants 에 컬럼이 아직 없어 전화번호만 가져온다.
+            결제 파트가 컬럼을 추가하면 여기에 두 줄만 더하면 된다.
+        -->
+        LEFT JOIN merchants m
+               ON m.id = t.merchant_id
+        WHERE we.workation_id = #{workationId}
+        <if test="budgetType != null">
+            AND we.budget_type = #{budgetType}
+        </if>
+        ORDER BY we.budget_type, we.spent_at, we.id
+    </select>
+
+    <select id="countExpenses" resultType="int">
+        SELECT COUNT(*)
+          FROM workation_expenses
+         WHERE workation_id = #{workationId}
+        <if test="budgetType != null">
+            AND budget_type = #{budgetType}
+        </if>
+    </select>
+
+    <select id="selectUserName" resultType="string">
+        SELECT name FROM users WHERE id = #{userId}
+    </select>
+
+    <!--
+        지출에 실제로 쓰인 카드만 뽑는다.
+        지갑에 등록만 하고 사용하지 않은 카드는 정산 문서에 표기할 이유가 없다.
+        앱 내 결제(transactions.card_id)와 수기 등록(workation_expenses.card_id)을 모두 본다.
+    -->
+    <select id="selectUsedCardLabels" resultType="string">
+        SELECT DISTINCT CONCAT(c.card_name, ' ',
+                   CONCAT(LEFT(c.card_number, 4), '-****-****-', RIGHT(c.card_number, 4)))
+          FROM workation_expenses we
+          LEFT JOIN transactions t ON t.id = we.transaction_id
+          JOIN cards c ON c.id = COALESCE(we.card_id, t.card_id)
+         WHERE we.workation_id = #{workationId}
+           AND c.card_number IS NOT NULL
+        <if test="budgetType != null">
+            AND we.budget_type = #{budgetType}
+        </if>
+         ORDER BY 1
+    </select>
+
+</mapper>

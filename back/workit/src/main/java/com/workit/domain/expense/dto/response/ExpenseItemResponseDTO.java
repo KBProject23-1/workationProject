@@ -28,7 +28,6 @@ public class ExpenseItemResponseDTO {
     private final String categoryName;
     private final Boolean isAutoCategorized;
     private final ExpenseSourceType sourceType;
-    private final Boolean proofCompleted;
     private final String memo;
 
     public static ExpenseItemResponseDTO from(WorkationExpenseVO vo) {
@@ -46,7 +45,6 @@ public class ExpenseItemResponseDTO {
                 .categoryName(vo.getDisplayCategoryName())
                 .isAutoCategorized(vo.getIsAutoCategorized())
                 .sourceType(vo.getSourceType())
-                .proofCompleted(vo.isProofCompleted())
                 .memo(vo.getMemo())
                 .build();
     }
