@@ -22,6 +22,33 @@
         <result property="refundAmount" column="refund_amount"/>
     </resultMap>
 
+    <resultMap id="reservationDetailMap"
+               type="com.workit.domain.reservation.vo.ReservationDetailVO">
+        <id property="reservationId" column="reservation_id"/>
+        <result property="reservationCode" column="reservation_code"/>
+        <result property="workationId" column="workation_id"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="merchantAddress" column="merchant_address"/>
+        <result property="merchantPhoneNumber" column="merchant_phone_number"/>
+        <result property="merchantThumbnailUrl" column="merchant_thumbnail_url"/>
+        <result property="productId" column="product_id"/>
+        <result property="productName" column="product_name"/>
+        <result property="productDetailType" column="product_detail_type"/>
+        <result property="productThumbnailUrl" column="product_thumbnail_url"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="headcount" column="headcount"/>
+        <result property="quantity" column="quantity"/>
+        <result property="totalAmount" column="total_amount"/>
+        <result property="paymentMethod" column="payment_method"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="reviewId" column="review_id"/>
+        <result property="reviewStatus" column="review_status"/>
+    </resultMap>
+
     <sql id="reservationListFrom">
         <!-- 목록 화면에 필요한 예약 상품과 가맹점 정보만 조인한다. -->
         FROM reservations r
@@ -48,7 +75,7 @@
             m.name AS merchant_name,
             rp.product_name,
             rp.product_detail_type,
-            m.thumbnail_url,
+            rp.thumbnail_url,
             r.start_date,
             r.end_date,
             r.headcount,
@@ -90,6 +117,49 @@
         SELECT COUNT(*)
         <include refid="reservationListFrom"/>
         <include refid="reservationListWhere"/>
+    </select>
+
+    <select id="selectReservationDetails" resultMap="reservationDetailMap">
+        <!-- 로그인 사용자가 소유한 예약 확정·이용 완료 건만 상세 조회 -->
+        SELECT
+            r.id AS reservation_id,
+            r.reservation_code,
+            r.workation_id,
+            m.id AS merchant_id,
+            m.name AS merchant_name,
+            m.category AS merchant_category,
+            m.address AS merchant_address,
+            m.phone_number AS merchant_phone_number,
+            m.thumbnail_url AS merchant_thumbnail_url,
+            rp.id AS product_id,
+            rp.product_name,
+            rp.product_detail_type,
+            rp.thumbnail_url AS product_thumbnail_url,
+            r.start_date,
+            r.end_date,
+            r.headcount,
+            r.quantity,
+            r.total_amount,
+            (
+                SELECT t.payment_source_type
+                FROM transactions t
+                WHERE t.reservation_id = r.id
+                  AND t.transaction_type = 'PAYMENT'
+                  AND t.status = 'PAID'
+                ORDER BY t.approved_at DESC, t.id DESC
+                LIMIT 1
+            ) AS payment_method,
+            r.status,
+            r.created_at,
+            rv.review_id,
+            rv.status AS review_status
+        FROM reservations r
+        JOIN reservation_products rp ON rp.id = r.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+        LEFT JOIN reviews rv ON rv.reservation_id = r.id
+        WHERE r.id = #{reservationId}
+          AND r.user_id = #{userId}
+          AND r.status IN ('CONFIRMED', 'COMPLETED')
     </select>
 
 </mapper>
