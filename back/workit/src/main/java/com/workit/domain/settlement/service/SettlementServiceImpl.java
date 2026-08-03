@@ -200,9 +200,31 @@ public class SettlementServiceImpl implements SettlementService {
                 uncheckedCount);
     }
 
+    // 부산워케이션_정산내역_20260803.xlsx
     @Override
-    public String buildFileName(String prefix, Long workationId, String extension) {
-        return String.format("%s_%d_%s.%s",
-                prefix, workationId, LocalDate.now().format(FILE_DATE_FORMAT), extension);
+    public String buildFileName(Long userId, Long workationId, String docType, String extension) {
+
+        WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
+
+        return String.format("%s_%s_%s.%s",
+                sanitize(workation.getTitle()),
+                docType,
+                LocalDate.now().format(FILE_DATE_FORMAT),
+                extension);
+    }
+
+    // 파일명에 쓸 수 없는 문자를 제거한다.
+    // 워케이션 제목은 사용자가 입력하므로 \ / : * ? " < > | 가 들어올 수 있고,
+    // 그대로 두면 브라우저가 파일을 저장하지 못한다.
+    private String sanitize(String title) {
+
+        if (title == null || title.trim().isEmpty()) {
+            return "워케이션";
+        }
+        String cleaned = title.replaceAll("[\\\\/:*?\"<>|]", "")
+                .replaceAll("\\s+", "")
+                .trim();
+
+        return cleaned.isEmpty() ? "워케이션" : cleaned;
     }
 }

@@ -1,6 +1,6 @@
 package com.workit.domain.settlement.service;
 
-import com.workit.domain.card.util.CardNumberMasker;
+import com.workit.domain.settlement.util.CardNumberFormatter;
 import com.workit.domain.expense.vo.WorkationExpenseVO;
 import com.workit.domain.settlement.dto.response.SettlementSummaryDTO;
 import com.workit.domain.settlement.exception.SettlementErrorCode;
@@ -188,23 +188,13 @@ public class SettlementExcelWriter {
         if (e.getTransactionId() != null) {
             return "앱 결제";
         }
-        return e.getCardId() != null ? "실물 카드" : "-";
+        return e.getCardId() != null ? "현장 결제" : "-";
     }
 
     private String maskedCard(WorkationExpenseVO e) {
 
-        String masked = CardNumberMasker.mask(e.getCardNumber());
-        return masked != null ? hyphen(masked) : "-";
-    }
-
-    // 4자리씩 끊어 표기한다. 카드번호는 이 형태가 눈에 익어 대조하기 쉽다
-    private String hyphen(String number) {
-
-        if (number.length() != 16) {
-            return number;
-        }
-        return number.substring(0, 4) + "-" + number.substring(4, 8) + "-"
-                + number.substring(8, 12) + "-" + number.substring(12);
+        String formatted = CardNumberFormatter.format(e.getCardNumber());
+        return formatted != null ? formatted : "-";
     }
 
     // 배정 예산이 0이면 나눌 수 없으므로 0으로 둔다

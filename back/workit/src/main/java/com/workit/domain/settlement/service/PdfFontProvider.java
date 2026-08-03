@@ -9,11 +9,6 @@ import org.springframework.stereotype.Component;
 import java.awt.Color;
 import java.io.InputStream;
 
-// PDF 에 사용할 한글 폰트를 준비한다.
-//
-// resources/fonts 에 ttf 가 있으면 그것을 PDF 에 포함시킨다(EMBEDDED).
-// 포함시키면 어느 PC 에서 열어도 같은 모양으로 보인다. 회사 제출용 문서라 이 편이 안전하다.
-// ttf 가 없으면 OpenPDF 가 제공하는 기본 한국어 폰트로 대체해 최소한 글자는 나오게 한다.
 @Component
 @Slf4j
 public class PdfFontProvider {

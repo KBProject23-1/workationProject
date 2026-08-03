@@ -15,5 +15,6 @@ public interface SettlementService {
     byte[] exportPdf(Long userId, Long workationId, BudgetType budgetType);
 
     // 다운로드 파일명. Controller 가 Content-Disposition 헤더에 사용한다
-    String buildFileName(String prefix, Long workationId, String extension);
+    // docType 은 문서 성격(정산내역, 증빙자료)
+    String buildFileName(Long userId, Long workationId, String docType, String extension);
 }

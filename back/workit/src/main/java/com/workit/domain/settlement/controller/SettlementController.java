@@ -53,7 +53,7 @@ public class SettlementController {
         Long userId = 1L;
 
         byte[] file = settlementService.exportExcel(userId, workationId, budgetType);
-        String fileName = settlementService.buildFileName("settlement", workationId, "xlsx");
+        String fileName = settlementService.buildFileName(userId, workationId, "정산내역", "xlsx");
 
         writeFile(response, file, fileName, EXCEL_CONTENT_TYPE);
     }
@@ -69,21 +69,17 @@ public class SettlementController {
         Long userId = 1L;
 
         byte[] file = settlementService.exportPdf(userId, workationId, budgetType);
-        String fileName = settlementService.buildFileName("expenses", workationId, "pdf");
+        String fileName = settlementService.buildFileName(userId, workationId, "증빙자료", "pdf");
 
         writeFile(response, file, fileName, MediaType.APPLICATION_PDF_VALUE);
     }
 
-    // 파일 바이트를 응답 스트림에 직접 쓴다.
-    // ServletConfig 가 메시지 컨버터를 Jackson 하나로 교체해 byte[] 를 처리할 컨버터가 없다.
-    // ResponseEntity<byte[]> 로 반환하면 HttpMessageNotWritableException 이 발생한다.
     private void writeFile(HttpServletResponse response, byte[] file,
                            String fileName, String contentType) {
 
         response.setContentType(contentType);
         response.setContentLength(file.length);
-        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"" + encode(fileName) + "\"");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(fileName));
 
         try (OutputStream out = response.getOutputStream()) {
             out.write(file);
@@ -94,8 +90,18 @@ public class SettlementController {
         }
     }
 
-    // 파일명에 한글이 들어가면 브라우저가 깨뜨리므로 URL 인코딩한다
-    // 인코딩 후 공백이 +로 바뀌므로 %20 으로 되돌린다
+    // Content-Disposition 헤더를 만든다.
+    //
+    // filename 에는 ASCII 만 넣을 수 있어 한글 파일명은 filename*=UTF-8'' 로 전달한다(RFC 5987).
+    // filename 은 이 형식을 모르는 클라이언트를 위한 대체값이라 한글을 뺀 이름을 넣는다.
+    private String contentDisposition(String fileName) {
+
+        String fallback = fileName.replaceAll("[^\\x20-\\x7E]", "_");
+
+        return "attachment; filename=\"" + fallback + "\"; filename*=UTF-8''" + encode(fileName);
+    }
+
+    // URL 인코딩 후 공백이 +로 바뀌므로 %20 으로 되돌린다
     private String encode(String fileName) {
         try {
             return URLEncoder.encode(fileName, "UTF-8").replaceAll("\\+", "%20");

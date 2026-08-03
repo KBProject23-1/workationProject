@@ -4,7 +4,7 @@ import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
-import com.workit.domain.card.util.CardNumberMasker;
+import com.workit.domain.settlement.util.CardNumberFormatter;
 import com.workit.domain.expense.vo.WorkationExpenseVO;
 import com.workit.domain.settlement.dto.response.SettlementSummaryDTO;
 import com.workit.domain.settlement.exception.SettlementErrorCode;
@@ -26,12 +26,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-// 법인 경비 정산 PDF 생성. 회사 제출용
+// 법인 경비 정산 PDF 생성
 //
 // 페이지 구성
 //   1p          기본정보 + 경비 사용 요약 + 계정과목별 사용 개요 + 증빙 현황
 //   2p 이후     증빙자료(매출전표). 계정과목마다 새 페이지에서 시작하고 한 페이지에 4장
-//   마지막 1p   실물 법인카드 결제 건 (매출전표 없음)
+//   마지막 1p   현장 결제 건 (매출전표 없음)
 @Component
 @RequiredArgsConstructor
 public class SettlementPdfWriter {
@@ -172,7 +172,7 @@ public class SettlementPdfWriter {
         return t;
     }
 
-    // 실물 카드 건은 매출전표가 없어 사용자가 종이 영수증을 따로 붙여 제출해야 한다
+    // 현장 결제 건은 매출전표가 없어 사용자가 종이 영수증을 따로 붙여 제출해야 한다
     private PdfPTable proofTable(SettlementDocumentVO doc) throws DocumentException {
 
         PdfPTable t = new PdfPTable(2);
@@ -181,7 +181,7 @@ public class SettlementPdfWriter {
 
         proofCell(t, "앱 결제", doc.getAppPaymentCount() + "건",
                 "매출전표를 이 문서에 첨부했습니다");
-        proofCell(t, "실물 법인카드", doc.getCardRecordCount() + "건",
+        proofCell(t, "현장 결제", doc.getCardRecordCount() + "건",
                 "실물 영수증을 별도로 첨부해 주세요");
 
         return t;
@@ -400,7 +400,7 @@ public class SettlementPdfWriter {
     }
 
     // =====================================================================================
-    // 마지막 페이지 실물 카드 결제 건
+    // 마지막 페이지 현장 결제 건
     // =====================================================================================
 
     private void writeCardRecordPage(Document d, SettlementDocumentVO doc) throws DocumentException {
@@ -414,7 +414,7 @@ public class SettlementPdfWriter {
         }
 
         d.newPage();
-        d.add(docTitle("실물 법인카드 결제 건"));
+        d.add(docTitle("현장 결제 건"));
         d.add(docSubtitle("매출전표 없음  ·  실물 영수증 별도 제출 대상"));
         d.add(rule());
 
@@ -598,16 +598,8 @@ public class SettlementPdfWriter {
 
     private String maskedCard(WorkationExpenseVO e) {
 
-        String masked = CardNumberMasker.mask(e.getCardNumber());
-
-        if (masked == null) {
-            return "-";
-        }
-        if (masked.length() != 16) {
-            return masked;
-        }
-        return masked.substring(0, 4) + "-" + masked.substring(4, 8) + "-"
-                + masked.substring(8, 12) + "-" + masked.substring(12);
+        String formatted = CardNumberFormatter.format(e.getCardNumber());
+        return formatted != null ? formatted : "-";
     }
 
     private String rate(BigDecimal spent, BigDecimal target) {
