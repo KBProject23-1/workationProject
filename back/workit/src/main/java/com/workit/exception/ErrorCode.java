@@ -22,5 +22,4 @@ public interface ErrorCode {
     default String getErrorCode() {
         return ((Enum<?>) this).name();
     }
-    return getClass().getSimpleName();
 }
