@@ -40,12 +40,12 @@ public class ServletConfig implements WebMvcConfigurer {
         return resolver;
     }
 
+    // configureMessageConverters -> extendMessageConverters 로 수정
     @Override
-    public void configureMessageConverters(List<HttpMessageConverter<?>> converters) {
+    public void extendMessageConverters(List<HttpMessageConverter<?>> converters) {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-
-        converters.add(new MappingJackson2HttpMessageConverter(objectMapper));
+        converters.add(0, new MappingJackson2HttpMessageConverter(objectMapper));
     }
 }

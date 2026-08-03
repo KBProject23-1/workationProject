@@ -3,7 +3,6 @@ package com.workit.domain.expense.dto.response;
 import com.workit.domain.card.util.CardNumberMasker;
 import com.workit.domain.category.vo.ExpenseCategoryVO;
 import com.workit.domain.expense.vo.ExpenseSourceType;
-import com.workit.domain.expense.vo.ProofSource;
 import com.workit.domain.expense.vo.WorkationExpenseVO;
 import com.workit.domain.workation.vo.BudgetType;
 import lombok.Builder;
@@ -36,8 +35,6 @@ public class ExpenseDetailResponseDTO {
     private final ExpenseSourceType sourceType;
     private final String memo;
     private final List<CategoryOption> availableCategories;
-    private final Boolean proofCompleted;
-    private final ProofSource proofSource;
     private final LocalDateTime createdAt;
     private final LocalDateTime updatedAt;
 
@@ -84,8 +81,6 @@ public class ExpenseDetailResponseDTO {
                 .sourceType(vo.getSourceType())
                 .memo(vo.getMemo())
                 .availableCategories(toOptions(categories))
-                .proofCompleted(vo.isProofCompleted())
-                .proofSource(vo.getProofSource())
                 .createdAt(vo.getCreatedAt())
                 .updatedAt(vo.getUpdatedAt())
                 .build();

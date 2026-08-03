@@ -14,7 +14,6 @@ public class ExpenseSummaryResponseDTO {
     private final Integer totalCount;
     private final BigDecimal totalAmount;
     private final Integer uncheckedCount;
-    private final Integer unproofedCount;
 
     public static ExpenseSummaryResponseDTO from(ExpenseSummaryVO vo) {
 
@@ -24,7 +23,6 @@ public class ExpenseSummaryResponseDTO {
                     .totalCount(0)
                     .totalAmount(BigDecimal.ZERO)
                     .uncheckedCount(0)
-                    .unproofedCount(0)
                     .build();
         }
 
@@ -32,7 +30,6 @@ public class ExpenseSummaryResponseDTO {
                 .totalCount(nvl(vo.getTotalCount()))
                 .totalAmount(vo.getTotalAmount() != null ? vo.getTotalAmount() : BigDecimal.ZERO)
                 .uncheckedCount(nvl(vo.getUncheckedCount()))
-                .unproofedCount(nvl(vo.getUnproofedCount()))
                 .build();
     }
 

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.reservation.mapper.ReservationMapper">
+
+    <resultMap id="reservationListItemMap"
+               type="com.workit.domain.reservation.vo.ReservationListItemVO">
+        <id property="reservationId" column="reservation_id"/>
+        <result property="reservationCode" column="reservation_code"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="productName" column="product_name"/>
+        <result property="productDetailType" column="product_detail_type"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="headcount" column="headcount"/>
+        <result property="quantity" column="quantity"/>
+        <result property="totalAmount" column="total_amount"/>
+        <result property="status" column="status"/>
+        <result property="canceledAt" column="canceled_at"/>
+        <result property="refundAmount" column="refund_amount"/>
+    </resultMap>
+
+    <sql id="reservationListFrom">
+        <!-- 목록 화면에 필요한 예약 상품과 가맹점 정보만 조인한다. -->
+        FROM reservations r
+        JOIN reservation_products rp ON rp.id = r.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+    </sql>
+
+    <sql id="reservationListWhere">
+        <!-- 로그인 사용자 소유 예약으로 제한하고 전달받은 모든 상태를 IN 조건으로 조회한다. -->
+        WHERE r.user_id = #{userId}
+          AND r.status IN
+        <foreach collection="statuses" item="status" open="(" separator="," close=")">
+            #{status}
+        </foreach>
+        <if test="category != null">
+          AND m.category = #{category}
+        </if>
+    </sql>
+
+    <select id="selectReservationList" resultMap="reservationListItemMap">
+        SELECT
+            r.id AS reservation_id,
+            r.reservation_code,
+            m.name AS merchant_name,
+            rp.product_name,
+            rp.product_detail_type,
+            m.thumbnail_url,
+            r.start_date,
+            r.end_date,
+            r.headcount,
+            r.quantity,
+            r.total_amount,
+            r.status,
+            CASE
+                WHEN r.status = 'CANCELED' THEN rc.canceled_at
+                ELSE NULL
+            END AS canceled_at,
+            CASE
+                WHEN r.status = 'CANCELED' THEN rc.refund_amount
+                ELSE NULL
+            END AS refund_amount
+        <include refid="reservationListFrom"/>
+        <!-- 취소 이력이 여러 건이면 가장 최근 이력의 취소 일시와 최종 환불 금액을 함께 조회한다. -->
+        LEFT JOIN reservation_cancels rc ON rc.id = (
+            SELECT rc2.id
+            FROM reservation_cancels rc2
+            WHERE rc2.reservation_id = r.id
+            ORDER BY rc2.canceled_at DESC, rc2.id DESC
+            LIMIT 1
+        )
+        <include refid="reservationListWhere"/>
+        <!-- 취소 탭과 예약/이용 내역 탭의 정렬 정책을 구분한다. -->
+        <choose>
+            <when test="canceledOnly">
+                ORDER BY canceled_at DESC, reservation_id DESC
+            </when>
+            <otherwise>
+                ORDER BY start_date ASC, reservation_id DESC
+            </otherwise>
+        </choose>
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countReservationList" resultType="long">
+        <!-- 페이지 메타데이터 계산을 위해 목록과 동일한 필터 조건의 전체 건수를 조회한다. -->
+        SELECT COUNT(*)
+        <include refid="reservationListFrom"/>
+        <include refid="reservationListWhere"/>
+    </select>
+
+</mapper>
