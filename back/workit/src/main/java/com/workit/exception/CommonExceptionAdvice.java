@@ -1,7 +1,7 @@
 package com.workit.exception;
 
-import com.workit.global.common.dto.CommonResponse;
-import com.workit.global.common.dto.GlobalResponseFactory;
+import com.workit.global.dto.CommonResponse;
+import com.workit.global.response.GlobalResponseFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;

@@ -1,6 +1,7 @@
-package com.workit.global.common.dto;
+package com.workit.global.response;
 
 import com.workit.exception.ErrorCode;
+import com.workit.global.dto.CommonResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 

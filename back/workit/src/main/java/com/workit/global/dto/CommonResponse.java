@@ -1,4 +1,4 @@
-package com.workit.global.common.dto;
+package com.workit.global.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Getter;
