@@ -8,6 +8,7 @@ import com.workit.domain.settlement.mapper.SettlementMapper;
 import com.workit.domain.settlement.vo.SettlementCategoryVO;
 import com.workit.domain.settlement.vo.SettlementDocumentVO;
 import com.workit.domain.settlement.vo.SettlementValidationVO;
+import com.workit.domain.settlement.vo.SpentDayCountVO;
 import com.workit.domain.workation.service.WorkationOwnershipValidator;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.domain.workation.vo.Region;
@@ -51,8 +52,8 @@ public class SettlementServiceImpl implements SettlementService {
         // 정산 완료된 워케이션도 조회는 가능해야 하므로 getOwned 를 쓴다
         WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
 
-        List<SettlementSummaryDTO> settlements =
-                buildSummaries(workationId, userId, budgetType);
+        List<SettlementSummaryDTO> settlements = buildSummaries(workationId, userId, budgetType,
+                totalDays(workation.getStartDate(), workation.getEndDate()));
 
         SettlementValidationVO validation =
                 settlementMapper.selectValidation(workationId, budgetType);
@@ -110,7 +111,7 @@ public class SettlementServiceImpl implements SettlementService {
         }
 
         List<SettlementSummaryDTO> summaries =
-                buildSummaries(workationId, userId, BudgetType.WORK);
+                buildSummaries(workationId, userId, BudgetType.WORK, null);
 
         return SettlementDocumentVO.builder()
                 .workation(workation)
@@ -128,10 +129,14 @@ public class SettlementServiceImpl implements SettlementService {
     // =====================================================================================
 
     // 카테고리 집계를 예산 유형별로 묶는다
-    private List<SettlementSummaryDTO> buildSummaries(Long workationId, Long userId, BudgetType budgetType) {
+    // totalDays 가 있으면 지출 일수를 함께 담는다. 문서 출력에는 필요 없어 null 로 호출한다
+    private List<SettlementSummaryDTO> buildSummaries(Long workationId, Long userId,
+                                                      BudgetType budgetType, Integer totalDays) {
 
         List<SettlementCategoryVO> rows =
                 settlementMapper.selectSettlementCategories(workationId, userId, budgetType);
+
+        Map<BudgetType, Integer> spentDays = toSpentDayMap(workationId, budgetType);
 
         // SQL 에서 budget_type 순으로 정렬했으므로 LinkedHashMap 으로 순서를 유지한다
         Map<BudgetType, List<SettlementCategoryVO>> grouped = rows.stream()
@@ -141,9 +146,18 @@ public class SettlementServiceImpl implements SettlementService {
         List<SettlementSummaryDTO> result = new ArrayList<>();
 
         for (Map.Entry<BudgetType, List<SettlementCategoryVO>> entry : grouped.entrySet()) {
-            result.add(SettlementSummaryDTO.of(entry.getKey(), entry.getValue()));
+            result.add(SettlementSummaryDTO.of(entry.getKey(), entry.getValue(),
+                    spentDays.getOrDefault(entry.getKey(), 0), totalDays));
         }
         return result;
+    }
+
+    // 지출이 하나도 없는 예산 유형은 행이 없으므로 조회 후 Map 으로 바꿔 기본값 0 을 쓴다
+    private Map<BudgetType, Integer> toSpentDayMap(Long workationId, BudgetType budgetType) {
+
+        return settlementMapper.selectSpentDayCounts(workationId, budgetType).stream()
+                .collect(Collectors.toMap(SpentDayCountVO::getBudgetType,
+                        SpentDayCountVO::getSpentDayCount));
     }
 
     private SettlementResponseDTO.WorkationInfo toWorkationInfo(WorkationVO workation) {
@@ -155,6 +169,8 @@ public class SettlementServiceImpl implements SettlementService {
                 .startDate(workation.getStartDate())
                 .endDate(workation.getEndDate())
                 .totalDays(totalDays(workation.getStartDate(), workation.getEndDate()))
+                .status(workation.getStatus())
+                .settledAt(workation.getSettledAt())
                 .build();
     }
 

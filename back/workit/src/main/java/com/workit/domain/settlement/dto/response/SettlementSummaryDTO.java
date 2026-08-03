@@ -17,6 +17,10 @@ public class SettlementSummaryDTO {
     private final BudgetType budgetType;
     private final BigDecimal totalAmount;
     private final Integer totalCount;
+    // 지출이 발생한 날짜 수. 하루에 여러 건을 써도 1일로 센다
+    private final Integer spentDayCount;
+    // 워케이션 전체 일수에서 지출한 날을 뺀 값
+    private final Integer noSpendDayCount;
     private final List<CategoryItem> categories;
 
     @Getter
@@ -29,7 +33,13 @@ public class SettlementSummaryDTO {
         private final Integer expenseCount;
     }
 
+    // 문서 출력용. 일수 정보가 필요 없는 곳에서 쓴다
     public static SettlementSummaryDTO of(BudgetType budgetType, List<SettlementCategoryVO> rows) {
+        return of(budgetType, rows, null, null);
+    }
+
+    public static SettlementSummaryDTO of(BudgetType budgetType, List<SettlementCategoryVO> rows,
+                                          Integer spentDayCount, Integer totalDays) {
 
         List<CategoryItem> items = rows.stream()
                 .map(vo -> CategoryItem.builder()
@@ -51,10 +61,14 @@ public class SettlementSummaryDTO {
                 .mapToInt(CategoryItem::getExpenseCount)
                 .sum();
 
+        int spentDays = spentDayCount != null ? spentDayCount : 0;
+
         return SettlementSummaryDTO.builder()
                 .budgetType(budgetType)
                 .totalAmount(totalAmount)
                 .totalCount(totalCount)
+                .spentDayCount(spentDays)
+                .noSpendDayCount(totalDays != null ? Math.max(totalDays - spentDays, 0) : null)
                 .categories(items)
                 .build();
     }

@@ -30,6 +30,7 @@
         c.card_number,
         c.card_type,
         t.merchant_id,
+        t.approved_number,
         m.category             AS merchant_category
     </sql>
 
