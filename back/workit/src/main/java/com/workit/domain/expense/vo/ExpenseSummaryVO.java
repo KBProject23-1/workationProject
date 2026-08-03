@@ -15,5 +15,4 @@ public class ExpenseSummaryVO {
     private Integer totalCount;
     private BigDecimal totalAmount;
     private Integer uncheckedCount;    // 자동분류 상태 그대로인 건수 (사용자 확인 필요)
-    private Integer unproofedCount;    // 법인 지출인데 카드 정보가 없어 증빙이 안 된 건수
 }
