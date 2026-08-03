@@ -5,21 +5,39 @@ CREATE DATABASE workit;
 USE workit;
 
 CREATE TABLE `users` (
-                         `id`            BIGINT          NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
-                         `email`         VARCHAR(100)    NOT NULL                COMMENT '유저 이메일 (로그인 ID)',
-                         `password`      VARCHAR(255)    NOT NULL                COMMENT '유저 비밀번호 (BCrypt 암호화)',
-                         `name`          VARCHAR(50)     NOT NULL                COMMENT '유저 이름 (PASS 실명 암호화 가능)',
-                         `phone_number`  VARCHAR(255)    NOT NULL                COMMENT '유저 핸드폰 번호 (양방향 암호화)',
-                         `pass_ci`       VARCHAR(255)    NOT NULL                COMMENT '유저 PASS 인증 식별값 (1인1계정 검증)',
-                         `birth_date`    DATE            NULL                    COMMENT '유저 생년월일 (YYYY-MM-DD)',
-                         `status`        VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
-                         `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
+                         `id`                    BIGINT          NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
+                         `email_hash`            VARCHAR(100)    NOT NULL                COMMENT '유저 이메일 (로그인 ID) SHA-256',
+                         `email_encrypt`         VARCHAR(100)    NOT NULL                COMMENT '유저 이메일 (로그인 ID) AES',
+                         `name_encrypt`          VARCHAR(50)     NOT NULL                COMMENT '유저 이름 AES',
+                         `phone_number_hash`     VARCHAR(255)    NOT NULL                COMMENT '유저 핸드폰 번호 SHA-256',
+                         `phone_number_encrypt`  VARCHAR(255)    NOT NULL                COMMENT '유저 핸드폰 번호 AES',
+                         `status`                VARCHAR(20)     NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
+                         `created_at`            DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
+                         `updated_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 업데이트 시간',
+                         `deleted_at`            DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 삭제 시간',
+
+
 
     -- 제약 조건 설정
                          PRIMARY KEY (`id`),
-                         UNIQUE KEY `ux_users_email` (`email`),          -- 로그인 ID 중복 방지
-                         UNIQUE KEY `ux_users_phone` (`phone_number`),   -- 휴대폰 번호 중복 가입 방지
-                         UNIQUE KEY `ux_users_pass_ci` (`pass_ci`)       -- PASS CI값 중복 가입 방지 (원천 차단)
+                         UNIQUE KEY `ux_users_email` (`email_hash`),          -- 로그인 ID 중복 방지
+                         UNIQUE KEY `ux_users_phone` (`phone_number_hash`),   -- 휴대폰 번호 중복 가입 방지
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 기본 계정 정보 테이블';
+
+CREATE TABLE `user_auth` (
+                         `id`                        BIGINT          NOT NULL AUTO_INCREMENT COMMENT '인증 정보 고유 번호(PK)',
+                         `user_id`                   BIGINT          NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
+                         `password_hash`             VARCHAR(255)    NOT NULL                COMMENT '유저 비밀번호 (BCrypt 암호화)',
+                         `identity_ci_hash`          VARCHAR(255)    NOT NULL                COMMENT '유저 PASS 인증 식별값 SHA-256 (1인1계정 검증)',
+                         `identity_ci_encrypt`       VARCHAR(255)    NOT NULL                COMMENT '유저 PASS 인증 식별값 AES',
+                         `created_at`                DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
+                         `updated_at`                DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 업데이트 시간',
+
+
+    -- 제약 조건 설정
+                         PRIMARY KEY (`id`),
+                         UNIQUE KEY `ux_users_pass_ci` (`pass_ci_hash`),     -- PASS CI값 중복 가입 방지 (원천 차단)
+                         CONSTRAINT `fk_user_auth_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원 기본 계정 정보 테이블';
 
 CREATE TABLE `user_profile` (
@@ -42,14 +60,13 @@ CREATE TABLE `user_device` (
                                `user_id`        BIGINT        NOT NULL                COMMENT '회원 고유 번호 (FK, users.id 참조)',
                                `device_id`      VARCHAR(100)  NOT NULL                COMMENT '브라우저 고유 식별 UUID',
                                `device_name`    VARCHAR(100)  NOT NULL                COMMENT '사용자 기기 정보 (예: Chrome / Windows)',
-                               `pin_number`     CHAR(60)      NOT NULL                COMMENT '자산 거래용 6자리 핀번호 (BCrypt 암호화문)',
-                               `fail_count`     INT           NOT NULL DEFAULT 0      COMMENT '핀번호 연속 실패 횟수 (5회 도달 시 잠금)',
+                               `pin_hash`       CHAR(60)      NOT NULL                COMMENT '자산 거래용 6자리 핀번호 (BCrypt 암호화문)',
                                `last_login_at`  DATETIME      NULL                    COMMENT '해당 기기 최종 로그인 일시',
                                `created_at`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '기기 최초 인증 등록 일시',
 
-    -- 제약 조건 설정 (금융권 표준 자물쇠)
+    -- 제약 조건 설정
                                PRIMARY KEY (`id`),
-                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), --  한 유저가 동일 기기를 중복 등록하는 것 방지
+                               UNIQUE KEY `ux_user_device_id` (`user_id`, `device_id`), -- 한 유저가 동일 기기를 중복 등록하는 것 방지
                                CONSTRAINT `fk_user_device_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='회원별 보안 핀번호 및 로그인 기기 관리 테이블 (비식별 관계)';
 
