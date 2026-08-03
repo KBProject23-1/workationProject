@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.auth.mapper.AuthMapper">
+
+    <!--
+        약관 목록 전체 조회.
+        화면 노출 순서 = 필수 먼저(required DESC), 그 다음 id 오름차순으로 고정
+    -->
+    <select id="selectTermsList"
+            resultType="com.workit.domain.auth.vo.TermsVO">
+        SELECT id,
+               title,
+               content,
+               required,
+               created_at
+        FROM terms
+        ORDER BY required DESC, id ASC
+    </select>
+
+</mapper>
