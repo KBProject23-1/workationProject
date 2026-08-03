@@ -493,6 +493,12 @@ CREATE TABLE `merchants`
     CONSTRAINT FOREIGN KEY (region_id) REFERENCES region (id) ON DELETE CASCADE
 );
 
+CREATE TABLE `tags`
+(
+    `id`   BIGINT AUTO_INCREMENT PRIMARY KEY NOT NULL,
+    `name` VARCHAR(50)                       NOT NULL
+);
+
 CREATE TABLE `merchant_tags`
 (
     `merchant_id` BIGINT NOT NULL,
@@ -502,11 +508,7 @@ CREATE TABLE `merchant_tags`
     CONSTRAINT FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
 );
 
-CREATE TABLE `tags`
-(
-    `id`   BIGINT AUTO_INCREMENT PRIMARY KEY NOT NULL,
-    `name` VARCHAR(50)                       NOT NULL
-);
+
 
 CREATE TABLE `accommodations`
 (
@@ -522,7 +524,7 @@ CREATE TABLE `offices`
 (
     `merchant_id` BIGINT PRIMARY KEY,
     `description` TEXT                             NULL,
-    `noise_level` ENUM ('QUIET', 'OPEN', 'COLLAB') NULL DEFAULT 'NORMAL',
+    `noise_level` ENUM ('QUIET', 'OPEN', 'COLLAB') NOT NULL,
     CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
 );
 
@@ -540,22 +542,6 @@ CREATE TABLE `activities`
     `merchant_id`   BIGINT PRIMARY KEY,
     `activity_type` ENUM ( 'MARINE', 'SPORTS', 'HEALING', 'CULTURE', 'FESTIVAL', 'SHOPPING', 'ETC' ) NOT NULL,
     CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
-);
-
-CREATE TABLE `recommendation_results`
-(
-    `id`                        BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `recommendation_request_id` BIGINT        NOT NULL,
-    `merchant_id`               BIGINT        NOT NULL,
-    `price_score`               DECIMAL(5, 2) NULL,
-    `preference_score`          DECIMAL(5, 2) NULL,
-    `accessibility_score`       DECIMAL(5, 2) NULL,
-    `rating_score`              DECIMAL(5, 2) NULL,
-    `total_score`               DECIMAL(5, 2) NOT NULL,
-    `ranking`                   INT           NOT NULL,
-    `calculated_at`             TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT FOREIGN KEY (recommendation_request_id) REFERENCES recommendation_requests (id) ON DELETE CASCADE,
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id)
 );
 
 CREATE TABLE `recommendation_requests`
@@ -581,6 +567,24 @@ CREATE TABLE `recommendation_requests`
         REFERENCES merchants (id)
 );
 
+CREATE TABLE `recommendation_results`
+(
+    `id`                        BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `recommendation_request_id` BIGINT        NOT NULL,
+    `merchant_id`               BIGINT        NOT NULL,
+    `price_score`               DECIMAL(5, 2) NULL,
+    `preference_score`          DECIMAL(5, 2) NULL,
+    `accessibility_score`       DECIMAL(5, 2) NULL,
+    `rating_score`              DECIMAL(5, 2) NULL,
+    `total_score`               DECIMAL(5, 2) NOT NULL,
+    `ranking`                   INT           NOT NULL,
+    `calculated_at`             TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT FOREIGN KEY (recommendation_request_id) REFERENCES recommendation_requests (id) ON DELETE CASCADE,
+    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id)
+);
+
+
+
 CREATE TABLE `survey_questions`
 (
     `id`             BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -594,6 +598,39 @@ CREATE TABLE `survey_questions`
     updated_at       TIMESTAMP                                                              NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 
 );
+
+CREATE TABLE `user_surveys`
+(
+    `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `user_id`      BIGINT    NOT NULL,
+    `workation_id` BIGINT    NOT NULL COMMENT '워케이션 고유 번호(PK)',
+    `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT FOREIGN KEY (user_id)
+        REFERENCES users (id),
+    CONSTRAINT FOREIGN KEY (workation_id)
+        REFERENCES workations (id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);
+
+CREATE TABLE `survey_options`
+(
+    `id`          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `question_id` BIGINT      NOT NULL,
+    `tag_id`      BIGINT      NULL,
+    `option_code` VARCHAR(40) NOT NULL,
+    `option_name` VARCHAR(20) NULL,
+    `weight`      TINYINT     NOT NULL,
+    CONSTRAINT FOREIGN KEY (question_id) REFERENCES survey_questions (id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+    CONSTRAINT FOREIGN KEY (tag_id) REFERENCES tags (id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+);
+
 
 CREATE TABLE `user_survey_answers`
 (
@@ -613,38 +650,215 @@ CREATE TABLE `user_survey_answers`
 );
 
 
-CREATE TABLE `survey_options`
+-- 1. 예약 가능 상품 테이블
+CREATE TABLE `reservation_products`
 (
-    `id`          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `question_id` BIGINT      NOT NULL,
-    `tag_id`      BIGINT      NOT NULL,
-    `option_code` VARCHAR(40) NOT NULL,
-    `option_name` VARCHAR(20) NULL,
-    `weight`      TINYINT     NOT NULL,
-    CONSTRAINT FOREIGN KEY (question_id) REFERENCES survey_questions (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
-    CONSTRAINT FOREIGN KEY (tag_id) REFERENCES tags (id)
-        ON DELETE SET NULL
-        ON UPDATE CASCADE
-);
+    `id`                  BIGINT         NOT NULL AUTO_INCREMENT COMMENT '예약 상품 고유번호(PK)',
+    `product_name`        VARCHAR(150)   NOT NULL COMMENT '예약 상품명',
+    `description`         TEXT           NULL COMMENT '예약 상품 설명',
+    `product_detail_type` ENUM ('ROOM', 'OFFICE_SEAT', 'MEETING_ROOM') NOT NULL COMMENT '상품 세부 유형\nROOM: 숙소 객실\nOFFICE_SEAT: 공유오피스 좌석\nMEETING_ROOM: 공유오피스 회의실',
+    `max_headcount`       INT            NOT NULL DEFAULT 1 COMMENT '상품 최대 수용 인원',
+    `bed_type`            VARCHAR(50)    NULL COMMENT '침대 유형',
+    `bed_count`           INT            NULL COMMENT '객실 내 침대 개수',
+    `price_per_unit`      DECIMAL(15, 2) NOT NULL COMMENT '상품 기준 단가',
+    `price_unit`          ENUM ('PER_DAY', 'PER_PERSON') NOT NULL COMMENT '가격 계산 단위\nPER_DAY: 일별\nPER_PERSON: 인원수별',
+    `merchant_id`         BIGINT         NOT NULL COMMENT '가맹점 고유번호(FK)',
+    `thumbnail_url`       VARCHAR(255)   NULL COMMENT '예약 상세용 상품 대표 이미지',
 
-CREATE TABLE `user_surveys`
+    CONSTRAINT `PK_RESERVATION_PRODUCTS`
+        PRIMARY KEY (`id`),
+
+    KEY `IX_RESERVATION_PRODUCTS_MERCHANT`
+        (`merchant_id`),
+
+    CONSTRAINT `FK_RESERVATION_PRODUCTS_MERCHANT`
+        FOREIGN KEY (`merchant_id`)
+            REFERENCES `merchants` (`id`),
+
+    CONSTRAINT `CK_RESERVATION_PRODUCTS_MAX_HEADCOUNT`
+        CHECK (`max_headcount` > 0),
+
+    CONSTRAINT `CK_RESERVATION_PRODUCTS_PRICE`
+        CHECK (`price_per_unit` >= 0),
+
+    CONSTRAINT `CK_RESERVATION_PRODUCTS_BED_COUNT`
+        CHECK (`bed_count` IS NULL OR `bed_count` >= 0)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT ='예약 가능 상품 테이블';
+
+
+-- 2. 예약 상품의 날짜별 재고 테이블
+CREATE TABLE `product_daily_inventories`
 (
-    `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id`      BIGINT    NOT NULL,
-    `workation_id` BIGINT    NOT NULL COMMENT '워케이션 고유 번호(PK)',
-    `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT FOREIGN KEY (user_id)
-        REFERENCES users (id),
-    CONSTRAINT FOREIGN KEY (workation_id)
-        REFERENCES workations (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE
-);
+    `id`                 BIGINT     NOT NULL AUTO_INCREMENT COMMENT '일별 재고 고유번호(PK)',
+    `product_id`         BIGINT     NOT NULL COMMENT '예약 상품 고유번호(FK)',
+    `inventory_date`     DATE       NOT NULL COMMENT '예약 가능 날짜',
+    `total_capacity`     INT        NOT NULL COMMENT '전체 재고 수',
+    `remaining_capacity` INT        NOT NULL COMMENT '남은 재고 수',
+    `is_available`       TINYINT(1) NOT NULL DEFAULT 1 COMMENT '해당 날짜 예약 접수 여부',
 
+    CONSTRAINT `PK_PRODUCT_DAILY_INVENTORIES`
+        PRIMARY KEY (`id`),
+
+    CONSTRAINT `UK_PRODUCT_DAILY_INVENTORIES_PRODUCT_DATE`
+        UNIQUE (`product_id`, `inventory_date`),
+
+    KEY `IX_PRODUCT_DAILY_INVENTORIES_DATE`
+        (`inventory_date`),
+
+    CONSTRAINT `FK_PRODUCT_DAILY_INVENTORIES_PRODUCT`
+        FOREIGN KEY (`product_id`)
+            REFERENCES `reservation_products` (`id`)
+            ON DELETE CASCADE,
+
+    CONSTRAINT `CK_PRODUCT_DAILY_INVENTORIES_TOTAL_CAPACITY`
+        CHECK (`total_capacity` >= 0),
+
+    CONSTRAINT `CK_PRODUCT_DAILY_INVENTORIES_REMAINING_CAPACITY`
+        CHECK (
+            `remaining_capacity` >= 0
+                AND `remaining_capacity` <= `total_capacity`
+            ),
+
+    CONSTRAINT `CK_PRODUCT_DAILY_INVENTORIES_AVAILABLE`
+        CHECK (`is_available` IN (0, 1))
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT ='예약 상품의 날짜별 재고 테이블';
+
+
+-- 3. 사용자 예약 테이블
+CREATE TABLE `reservations`
+(
+    `id`               BIGINT                                       NOT NULL AUTO_INCREMENT COMMENT '예약 고유번호(PK)',
+    `user_id`          BIGINT                                       NOT NULL COMMENT '회원 고유번호(FK)',
+    `workation_id`     BIGINT                                       NOT NULL COMMENT '워케이션 고유번호(FK)',
+    `product_id`       BIGINT                                       NOT NULL COMMENT '예약 상품 고유번호(FK)',
+    `reservation_code` VARCHAR(50)                                  NOT NULL COMMENT '예약번호',
+    `start_date`       DATE                                         NOT NULL COMMENT '사용자가 예약한 시작일',
+    `end_date`         DATE                                         NOT NULL COMMENT '사용자가 예약한 종료일',
+    `headcount`        INT                                          NOT NULL DEFAULT 1 COMMENT '예약 이용 인원',
+    `quantity`         INT                                          NOT NULL DEFAULT 1 COMMENT '예약한 상품 수량\n숙소: 객실 수\n공유오피스: 좌석 또는 공간 수',
+    `total_amount`     DECIMAL(15, 2)                               NOT NULL COMMENT '예약 시점에 확정된 총 결제 금액',
+    `status`           ENUM ('CONFIRMED', 'CANCELED', 'COMPLETED')  NOT NULL DEFAULT 'CONFIRMED' COMMENT '예약 상태',
+    `created_at`       TIMESTAMP                                    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '예약 생성 시각',
+
+    CONSTRAINT `PK_RESERVATIONS`
+        PRIMARY KEY (`id`),
+
+    CONSTRAINT `UK_RESERVATIONS_RESERVATION_CODE`
+        UNIQUE (`reservation_code`),
+
+    KEY `IX_RESERVATIONS_USER_STATUS`
+        (`user_id`, `status`),
+
+    KEY `IX_RESERVATIONS_WORKATION`
+        (`workation_id`),
+
+    KEY `IX_RESERVATIONS_PRODUCT`
+        (`product_id`),
+
+    KEY `IX_RESERVATIONS_START_DATE`
+        (`start_date`),
+
+    CONSTRAINT `FK_RESERVATIONS_PRODUCT`
+        FOREIGN KEY (`product_id`)
+            REFERENCES `reservation_products` (`id`),
+
+    CONSTRAINT `FK_RESERVATIONS_WORKATION`
+        FOREIGN KEY (`workation_id`)
+            REFERENCES `workations` (`id`),
+
+    CONSTRAINT `FK_RESERVATIONS_USER`
+        FOREIGN KEY (`user_id`)
+            REFERENCES `users` (`id`),
+
+    CONSTRAINT `CK_RESERVATIONS_DATE`
+        CHECK (`end_date` IS NULL OR `end_date` >= `start_date`),
+
+    CONSTRAINT `CK_RESERVATIONS_HEADCOUNT`
+        CHECK (`headcount` > 0),
+
+    CONSTRAINT `CK_RESERVATIONS_QUANTITY`
+        CHECK (`quantity` > 0),
+
+    CONSTRAINT `CK_RESERVATIONS_TOTAL_AMOUNT`
+        CHECK (`total_amount` >= 0)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT ='사용자 예약 테이블';
+
+
+-- 4. 예약과 날짜별 상품 재고 연결 테이블
+CREATE TABLE `reservation_daily_inventories`
+(
+    `id`                 BIGINT NOT NULL AUTO_INCREMENT COMMENT '예약 재고 연결 고유번호(PK)',
+    `reservation_id`     BIGINT NOT NULL COMMENT '예약 고유번호(FK)',
+    `daily_inventory_id` BIGINT NOT NULL COMMENT '일별 재고 고유번호(FK)',
+    `reserved_count`     INT    NOT NULL DEFAULT 1 COMMENT '해당 날짜에 예약한 객실 또는 좌석 수',
+
+    CONSTRAINT `PK_RESERVATION_DAILY_INVENTORIES`
+        PRIMARY KEY (`id`),
+
+    CONSTRAINT `UK_RESERVATION_DAILY_INVENTORIES`
+        UNIQUE (`reservation_id`, `daily_inventory_id`),
+
+    KEY `IX_RESERVATION_DAILY_INVENTORIES_INVENTORY`
+        (`daily_inventory_id`),
+
+    CONSTRAINT `FK_RESERVATION_DAILY_INVENTORIES_RESERVATION`
+        FOREIGN KEY (`reservation_id`)
+            REFERENCES `reservations` (`id`)
+            ON DELETE CASCADE,
+
+    CONSTRAINT `FK_RESERVATION_DAILY_INVENTORIES_INVENTORY`
+        FOREIGN KEY (`daily_inventory_id`)
+            REFERENCES `product_daily_inventories` (`id`),
+
+    CONSTRAINT `CK_RESERVATION_DAILY_INVENTORIES_COUNT`
+        CHECK (`reserved_count` > 0)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT ='예약과 날짜별 상품 재고 연결 테이블';
+
+
+-- 5. 예약 취소 및 환불 내역 테이블
+CREATE TABLE `reservation_cancels`
+(
+    `id`             BIGINT         NOT NULL AUTO_INCREMENT COMMENT '예약 취소 고유번호(PK)',
+    `reservation_id` BIGINT         NOT NULL COMMENT '예약 고유번호(FK)',
+    `cancel_fee`     DECIMAL(15, 2) NOT NULL DEFAULT 0.00 COMMENT '취소 수수료',
+    `refund_amount`  DECIMAL(15, 2) NOT NULL DEFAULT 0.00 COMMENT '최종 환불 금액',
+    `canceled_at`    TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '취소 시각',
+    `refunded_at`    TIMESTAMP      NULL COMMENT '환불 완료 시각',
+
+    CONSTRAINT `PK_RESERVATION_CANCELS`
+        PRIMARY KEY (`id`),
+
+    CONSTRAINT `UK_RESERVATION_CANCELS_RESERVATION`
+        UNIQUE (`reservation_id`),
+
+    CONSTRAINT `FK_RESERVATION_CANCELS_RESERVATION`
+        FOREIGN KEY (`reservation_id`)
+            REFERENCES `reservations` (`id`),
+
+    CONSTRAINT `CK_RESERVATION_CANCELS_CANCEL_FEE`
+        CHECK (`cancel_fee` >= 0),
+
+    CONSTRAINT `CK_RESERVATION_CANCELS_REFUND_AMOUNT`
+        CHECK (`refund_amount` >= 0),
+
+    CONSTRAINT `CK_RESERVATION_CANCELS_REFUNDED_AT`
+        CHECK (`refunded_at` IS NULL OR `refunded_at` >= `canceled_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT ='예약 취소 및 환불 내역 테이블';
 
 CREATE TABLE `reviews`
 (
@@ -700,185 +914,123 @@ CREATE TABLE `bookmarks`
 
 );
 
-CREATE TABLE `reservation_daily_inventories`
-(
-    `id`                 BIGINT NOT NULL COMMENT '예약 재고 연결 고유번호(PK)',
-    `reservation_id`     BIGINT NOT NULL COMMENT '예약 고유번호(FK)',
-    `daily_inventory_id` BIGINT NOT NULL COMMENT '일별 재고 고유번호(FK)',
-    `reserved_count`     INT    NOT NULL DEFAULT 1 COMMENT '예약한 객실 또는 좌석 수'
-);
-
-CREATE TABLE `reservations`
-(
-    `id`               BIGINT                                       NOT NULL COMMENT '예약 고유번호(PK)',
-    `product_id`       BIGINT                                       NOT NULL COMMENT '예약 상품 고유번호(FK)',
-    `reservation_code` VARCHAR(50)                                  NOT NULL COMMENT '예약번호',
-    `start_date`       DATE                                         NOT NULL COMMENT '사용자가 실제로 예약한 시작 일시',
-    `end_date`         DATE                                         NULL COMMENT '사용자가 실제로 예약한 종료 일시',
-    `headcount`        INT                                          NOT NULL DEFAULT 1 COMMENT '예약 인원',
-    `total_amount`     DECIMAL(15, 2)                               NOT NULL COMMENT '예약 생성 시 계산되어 확정된 예약 총액',
-    `status`           ENUM ( 'CONFIRMED', 'CANCELED', 'COMPLETED') NOT NULL DEFAULT 'CONFIRMED' COMMENT '예약 상태',
-    `created_at`       TIMESTAMP                                    NULL     DEFAULT CURRENT_TIMESTAMP COMMENT '예약 생성 시각',
-    `user_id`          BIGINT                                       NOT NULL COMMENT '회원 고유 번호(FK)',
-    `quantity`         INT                                          NOT NULL COMMENT '사용자가 예약한 상품 수량
-(숙소 객실 수, 공유 오피스 좌석/공간 수)'
-);
 
 
-CREATE TABLE `product_daily_inventories`
-(
-    `id`                 BIGINT     NOT NULL COMMENT '일별 재고 고유번호(PK)',
-    `product_id`         BIGINT     NOT NULL COMMENT '예약 상품 고유번호(FK)',
-    `inventory_date`     DATE       NOT NULL COMMENT '예약 가능 날짜',
-    `total_capacity`     INT        NOT NULL COMMENT '전체 재고 수',
-    `remaining_capacity` INT        NOT NULL COMMENT '남은 재고 수',
-    `is_available`       TINYINT(1) NOT NULL DEFAULT 1 COMMENT '해당 날짜 예약 접수 여부'
-);
-
-CREATE TABLE `reservation_products`
-(
-    `id`                  BIGINT                                       NOT NULL COMMENT '예약 상품 고유번호(PK)',
-    `product_name`        VARCHAR(150)                                 NOT NULL COMMENT '예약 상품명',
-    `description`         TEXT                                         NULL COMMENT '예약 상품 설명',
-    `product_detail_type` ENUM ('ROOM', 'OFFICE_SEAT', 'MEETING_ROOM') NOT NULL COMMENT '상품 세부 유형
-ROOM: 숙소(객실)
-SEAT, MEETING_ROOM(공유오피스)',
-    `max_headcount`       INT                                          NOT NULL DEFAULT 1 COMMENT '상품 최대 수용 인원',
-    `bed_type`            VARCHAR(50)                                  NULL COMMENT '침대 유형',
-    `bed_count`           INT                                          NULL COMMENT '객실 내 침대 개수',
-    `price_per_unit`      DECIMAL(15, 2)                               NOT NULL COMMENT '상품 기준 단가',
-    `price_unit`          ENUM ('PER_DAY', 'PER_PERSON')               NOT NULL COMMENT '가격 계산 단위
-일별, 인원수별',
-    `merchant_id`         BIGINT                                       NOT NULL,
-    `thumbnail_url`       VARCHAR(255)                                 NULL
-);
-
-CREATE TABLE `reservation_cancels`
-(
-    `id`             BIGINT         NOT NULL COMMENT '예약 취소 고유번호(PK)',
-    `reservation_id` BIGINT         NOT NULL COMMENT '예약 고유번호(FK)',
-    `cancel_fee`     DECIMAL(15, 2) NOT NULL DEFAULT 0 COMMENT '취소 수수료',
-    `refund_amount`  DECIMAL(15, 2) NOT NULL DEFAULT 0 COMMENT '환불 금액',
-    `canceled_at`    TIMESTAMP      NULL     DEFAULT CURRENT_TIMESTAMP COMMENT '취소 시각',
-    `refunded_at`    TIMESTAMP      NULL COMMENT '환불 완료 시각'
-);
+-- ALTER TABLE `reservation_daily_inventories`
+--     ADD CONSTRAINT `PK_RESERVATION_DAILY_INVENTORIES` PRIMARY KEY (
+--                                                                    `id`
+--         );
 
 
-ALTER TABLE `reservation_daily_inventories`
-    ADD CONSTRAINT `PK_RESERVATION_DAILY_INVENTORIES` PRIMARY KEY (
-                                                                   `id`
-        );
+-- ALTER TABLE `reservations`
+--     ADD CONSTRAINT `PK_RESERVATIONS` PRIMARY KEY (
+--                                                   `id`
+--         );
 
 
-ALTER TABLE `reservations`
-    ADD CONSTRAINT `PK_RESERVATIONS` PRIMARY KEY (
-                                                  `id`
-        );
+-- ALTER TABLE `product_daily_inventories`
+--     ADD CONSTRAINT `PK_PRODUCT_DAILY_INVENTORIES` PRIMARY KEY (
+--                                                                `id`
+--         );
 
+-- ALTER TABLE `reservation_products`
+--     ADD CONSTRAINT `PK_RESERVATION_PRODUCTS` PRIMARY KEY (
+--                                                           `id`
+--         );
 
-ALTER TABLE `product_daily_inventories`
-    ADD CONSTRAINT `PK_PRODUCT_DAILY_INVENTORIES` PRIMARY KEY (
-                                                               `id`
-        );
-
-ALTER TABLE `reservation_products`
-    ADD CONSTRAINT `PK_RESERVATION_PRODUCTS` PRIMARY KEY (
-                                                          `id`
-        );
-
-ALTER TABLE `reservation_cancels`
-    ADD CONSTRAINT `PK_RESERVATION_CANCELS` PRIMARY KEY (
-                                                         `id`
-        );
+-- ALTER TABLE `reservation_cancels`
+--     ADD CONSTRAINT `PK_RESERVATION_CANCELS` PRIMARY KEY (
+--                                                          `id`
+--         );
 
 # ALTER TABLE `restaurants` ADD CONSTRAINT `PK_RESTAURANTS` PRIMARY KEY (
-#                                                                        `id`
+                                                                         #                                                                        `id`
 #
 # );
 
 # ALTER TABLE `merchant_tags` ADD CONSTRAINT `PK_MERCHANT_TAGS` PRIMARY KEY (
-#                                                                            `merchant_id`,
-#                                                                            `tag_id`
+                                                                             #                                                                            `merchant_id`,
+                                                                             #                                                                            `tag_id`
 #     );
 
 # ALTER TABLE `survey_questions` ADD CONSTRAINT `PK_SURVEY_QUESTIONS` PRIMARY KEY (
-#                                                                                  `id`
+                                                                                   #                                                                                  `id`
 #     );
 
 # ALTER TABLE `offices` ADD CONSTRAINT `PK_OFFICES` PRIMARY KEY (
-#                                                                `id`,
-#                                                                `merchant_id`
+                                                                 #                                                                `id`,
+                                                                 #                                                                `merchant_id`
 #     );
 
 # ALTER TABLE `user_survey_answers` ADD CONSTRAINT `PK_USER_SURVEY_ANSWERS` PRIMARY KEY (
-#                                                                                        `id`
+                                                                                         #                                                                                        `id`
 #     );
 
 # ALTER TABLE `tags` ADD CONSTRAINT `PK_TAGS` PRIMARY KEY (
-#                                                          `id`
+                                                           #                                                          `id`
 #     );
 
 # ALTER TABLE `survey_options` ADD CONSTRAINT `PK_SURVEY_OPTIONS` PRIMARY KEY (
-#                                                                              `id`
+                                                                               #                                                                              `id`
 #     );
 #
 # ALTER TABLE `user_surveys` ADD CONSTRAINT `PK_USER_SURVEYS` PRIMARY KEY (
-#                                                                          `id`
+                                                                           #                                                                          `id`
 #     );
 
 # ALTER TABLE `accommodations` ADD CONSTRAINT `PK_ACCOMMODATIONS` PRIMARY KEY (
-#                                                                              `id`
+                                                                               #                                                                              `id`
 #     );
 #
 # ALTER TABLE `activities` ADD CONSTRAINT `PK_ACTIVITIES` PRIMARY KEY (
-#                                                                      `id`,
-#                                                                      `merchant_id`
+                                                                       #                                                                      `id`,
+                                                                       #                                                                      `merchant_id`
 #     );
 
 # ALTER TABLE `restaurants` ADD CONSTRAINT `FK_merchants_TO_restaurants_1` FOREIGN KEY (
-#                                                                                       `id2`
+                                                                                        #                                                                                       `id2`
 #     )
-#     REFERENCES `merchants` (
-#                             `id`
-#         );
+    #     REFERENCES `merchants` (
+    #                             `id`
+    #         );
 
 # ALTER TABLE `merchant_tags` ADD CONSTRAINT `FK_merchants_TO_merchant_tags_1` FOREIGN KEY (
-#                                                                                           `merchant_id`
+                                                                                            #                                                                                           `merchant_id`
 #     )
-#     REFERENCES `merchants` (
-#                             `id`
-#         );
+    #     REFERENCES `merchants` (
+    #                             `id`
+    #         );
 #
 # ALTER TABLE `merchant_tags` ADD CONSTRAINT `FK_tags_TO_merchant_tags_1` FOREIGN KEY (
-#                                                                                      `tag_id`
+                                                                                       #                                                                                      `tag_id`
 #     )
-#     REFERENCES `tags` (
-#                        `id`
-#         );
+    #     REFERENCES `tags` (
+    #                        `id`
+    #         );
 
 # ALTER TABLE `offices` ADD CONSTRAINT `FK_merchants_TO_offices_1` FOREIGN KEY (
-#                                                                               `merchant_id`
+                                                                                #                                                                               `merchant_id`
 #     )
-#     REFERENCES `merchants` (
-#                             `id`
-#         );
+    #     REFERENCES `merchants` (
+    #                             `id`
+    #         );
 #
 # ALTER TABLE `accommodations` ADD CONSTRAINT `FK_merchants_TO_accommodations_1` FOREIGN KEY (
-#                                                                                             `id2`
+                                                                                              #                                                                                             `id2`
 #     )
-#     REFERENCES `merchants` (
-#                             `id`
-#         );
+    #     REFERENCES `merchants` (
+    #                             `id`
+    #         );
 #
 # ALTER TABLE `activities` ADD CONSTRAINT `FK_merchants_TO_activities_1` FOREIGN KEY (
-#                                                                                     `merchant_id`
+                                                                                      #                                                                                     `merchant_id`
 #     )
-#     REFERENCES `merchants` (
-#                             `id`
-#         );
+    #     REFERENCES `merchants` (
+    #                             `id`
+    #         );
 
 # ALTER TABLE `reviews` ADD CONSTRAINT `PK_REVIEWS` PRIMARY KEY (
-#                                                                `review_id`
+                                                                 #                                                                `review_id`
 #     );
 
 -- ========================================================================================
