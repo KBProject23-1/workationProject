@@ -1,5 +1,6 @@
 package com.workit.domain.reservation.service;
 
+import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
 import com.workit.domain.reservation.vo.ReservationCategory;
@@ -28,4 +29,12 @@ public interface ReservationService {
      * 로그인 사용자가 소유한 예약 확정·이용 완료 상세를 조회한다.
      */
     ReservationDetailResponseDTO findReservationDetails(Long userId, Long reservationId);
+
+    /**
+     * 로그인 사용자가 소유한 예약 취소 상세를 조회한다.
+     */
+    ReservationCancellationDetailResponseDTO findReservationCancellationDetails(
+            Long userId,
+            Long reservationId
+    );
 }

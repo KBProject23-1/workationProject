@@ -1,10 +1,12 @@
 package com.workit.domain.reservation.service;
 
+import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
 import com.workit.domain.reservation.exception.ReservationErrorCode;
 import com.workit.domain.reservation.mapper.ReservationMapper;
 import com.workit.domain.reservation.vo.ReservationCategory;
+import com.workit.domain.reservation.vo.ReservationCancellationDetailVO;
 import com.workit.domain.reservation.vo.ReservationDetailVO;
 import com.workit.domain.reservation.vo.ReservationReviewAction;
 import com.workit.domain.reservation.vo.ReservationStatus;
@@ -123,6 +125,24 @@ public class ReservationServiceImpl implements ReservationService {
         );
     }
 
+    @Override
+    @Transactional(readOnly = true)
+//    userId 사용자의 reservationId 기준 예약 취소 상세 조회
+    public ReservationCancellationDetailResponseDTO findReservationCancellationDetails(
+            Long userId,
+            Long reservationId) {
+
+        validateDetailRequest(userId, reservationId);
+
+        ReservationCancellationDetailVO detail =
+                reservationMapper.selectReservationCancellationDetails(userId, reservationId);
+        if (detail == null) {
+            throw new BusinessException(ReservationErrorCode.RESERVATION_CANCELLATION_NOT_FOUND);
+        }
+
+        return ReservationCancellationDetailResponseDTO.from(detail);
+    }
+
     // 리뷰 작성 이력과 이용 종료 후 30일 기한을 기준으로 화면 동작을 결정한다.
     private ReservationReviewAction findReviewAction(
             ReservationDetailVO detail,
@@ -151,7 +171,7 @@ public class ReservationServiceImpl implements ReservationService {
         }
 
         if (reservationId == null || reservationId < 1) {
-            throw new IllegalArgumentException("예약 정보가 올바르지 않습니다.");
+            throw new BusinessException(ReservationErrorCode.INVALID_RESERVATION_ID);
         }
     }
 
@@ -167,7 +187,7 @@ public class ReservationServiceImpl implements ReservationService {
         }
 
         if (statuses == null || statuses.isEmpty() || statuses.contains(null)) {
-            throw new IllegalArgumentException("예약 상태를 한 개 이상 선택해야 합니다.");
+            throw new BusinessException(ReservationErrorCode.RESERVATION_STATUS_REQUIRED);
         }
 
         if (page < 0) {
