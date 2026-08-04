@@ -33,10 +33,7 @@
         <result column="card_classification" property="cardClassification"/>
     </resultMap>
 
-    <select id="findTransactions" resultMap="TransactionResultMap">
-        SELECT id, user_id, workation_id, payment_source_type, merchant_name, amount,
-        transaction_type, category_assigned, is_business_expense, approved_number, status, approved_at
-        FROM transactions
+    <sql id="transactionFilters">
         WHERE user_id = #{userId}
         <if test="startDate != null and startDate != ''">
             AND approved_at &gt;= CONCAT(#{startDate}, ' 00:00:00')
@@ -53,7 +50,22 @@
         <if test="cardId != null">
             AND card_id = #{cardId}
         </if>
+    </sql>
+
+    <select id="findTransactions" resultMap="TransactionResultMap">
+        SELECT id, user_id, workation_id, payment_source_type, merchant_name, amount,
+        transaction_type, category_assigned, is_business_expense, approved_number, status, approved_at
+        FROM transactions
+        <include refid="transactionFilters"/>
         ORDER BY approved_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- 목록과 필터 조건이 같아야 페이지 수가 맞는다 -->
+    <select id="countTransactions" resultType="long">
+        SELECT COUNT(*)
+        FROM transactions
+        <include refid="transactionFilters"/>
     </select>
 
     <select id="findTransactionDetailById" resultMap="TransactionResultMap">
