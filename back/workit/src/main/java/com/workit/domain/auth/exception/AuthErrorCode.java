@@ -41,7 +41,17 @@ public enum AuthErrorCode implements ErrorCode {
 
     // 회원가입 완료 - agreedTermsIds 에 존재하지 않는 약관 ID 포함 → 400
     // (terms 마스터에 없는 ID 는 user_terms_agreements FK 위반으로 500 이 되므로 사전 차단)
-    INVALID_TERM_ID(HttpStatus.BAD_REQUEST, "존재하지 않는 약관이 포함되어 있습니다. 다시 확인해 주세요.");
+    INVALID_TERM_ID(HttpStatus.BAD_REQUEST, "존재하지 않는 약관이 포함되어 있습니다. 다시 확인해 주세요."),
+
+    // JWT 토큰 검증 실패 - 서명/형식 오류, sub(userId) 누락 등 → 400
+    // (회원가입 INVALID_SIGNUP_TOKEN 규약과 동일 — 위변조/형식 오류는 400)
+    INVALID_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않은 토큰입니다. 다시 로그인해 주세요."),
+
+    // JWT 토큰 만료 → 401 (knowledge.md: Token 만료는 401)
+    EXPIRED_TOKEN(HttpStatus.UNAUTHORIZED, "토큰이 만료되었습니다. 다시 로그인해 주세요."),
+
+    // 지원하지 않는 JWT 토큰 - 알고리즘/형식 불일치, 용도 오류 등 → 400
+    UNSUPPORTED_TOKEN(HttpStatus.BAD_REQUEST, "지원하지 않는 토큰 형식입니다. 다시 로그인해 주세요.");
 
     private final HttpStatus status;
     private final String message;
