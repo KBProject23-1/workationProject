@@ -13,6 +13,8 @@ public interface CardService {
 
     List<CardResponse> getMyCards(Long userId);
 
+    List<CardResponse> getAllCardsForFilter(Long userId);
+
     List<CardResponse> linkCards(Long userId, List<Long> linkableCardIds);
 
     PrimaryCardResponse setPrimaryCard(Long userId, Long cardId);

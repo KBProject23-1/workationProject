@@ -14,6 +14,7 @@ public class CardResponse {
     private String cardClassification;
     private String cardType;
     private Boolean isPrimary;
+    private Boolean isDeleted;
 
     public static CardResponse from(CardVO vo) {
         CardResponse response = new CardResponse();
@@ -25,6 +26,7 @@ public class CardResponse {
         response.setCardClassification(vo.getCardClassification());
         response.setCardType(vo.getCardType());
         response.setIsPrimary(vo.getIsPrimary());
+        response.setIsDeleted(vo.getIsDeleted());
         return response;
     }
 }
