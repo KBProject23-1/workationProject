@@ -64,12 +64,12 @@ public class WalletServiceImpl implements WalletService {
 
         BankAccountVO account = accountMapper.findAccountById(request.getAccountId(), userId);
         if (account == null) {
-            throw new BusinessException(WalletErrorCode.ACCOUNT_NOT_FOUND);
+            throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_NOT_FOUND);
         }
 
         int accountUpdatedRows = accountMapper.decreaseBalance(request.getAccountId(), amount);
         if (accountUpdatedRows == 0) {
-            throw new BusinessException(WalletErrorCode.INSUFFICIENT_ACCOUNT_BALANCE);
+            throw new BusinessException(WalletErrorCode.WALLET_INSUFFICIENT_ACCOUNT_BALANCE);
         }
 
         walletMapper.increaseBalance(userId, amount);
@@ -97,17 +97,17 @@ public class WalletServiceImpl implements WalletService {
 
         BankAccountVO primaryAccount = accountMapper.findPrimaryAccount(userId);
         if (primaryAccount == null) {
-            throw new BusinessException(WalletErrorCode.PRIMARY_ACCOUNT_NOT_FOUND);
+            throw new BusinessException(WalletErrorCode.WALLET_PRIMARY_ACCOUNT_NOT_FOUND);
         }
 
         int walletUpdatedRows = walletMapper.decreaseBalance(userId, amount);
         if (walletUpdatedRows == 0) {
-            throw new BusinessException(WalletErrorCode.INSUFFICIENT_WALLET_BALANCE);
+            throw new BusinessException(WalletErrorCode.WALLET_INSUFFICIENT_BALANCE);
         }
 
         int accountUpdatedRows = accountMapper.increaseBalance(primaryAccount.getId(), amount);
         if (accountUpdatedRows == 0) {
-            throw new BusinessException(WalletErrorCode.ACCOUNT_STATE_INVALID);
+            throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_STATE_INVALID);
         }
 
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
@@ -120,45 +120,45 @@ public class WalletServiceImpl implements WalletService {
 
     private void validateChargeRequest(ChargeRequest request) {
         if (request.getAccountId() == null) {
-            throw new BusinessException(WalletErrorCode.ACCOUNT_ID_REQUIRED);
+            throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_ID_REQUIRED);
         }
         if (request.getAmount() == null) {
-            throw new BusinessException(WalletErrorCode.AMOUNT_REQUIRED);
+            throw new BusinessException(WalletErrorCode.WALLET_AMOUNT_REQUIRED);
         }
         if (request.getPinNumber() == null) {
-            throw new BusinessException(WalletErrorCode.PIN_REQUIRED);
+            throw new BusinessException(WalletErrorCode.WALLET_PIN_REQUIRED);
         }
 
         BigDecimal amount = request.getAmount();
         if (amount.compareTo(MIN_CHARGE_AMOUNT) < 0) {
-            throw new BusinessException(WalletErrorCode.MIN_CHARGE_AMOUNT_VIOLATION);
+            throw new BusinessException(WalletErrorCode.WALLET_MIN_CHARGE_AMOUNT_VIOLATION);
         }
         if (amount.compareTo(MAX_TRANSACTION_AMOUNT) > 0) {
-            throw new BusinessException(WalletErrorCode.MAX_TRANSACTION_AMOUNT_EXCEEDED);
+            throw new BusinessException(WalletErrorCode.WALLET_MAX_TRANSACTION_AMOUNT_EXCEEDED);
         }
     }
 
     private void validateRefundRequest(RefundRequest request) {
         if (request.getAmount() == null) {
-            throw new BusinessException(WalletErrorCode.REFUND_AMOUNT_REQUIRED);
+            throw new BusinessException(WalletErrorCode.WALLET_REFUND_AMOUNT_REQUIRED);
         }
         if (request.getPinNumber() == null) {
-            throw new BusinessException(WalletErrorCode.PIN_REQUIRED);
+            throw new BusinessException(WalletErrorCode.WALLET_PIN_REQUIRED);
         }
 
         BigDecimal amount = request.getAmount();
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessException(WalletErrorCode.INVALID_REFUND_AMOUNT);
+            throw new BusinessException(WalletErrorCode.WALLET_INVALID_REFUND_AMOUNT);
         }
         if (amount.compareTo(MAX_TRANSACTION_AMOUNT) > 0) {
-            throw new BusinessException(WalletErrorCode.MAX_TRANSACTION_AMOUNT_EXCEEDED);
+            throw new BusinessException(WalletErrorCode.WALLET_MAX_TRANSACTION_AMOUNT_EXCEEDED);
         }
     }
 
     private void validatePin(Long userId, String pinNumber) {
         // TODO: user_device.pin_number 검증 로직 — 담당자 확인 후 구현
         if (pinNumber == null || pinNumber.length() != 6) {
-            throw new BusinessException(WalletErrorCode.PIN_INVALID);
+            throw new BusinessException(WalletErrorCode.WALLET_PIN_INVALID);
         }
     }
 }

@@ -68,6 +68,33 @@
         <include refid="transactionFilters"/>
     </select>
 
+    <!-- transactionType 은 지출/충전 두 값을 함께 집계해야 하므로 필터에서 제외한다 -->
+    <sql id="transactionSummaryFilters">
+        WHERE user_id = #{userId}
+        AND status != 'CANCELED'
+        <if test="startDate != null and startDate != ''">
+            AND approved_at &gt;= CONCAT(#{startDate}, ' 00:00:00')
+        </if>
+        <if test="endDate != null and endDate != ''">
+            AND approved_at &lt;= CONCAT(#{endDate}, ' 23:59:59')
+        </if>
+        <if test="paymentSourceType != null and paymentSourceType != ''">
+            AND payment_source_type = #{paymentSourceType}
+        </if>
+        <if test="cardId != null">
+            AND card_id = #{cardId}
+        </if>
+    </sql>
+
+    <select id="findTransactionSummary" resultType="com.workit.domain.transaction.vo.TransactionSummaryVO">
+        SELECT
+            COALESCE(SUM(CASE WHEN transaction_type = 'PAYMENT' THEN amount ELSE 0 END), 0) AS total_payment_amount,
+            COALESCE(SUM(CASE WHEN transaction_type = 'DEPOSIT' THEN amount ELSE 0 END), 0) AS total_charge_amount,
+            COUNT(CASE WHEN transaction_type = 'PAYMENT' THEN 1 END) AS total_payment_count
+        FROM transactions
+        <include refid="transactionSummaryFilters"/>
+    </select>
+
     <select id="findTransactionDetailById" resultMap="TransactionResultMap">
         SELECT t.*, m.address AS merchant_address
         FROM transactions t
