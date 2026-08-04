@@ -100,8 +100,12 @@ class SignupTokenProviderTest {
     @DisplayName("위변조 JWT 실패 - 서명 부분을 변경하면 검증 시 예외 발생")
     void verify_tampered_throws() {
         String token = provider.issue("temp-key-1");
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("a") ? "b" : "a");
+        // 끝에서 두 번째 base64 글자를 바꾼다.
+        // 마지막 글자는 256비트 서명의 패딩 비트만 담고 있어 'a'→'b' 교체 시
+        // 복호화된 서명이 동일해질 수 있어(플레이크) 반드시 유효 비트를 바꾸는 위치를 사용한다
+        String tampered = token.substring(0, token.length() - 2)
+                + (token.charAt(token.length() - 2) == 'a' ? "b" : "a")
+                + token.charAt(token.length() - 1);
 
         assertThrows(JwtException.class, () -> provider.verify(tampered));
     }
