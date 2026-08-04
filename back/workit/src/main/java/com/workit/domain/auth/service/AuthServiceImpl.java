@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
@@ -19,7 +20,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +35,12 @@ public class AuthServiceImpl implements AuthService {
     private final SignupTokenProvider signupTokenProvider;
     private final SignupVerificationStore signupVerificationStore;
 
+    /**
+     * 이메일 형식 검증 패턴 (일반적인 이메일 주소 규칙)
+     */
+    private static final Pattern EMAIL_PATTERN = Pattern.compile(
+            "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+
     @Override
     @Transactional(readOnly = true)
     public TermsListResponseDTO getTermsList() {
@@ -42,6 +51,34 @@ public class AuthServiceImpl implements AuthService {
                 .collect(Collectors.toList());
 
         return TermsListResponseDTO.of(terms);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public EmailAvailabilityResponseDTO checkEmailAvailability(String email) {
+
+        // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
+        //    - null / blank 는 INVALID_EMAIL_FORMAT (docs: 400)
+        //    - 이메일 원문 로그 출력 금지 — 로그에 이메일 값 미포함
+        if (email == null || email.trim().isEmpty()) {
+            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
+        }
+
+        // 2. 이메일 형식 검증
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        if (!EMAIL_PATTERN.matcher(normalizedEmail).matches()) {
+            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
+        }
+
+        // 3. 검색용 SHA-256 hash 생성 후 users.email_hash 기준 중복 조회
+        //    - email_encrypt(AES 원문) 복호화 금지, 원문 검색 금지 (knowledge.md: 검색용 hash 저장)
+        //    - 소문자 정규화 후 hash — email_hash 기준 UNIQUE 제약과 중복 체크가 대소문자에 무관하게 동작하도록
+        //      회원가입 완료 시에도 동일하게 소문자 정규화 후 hash 해야 한다
+        String emailHash = sha256Hex(normalizedEmail);
+        boolean available = authMapper.countByEmailHash(emailHash) == 0;
+
+        // 4. 중복 여부 반환 (중복이어도 성공 응답, 판단은 프론트 가입 흐름에서 처리)
+        return EmailAvailabilityResponseDTO.of(available);
     }
 
     @Override

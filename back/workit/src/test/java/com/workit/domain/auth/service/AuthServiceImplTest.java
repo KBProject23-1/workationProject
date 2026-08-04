@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
@@ -44,10 +45,18 @@ class AuthServiceImplTest {
     private static final String CI_HASH_9999999999 =
             "00f5bd77a441d1d2b1a15cc14402e1cb6888ead3c017443fb20875b28f341497";
 
+    // 이메일 중복 확인 테스트용 사전 계산 hash
+    // SHA-256("used@example.com") — 이미 가입된 이메일로 간주
+    private static final String EMAIL_HASH_USED =
+            "aefc1b2b97574c8419760aa407a5ee332933d95b0b905b5c80f3473588d526e3";
+    // SHA-256("new@example.com") — 가입 가능한 이메일
+    private static final String EMAIL_HASH_NEW =
+            "f0030501023327437b06e5c6f87df7871b8e704ae608d1d0b7b24fdd2a06c716";
+
     private AuthService authService;
     private InMemorySignupVerificationStore signupVerificationStore;
 
-    // 수동 Fake Mapper - 테스트에서 원하는 약관 목록 / CI 해시 중복 상태를 그대로 돌려준다
+    // 수동 Fake Mapper - 테스트에서 원하는 약관 목록 / CI·이메일 해시 중복 상태를 그대로 돌려준다
     private static class FakeAuthMapper implements AuthMapper {
 
         private final List<TermsVO> terms;
@@ -55,13 +64,21 @@ class AuthServiceImplTest {
         /** 이미 가입된 회원으로 간주할 CI SHA-256 해시 집합 */
         private final Set<String> existingCiHashes;
 
+        /** 이미 가입된 회원으로 간주할 이메일 SHA-256 해시 집합 */
+        private final Set<String> existingEmailHashes;
+
         FakeAuthMapper(List<TermsVO> terms) {
             this(terms, Collections.emptySet());
         }
 
         FakeAuthMapper(List<TermsVO> terms, Set<String> existingCiHashes) {
+            this(terms, existingCiHashes, Collections.emptySet());
+        }
+
+        FakeAuthMapper(List<TermsVO> terms, Set<String> existingCiHashes, Set<String> existingEmailHashes) {
             this.terms = terms;
             this.existingCiHashes = existingCiHashes;
+            this.existingEmailHashes = existingEmailHashes;
         }
 
         @Override
@@ -72,6 +89,11 @@ class AuthServiceImplTest {
         @Override
         public int countByCiHash(String ciHash) {
             return existingCiHashes.contains(ciHash) ? 1 : 0;
+        }
+
+        @Override
+        public int countByEmailHash(String emailHash) {
+            return existingEmailHashes.contains(emailHash) ? 1 : 0;
         }
     }
 
@@ -275,5 +297,75 @@ class AuthServiceImplTest {
                 signupVerificationStore.find(claims.get("temporaryUserKey", String.class));
         assertNotNull(saved);
         assertEquals(CI_HASH_5555555555, saved.getCiHash());
+    }
+
+    // ---------- 회원가입 이메일 중복 확인 ----------
+
+    private AuthService emailServiceWithExisting(Set<String> existingEmailHashes) {
+        return new AuthServiceImpl(
+                new FakeAuthMapper(Collections.emptyList(),
+                        Collections.emptySet(), existingEmailHashes),
+                new MockIdentityVerificationProvider(),
+                new SignupTokenProvider(TEST_JWT_SECRET, 10),
+                new InMemorySignupVerificationStore()
+        );
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 존재하지 않는 email_hash → available=true")
+    void checkEmailAvailability_notExists_available() {
+        AuthService service = emailServiceWithExisting(Collections.emptySet());
+
+        EmailAvailabilityResponseDTO result = service.checkEmailAvailability("new@example.com");
+
+        assertNotNull(result);
+        assertTrue(result.isAvailable());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 존재하는 email_hash → available=false")
+    void checkEmailAvailability_exists_duplicate() {
+        AuthService service =
+                emailServiceWithExisting(Collections.singleton(EMAIL_HASH_USED));
+
+        EmailAvailabilityResponseDTO result = service.checkEmailAvailability("used@example.com");
+
+        assertNotNull(result);
+        assertFalse(result.isAvailable());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 대소문자 무관 (소문자 정규화 후 hash) → 동일 결과")
+    void checkEmailAvailability_caseInsensitive() {
+        // SHA-256("used@example.com") 이 이미 가입된 상태에서
+        // 대문자 입력("USED@EXAMPLE.COM")도 소문자 정규화 후 hash 되므로 중복으로 판단해야 한다
+        AuthService service =
+                emailServiceWithExisting(Collections.singleton(EMAIL_HASH_USED));
+
+        EmailAvailabilityResponseDTO upper = service.checkEmailAvailability("USED@EXAMPLE.COM");
+        assertFalse(upper.isAvailable());
+
+        EmailAvailabilityResponseDTO spaced = service.checkEmailAvailability("  used@example.com  ");
+        assertFalse(spaced.isAvailable());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - null/blank → INVALID_EMAIL_FORMAT 예외")
+    void checkEmailAvailability_blank_throws() {
+        AuthService service = emailServiceWithExisting(Collections.emptySet());
+
+        assertThrows(BusinessException.class, () -> service.checkEmailAvailability(null));
+        assertThrows(BusinessException.class, () -> service.checkEmailAvailability(""));
+        assertThrows(BusinessException.class, () -> service.checkEmailAvailability("   "));
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 잘못된 형식 → INVALID_EMAIL_FORMAT 예외")
+    void checkEmailAvailability_invalidFormat_throws() {
+        AuthService service = emailServiceWithExisting(Collections.emptySet());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.checkEmailAvailability("not-an-email"));
+        assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
     }
 }
