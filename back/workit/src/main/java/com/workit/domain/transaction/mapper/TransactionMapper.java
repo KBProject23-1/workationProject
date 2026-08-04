@@ -1,5 +1,6 @@
 package com.workit.domain.transaction.mapper;
 
+import com.workit.domain.transaction.vo.TransactionSummaryVO;
 import com.workit.domain.transaction.vo.TransactionVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -24,6 +25,13 @@ public interface TransactionMapper {
                            @Param("paymentSourceType") String paymentSourceType,
                            @Param("transactionType") String transactionType,
                            @Param("cardId") Long cardId);
+
+    // 조회 기간 전체 집계 (결제 합계 / 충전 합계). 페이징과 무관하게 필터 조건 전체를 기준으로 계산한다
+    TransactionSummaryVO findTransactionSummary(@Param("userId") Long userId,
+                                                @Param("startDate") String startDate,
+                                                @Param("endDate") String endDate,
+                                                @Param("paymentSourceType") String paymentSourceType,
+                                                @Param("cardId") Long cardId);
 
     // 단건 상세 조회 (좌표 포함, merchants 조인)
     TransactionVO findTransactionDetailById(@Param("transactionId") Long transactionId,

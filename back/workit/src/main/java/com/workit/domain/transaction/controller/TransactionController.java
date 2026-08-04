@@ -38,6 +38,22 @@ public class TransactionController {
         ));
     }
 
+    /** 거래 내역 조회 기간 전체 집계 (결제 합계 / 충전 합계, 페이징과 무관) */
+    @GetMapping("/api/v1/transactions/summary")
+    public ResponseEntity<TransactionSummaryResponse> getTransactionSummary(
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String paymentSourceType,
+            @RequestParam(required = false) Long cardId,
+            HttpServletRequest request
+    ) {
+        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
+        Long userId = 1L;
+        return ResponseEntity.ok(transactionService.getTransactionSummary(
+                userId, startDate, endDate, paymentSourceType, cardId
+        ));
+    }
+
     /** 거래 내역 단건 상세 조회 */
     @GetMapping("/api/v1/transactions/{transactionId}")
     public ResponseEntity<TransactionDetailResponse> getTransactionDetail(

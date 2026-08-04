@@ -66,6 +66,14 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    public TransactionSummaryResponse getTransactionSummary(Long userId, String startDate, String endDate,
+                                                             String paymentSourceType, Long cardId) {
+        return TransactionSummaryResponse.from(
+                transactionMapper.findTransactionSummary(userId, startDate, endDate, paymentSourceType, cardId)
+        );
+    }
+
+    @Override
     public TransactionDetailResponse getTransactionDetail(Long userId, Long transactionId) {
         TransactionVO transaction = transactionMapper.findTransactionDetailById(transactionId, userId);
         if (transaction == null) {
