@@ -31,6 +31,9 @@ public interface CardMapper {
     // 연동된 내 카드 목록/단건 조회
     List<CardVO> findMyCards(@Param("userId") Long userId);
 
+    // 거래 내역 카드별 필터용. 삭제된 카드도 과거 거래를 조회할 수 있어야 하므로 is_deleted 조건 없이 전체 조회
+    List<CardVO> findAllCardsForFilter(@Param("userId") Long userId);
+
     CardVO findCardById(@Param("cardId") Long cardId, @Param("userId") Long userId);
 
     int countActiveCards(@Param("userId") Long userId);

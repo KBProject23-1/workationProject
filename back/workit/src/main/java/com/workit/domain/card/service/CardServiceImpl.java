@@ -40,6 +40,14 @@ public class CardServiceImpl implements CardService {
     }
 
     @Override
+    public List<CardResponse> getAllCardsForFilter(Long userId) {
+        List<CardVO> cards = cardMapper.findAllCardsForFilter(userId);
+        return cards.stream()
+                .map(CardResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     @Transactional
     public List<CardResponse> linkCards(Long userId, List<Long> linkableCardIds) {
         boolean hasExistingCard = cardMapper.countActiveCards(userId) > 0;

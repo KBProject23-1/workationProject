@@ -93,6 +93,17 @@
         ORDER BY c.is_primary DESC, c.id ASC
     </select>
 
+    <!-- 거래 내역 카드별 필터용. 삭제된 카드도 과거 결제 내역 조회가 필요해서 is_deleted 조건을 걸지 않는다 -->
+    <select id="findAllCardsForFilter" resultMap="CardResultMap">
+        SELECT c.id, c.user_id, c.card_company_code, cc.name AS card_company_name,
+        c.card_name, c.card_number, c.card_classification, c.card_type,
+        c.is_primary, c.is_agreed, c.created_at, c.is_deleted, c.updated_at, c.deleted_at
+        FROM cards c
+        JOIN card_companies cc ON c.card_company_code = cc.code
+        WHERE c.user_id = #{userId}
+        ORDER BY c.is_deleted ASC, c.is_primary DESC, c.id ASC
+    </select>
+
     <select id="findCardById" resultMap="CardResultMap">
         SELECT c.id, c.user_id, c.card_company_code, cc.name AS card_company_name,
         c.card_name, c.card_number, c.card_classification, c.card_type,

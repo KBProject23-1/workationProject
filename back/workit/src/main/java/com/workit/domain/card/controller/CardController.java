@@ -45,6 +45,16 @@ public class CardController {
         return GlobalResponseFactory.success(cardService.getMyCards(userId));
     }
 
+    /** 거래 내역 카드별 필터용 전체 카드 목록 (삭제된 카드 포함) */
+    @GetMapping("/all")
+    public ResponseEntity<CommonResponse<List<CardResponse>>> getAllCardsForFilter(
+            HttpServletRequest request
+    ) {
+        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
+        Long userId = 1L;
+        return GlobalResponseFactory.success(cardService.getAllCardsForFilter(userId));
+    }
+
     /** 카드 등록(연동) */
     @PostMapping
     public ResponseEntity<CommonResponse<List<CardResponse>>> linkCards(
