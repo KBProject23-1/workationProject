@@ -1,19 +1,31 @@
 package com.workit.domain.review.service;
 
+import com.workit.domain.review.dto.request.ReviewCreateRequestDTO;
+import com.workit.domain.review.dto.request.ReviewUpdateRequestDTO;
 import com.workit.domain.review.dto.response.MerchantReviewItemResponseDTO;
 import com.workit.domain.review.dto.response.MerchantReviewListResponseDTO;
 import com.workit.domain.review.dto.response.MyReviewListResponseDTO;
+import com.workit.domain.review.dto.response.ReviewCreateResponseDTO;
 import com.workit.domain.review.dto.response.ReviewDetailResponseDTO;
+import com.workit.domain.review.dto.response.ReviewUpdateResponseDTO;
 import com.workit.domain.review.exception.ReviewErrorCode;
 import com.workit.domain.review.mapper.ReviewMapper;
 import com.workit.domain.review.vo.MerchantReviewStatisticsVO;
+import com.workit.domain.review.vo.OwnedReviewVO;
+import com.workit.domain.review.vo.ReservationReviewSourceVO;
+import com.workit.domain.review.vo.ReviewAtmosphere;
 import com.workit.domain.review.vo.ReviewDetailVO;
+import com.workit.domain.review.vo.ReviewVO;
+import com.workit.domain.review.vo.TransactionReviewSourceVO;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.dao.DuplicateKeyException;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
@@ -99,6 +111,127 @@ public class ReviewServiceImpl implements ReviewService {
         return PageResponseDTO.of(content, page, size, totalElements);
     }
 
+    @Override
+    @Transactional
+    public ReviewCreateResponseDTO addReservationReview(
+            Long userId,
+            Long reservationId,
+            ReviewCreateRequestDTO request) {
+        validateUserAndSourceId(userId, reservationId, "예약 번호");
+        validateCreateRequest(request);
+
+        ReservationReviewSourceVO source =
+                reviewMapper.selectReservationReviewSource(userId, reservationId);
+        if (source == null) {
+            throw new BusinessException(ReviewErrorCode.RESERVATION_NOT_FOUND);
+        }
+        if (source.getReviewId() != null) {
+            throw new BusinessException(ReviewErrorCode.DUPLICATE_REVIEW);
+        }
+        if (!"ACCOMMODATION".equals(source.getMerchantCategory())
+                && !"OFFICE".equals(source.getMerchantCategory())) {
+            throw new BusinessException(ReviewErrorCode.UNSUPPORTED_RESERVATION_CATEGORY);
+        }
+        if ("CANCELED".equals(source.getReservationStatus())) {
+            throw new BusinessException(ReviewErrorCode.CANCELED_RESERVATION);
+        }
+
+        validateReservationPeriod(source);
+        validateAtmosphere(source.getMerchantCategory(), request.getAtmosphere(), true);
+
+        ReviewVO review = createReview(userId, source.getMerchantId(), request);
+        review.setReservationId(reservationId);
+        insertReview(review);
+        return ReviewCreateResponseDTO.from(review);
+    }
+
+    @Override
+    @Transactional
+    public ReviewCreateResponseDTO addTransactionReview(
+            Long userId,
+            Long transactionId,
+            ReviewCreateRequestDTO request) {
+        validateUserAndSourceId(userId, transactionId, "결제 번호");
+        validateCreateRequest(request);
+
+        TransactionReviewSourceVO source =
+                reviewMapper.selectTransactionReviewSource(userId, transactionId);
+        if (source == null) {
+            throw new BusinessException(ReviewErrorCode.TRANSACTION_NOT_FOUND);
+        }
+        if (source.getReviewId() != null) {
+            throw new BusinessException(ReviewErrorCode.DUPLICATE_REVIEW);
+        }
+        if (!"RESTAURANT".equals(source.getMerchantCategory())
+                && !"ACTIVITY".equals(source.getMerchantCategory())) {
+            throw new BusinessException(ReviewErrorCode.UNSUPPORTED_TRANSACTION_CATEGORY);
+        }
+        if (!"PAYMENT".equals(source.getTransactionType())
+                || !"PAID".equals(source.getTransactionStatus())) {
+            throw new BusinessException(ReviewErrorCode.PAYMENT_NOT_COMPLETED);
+        }
+        if (LocalDateTime.now().isAfter(source.getApprovedAt().plusDays(30))) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_PERIOD_EXPIRED);
+        }
+        validateAtmosphere(source.getMerchantCategory(), request.getAtmosphere(), true);
+
+        ReviewVO review = createReview(userId, source.getMerchantId(), request);
+        review.setTransactionId(transactionId);
+        insertReview(review);
+        return ReviewCreateResponseDTO.from(review);
+    }
+
+    @Override
+    @Transactional
+    public ReviewUpdateResponseDTO modifyReview(
+            Long userId,
+            Long reviewId,
+            ReviewUpdateRequestDTO request) {
+        validateUserAndSourceId(userId, reviewId, "리뷰 번호");
+        if (request == null || !request.hasAnyField()) {
+            throw new BusinessException(ReviewErrorCode.UPDATE_FIELD_REQUIRED);
+        }
+        if (request.isRatingProvided()) {
+            validateRating(request.getRating());
+        }
+
+        OwnedReviewVO review = reviewMapper.selectOwnedReview(userId, reviewId);
+        if (review == null) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_NOT_FOUND);
+        }
+        if (!"ACTIVE".equals(review.getStatus())) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_NOT_ACTIVE);
+        }
+        validateModificationPeriod(review);
+
+        if (request.isAtmosphereProvided()) {
+            validateAtmosphere(
+                    review.getMerchantCategory(),
+                    request.getAtmosphere(),
+                    false
+            );
+        }
+
+        reviewMapper.updateReview(reviewId, request);
+        return ReviewUpdateResponseDTO.of(reviewId);
+    }
+
+    @Override
+    @Transactional
+    public void removeReview(Long userId, Long reviewId) {
+        validateUserAndSourceId(userId, reviewId, "리뷰 번호");
+
+        OwnedReviewVO review = reviewMapper.selectOwnedReview(userId, reviewId);
+        if (review == null) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_NOT_FOUND);
+        }
+        if (!"ACTIVE".equals(review.getStatus())) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_NOT_ACTIVE);
+        }
+
+        reviewMapper.updateReviewStatusDeleted(userId, reviewId);
+    }
+
     // 별점 1점부터 5점까지 누락 없이 분포 구성
     private Map<Integer, Long> createRatingDistribution(MerchantReviewStatisticsVO statistics) {
         Map<Integer, Long> ratingDistribution = new LinkedHashMap<>();
@@ -122,6 +255,98 @@ public class ReviewServiceImpl implements ReviewService {
 
         if (page > Integer.MAX_VALUE / size) {
             throw new IllegalArgumentException("요청한 페이지 범위가 너무 큽니다.");
+        }
+    }
+
+    private void validateCreateRequest(ReviewCreateRequestDTO request) {
+        if (request == null) {
+            throw new IllegalArgumentException("리뷰 작성 정보가 필요합니다.");
+        }
+        validateRating(request.getRating());
+    }
+
+    private void validateRating(Integer rating) {
+        if (rating == null || rating < 1 || rating > 5) {
+            throw new BusinessException(ReviewErrorCode.INVALID_RATING);
+        }
+    }
+
+    private void validateUserAndSourceId(Long userId, Long sourceId, String sourceName) {
+        if (userId == null || userId < 1) {
+            throw new IllegalArgumentException("사용자 번호는 1 이상이어야 합니다.");
+        }
+        if (sourceId == null || sourceId < 1) {
+            throw new IllegalArgumentException(sourceName + "는 1 이상이어야 합니다.");
+        }
+    }
+
+    private void validateReservationPeriod(ReservationReviewSourceVO source) {
+        LocalDate today = LocalDate.now();
+        LocalDate availableDate = "OFFICE".equals(source.getMerchantCategory())
+                ? source.getEndDate().plusDays(1)
+                : source.getEndDate();
+
+        if (today.isBefore(availableDate)) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_NOT_AVAILABLE_YET);
+        }
+        if (today.isAfter(source.getEndDate().plusDays(30))) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_PERIOD_EXPIRED);
+        }
+    }
+
+    private void validateModificationPeriod(OwnedReviewVO review) {
+        boolean expired;
+        if (review.getReservationId() != null) {
+            expired = LocalDate.now().isAfter(review.getReservationEndDate().plusDays(30));
+        } else {
+            expired = LocalDateTime.now().isAfter(
+                    review.getTransactionApprovedAt().plusDays(30)
+            );
+        }
+
+        if (expired) {
+            throw new BusinessException(ReviewErrorCode.REVIEW_PERIOD_EXPIRED);
+        }
+    }
+
+    private void validateAtmosphere(
+            String merchantCategory,
+            ReviewAtmosphere atmosphere,
+            boolean create) {
+        if ("OFFICE".equals(merchantCategory)) {
+            if (atmosphere == null && create) {
+                throw new BusinessException(ReviewErrorCode.ATMOSPHERE_REQUIRED);
+            }
+            if (atmosphere == null && !create) {
+                throw new BusinessException(ReviewErrorCode.ATMOSPHERE_REQUIRED);
+            }
+            return;
+        }
+
+        if (atmosphere != null) {
+            throw new BusinessException(ReviewErrorCode.ATMOSPHERE_ONLY_OFFICE);
+        }
+    }
+
+    private ReviewVO createReview(
+            Long userId,
+            Long merchantId,
+            ReviewCreateRequestDTO request) {
+        ReviewVO review = new ReviewVO();
+        review.setUserId(userId);
+        review.setMerchantId(merchantId);
+        review.setRating(request.getRating());
+        review.setContent(request.getContent());
+        review.setAtmosphere(request.getAtmosphere());
+        review.setImageUrl(request.getImageUrl());
+        return review;
+    }
+
+    private void insertReview(ReviewVO review) {
+        try {
+            reviewMapper.insertReview(review);
+        } catch (DuplicateKeyException exception) {
+            throw new BusinessException(ReviewErrorCode.DUPLICATE_REVIEW);
         }
     }
 }

@@ -47,11 +47,11 @@ public class ReservationServiceImpl implements ReservationService {
 
         validateRequest(userId, statuses, page, size);
 
-        // 같은 상태가 여러 번 전달돼도 SQL IN 조건에는 한 번만 포함한다.
+        // 같은 상태가 여러 번 전달돼도 SQL IN 조건에는 한 번만 포함
         List<ReservationStatus> distinctStatuses = new ArrayList<>(new LinkedHashSet<>(statuses));
         int offset = page * size;
 
-        // 목록과 동일한 사용자·상태·카테고리 조건으로 전체 건수를 조회한다.
+        // 목록과 동일한 사용자·상태·카테고리 조건으로 전체 건수를 조회
         long totalElements = reservationMapper.countReservationList(
                 userId,
                 distinctStatuses,
@@ -101,9 +101,12 @@ public class ReservationServiceImpl implements ReservationService {
         boolean cancelable = detail.getStatus() == ReservationStatus.CONFIRMED
                 && today.isBefore(detail.getStartDate());
 
-//        이용 종료 후부터 종료일 기준 30일 이내이면 후기 작성 가능
-        boolean reviewPeriod = today.isAfter(detail.getEndDate())
-                && !today.isAfter(detail.getEndDate().plusDays(30));
+        // 숙소는 체크아웃 당일, 공유 오피스는 이용 종료 다음 날부터 작성 가능
+        boolean reviewStartReached = "ACCOMMODATION".equals(detail.getMerchantCategory())
+                ? !today.isBefore(detail.getEndDate())
+                : today.isAfter(detail.getEndDate());
+        boolean reviewDeadlineNotPassed = !today.isAfter(detail.getEndDate().plusDays(30));
+        boolean reviewPeriod = reviewStartReached && reviewDeadlineNotPassed;
 
 //        후기 작성 가능 여부와 기존 후기 존재 여부를 바탕으로 화면 동작을 결정
         boolean activeReview = detail.getReviewId() != null
@@ -112,6 +115,7 @@ public class ReservationServiceImpl implements ReservationService {
         ReservationReviewAction reviewAction = findReviewAction(
                 detail,
                 reviewPeriod,
+                reviewDeadlineNotPassed,
                 activeReview
         );
         Long activeReviewId = activeReview ? detail.getReviewId() : null;
@@ -143,28 +147,27 @@ public class ReservationServiceImpl implements ReservationService {
         return ReservationCancellationDetailResponseDTO.from(detail);
     }
 
-    // 리뷰 작성 이력과 이용 종료 후 30일 기한을 기준으로 화면 동작을 결정한다.
+    // 리뷰 작성 이력과 이용 종료 후 30일 기한을 기준으로 화면 동작을 결정
     private ReservationReviewAction findReviewAction(
             ReservationDetailVO detail,
             boolean reviewPeriod,
+            boolean reviewDeadlineNotPassed,
             boolean activeReview) {
 
-        if (!reviewPeriod) {
-            return ReservationReviewAction.NONE;
-        }
-
         if (activeReview) {
-            return ReservationReviewAction.EDIT;
+            return reviewDeadlineNotPassed
+                    ? ReservationReviewAction.EDIT
+                    : ReservationReviewAction.DELETE;
         }
 
-        if (detail.getReviewId() == null) {
+        if (reviewPeriod && detail.getReviewId() == null) {
             return ReservationReviewAction.WRITE;
         }
 
         return ReservationReviewAction.NONE;
     }
 
-    // 상세 조회에 필요한 사용자와 예약 식별자를 검증한다.
+    // 상세 조회에 필요한 사용자와 예약 식별자를 검증
     private void validateDetailRequest(Long userId, Long reservationId) {
         if (userId == null || userId < 1) {
             throw new IllegalArgumentException("사용자 정보가 올바르지 않습니다.");
@@ -175,7 +178,7 @@ public class ReservationServiceImpl implements ReservationService {
         }
     }
 
-    // 필수 조회 조건과 페이징 범위를 검증한다.
+    // 필수 조회 조건과 페이징 범위를 검증
     private void validateRequest(
             Long userId,
             List<ReservationStatus> statuses,

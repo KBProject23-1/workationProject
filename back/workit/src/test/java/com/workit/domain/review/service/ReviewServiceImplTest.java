@@ -1,5 +1,7 @@
 package com.workit.domain.review.service;
 
+import com.workit.domain.review.dto.request.ReviewCreateRequestDTO;
+import com.workit.domain.review.dto.request.ReviewUpdateRequestDTO;
 import com.workit.domain.review.dto.response.MerchantReviewListResponseDTO;
 import com.workit.domain.review.dto.response.MyReviewListResponseDTO;
 import com.workit.domain.review.dto.response.ReviewDetailResponseDTO;
@@ -8,12 +10,18 @@ import com.workit.domain.review.mapper.ReviewMapper;
 import com.workit.domain.review.vo.MerchantReviewStatisticsVO;
 import com.workit.domain.review.vo.MerchantReviewVO;
 import com.workit.domain.review.vo.MyReviewListItemVO;
+import com.workit.domain.review.vo.OwnedReviewVO;
+import com.workit.domain.review.vo.ReservationReviewSourceVO;
 import com.workit.domain.review.vo.ReviewDetailVO;
+import com.workit.domain.review.vo.ReviewVO;
+import com.workit.domain.review.vo.TransactionReviewSourceVO;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 
@@ -155,6 +163,160 @@ class ReviewServiceImplTest {
         );
     }
 
+    @Test
+    void 숙소는체크아웃당일부터리뷰를작성한다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        ReservationReviewSourceVO source = new ReservationReviewSourceVO();
+        source.setReservationId(10L);
+        source.setUserId(1L);
+        source.setMerchantId(20L);
+        source.setMerchantCategory("ACCOMMODATION");
+        source.setReservationStatus("COMPLETED");
+        source.setEndDate(LocalDate.now());
+        mapper.reservationSource = source;
+
+        ReviewCreateRequestDTO request = new ReviewCreateRequestDTO();
+        request.setRating(5);
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        service.addReservationReview(1L, 10L, request);
+
+        assertEquals(10L, mapper.insertedReview.getReservationId());
+        assertEquals(5, mapper.insertedReview.getRating());
+    }
+
+    @Test
+    void 공유오피스는종료다음날부터분위기태그와리뷰를작성한다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        ReservationReviewSourceVO source = new ReservationReviewSourceVO();
+        source.setReservationId(11L);
+        source.setUserId(1L);
+        source.setMerchantId(21L);
+        source.setMerchantCategory("OFFICE");
+        source.setReservationStatus("COMPLETED");
+        source.setEndDate(LocalDate.now().minusDays(1));
+        mapper.reservationSource = source;
+
+        ReviewCreateRequestDTO request = new ReviewCreateRequestDTO();
+        request.setRating(4);
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.addReservationReview(1L, 11L, request)
+        );
+
+        assertEquals(ReviewErrorCode.ATMOSPHERE_REQUIRED, exception.getErrorCode());
+    }
+
+    @Test
+    void 삭제된리뷰도같은예약으로재작성할수없다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        ReservationReviewSourceVO source = new ReservationReviewSourceVO();
+        source.setReservationId(12L);
+        source.setReviewId(99L);
+        mapper.reservationSource = source;
+
+        ReviewCreateRequestDTO request = new ReviewCreateRequestDTO();
+        request.setRating(5);
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.addReservationReview(1L, 12L, request)
+        );
+
+        assertEquals(ReviewErrorCode.DUPLICATE_REVIEW, exception.getErrorCode());
+        assertEquals("이미 작성했거나 삭제된 내역입니다.", exception.getMessage());
+    }
+
+    @Test
+    void 결제완료된식당거래는즉시리뷰를작성한다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        TransactionReviewSourceVO source = new TransactionReviewSourceVO();
+        source.setTransactionId(30L);
+        source.setUserId(1L);
+        source.setMerchantId(40L);
+        source.setMerchantCategory("RESTAURANT");
+        source.setTransactionType("PAYMENT");
+        source.setTransactionStatus("PAID");
+        source.setApprovedAt(LocalDateTime.now());
+        mapper.transactionSource = source;
+
+        ReviewCreateRequestDTO request = new ReviewCreateRequestDTO();
+        request.setRating(3);
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        service.addTransactionReview(1L, 30L, request);
+
+        assertEquals(30L, mapper.insertedReview.getTransactionId());
+    }
+
+    @Test
+    void 이용종료후삼십일이지나면리뷰를수정할수없다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        OwnedReviewVO review = new OwnedReviewVO();
+        review.setReviewId(50L);
+        review.setUserId(1L);
+        review.setReservationId(10L);
+        review.setStatus("ACTIVE");
+        review.setMerchantCategory("ACCOMMODATION");
+        review.setReservationEndDate(LocalDate.now().minusDays(31));
+        mapper.ownedReview = review;
+
+        ReviewUpdateRequestDTO request = new ReviewUpdateRequestDTO();
+        request.setRating(4);
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.modifyReview(1L, 50L, request)
+        );
+
+        assertEquals(ReviewErrorCode.REVIEW_PERIOD_EXPIRED, exception.getErrorCode());
+    }
+
+    @Test
+    void 수정기한이지나도리뷰는소프트삭제할수있다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        OwnedReviewVO review = new OwnedReviewVO();
+        review.setReviewId(51L);
+        review.setUserId(1L);
+        review.setReservationId(10L);
+        review.setStatus("ACTIVE");
+        review.setReservationEndDate(LocalDate.now().minusDays(31));
+        mapper.ownedReview = review;
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        service.removeReview(1L, 51L);
+
+        assertEquals(1, mapper.softDeleteCount);
+    }
+
     private MerchantReviewStatisticsVO createStatistics() {
         MerchantReviewStatisticsVO statistics = new MerchantReviewStatisticsVO();
         statistics.setAverageRating(new BigDecimal("4.5"));
@@ -174,6 +336,11 @@ class ReviewServiceImplTest {
         private final MerchantReviewStatisticsVO statistics;
         private final ReviewDetailVO reviewDetail;
         private final List<MyReviewListItemVO> myReviews;
+        private ReservationReviewSourceVO reservationSource;
+        private TransactionReviewSourceVO transactionSource;
+        private OwnedReviewVO ownedReview;
+        private ReviewVO insertedReview;
+        private int softDeleteCount;
 
         private StubReviewMapper(
                 boolean merchantExists,
@@ -237,6 +404,44 @@ class ReviewServiceImplTest {
         @Override
         public long countMyReviewList(Long userId) {
             return myReviews.size();
+        }
+
+        @Override
+        public ReservationReviewSourceVO selectReservationReviewSource(
+                Long userId,
+                Long reservationId) {
+            return reservationSource;
+        }
+
+        @Override
+        public TransactionReviewSourceVO selectTransactionReviewSource(
+                Long userId,
+                Long transactionId) {
+            return transactionSource;
+        }
+
+        @Override
+        public void insertReview(ReviewVO review) {
+            review.setReviewId(100L);
+            insertedReview = review;
+        }
+
+        @Override
+        public OwnedReviewVO selectOwnedReview(Long userId, Long reviewId) {
+            return ownedReview;
+        }
+
+        @Override
+        public int updateReview(
+                Long reviewId,
+                com.workit.domain.review.dto.request.ReviewUpdateRequestDTO request) {
+            return 1;
+        }
+
+        @Override
+        public int updateReviewStatusDeleted(Long userId, Long reviewId) {
+            softDeleteCount++;
+            return 1;
         }
     }
 }

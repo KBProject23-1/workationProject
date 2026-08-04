@@ -24,6 +24,9 @@
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
         <result column="cancelled_at" property="cancelledAt"/>
+        <result column="merchant_category" property="merchantCategory"/>
+        <result column="review_id" property="reviewId"/>
+        <result column="review_status" property="reviewStatus"/>
         <result column="merchant_address" property="merchantAddress"/>
         <result column="merchant_taxpayer_number" property="merchantTaxpayerNumber"/>
         <result column="merchant_phone_number" property="merchantPhoneNumber"/>
@@ -96,9 +99,15 @@
     </select>
 
     <select id="findTransactionDetailById" resultMap="TransactionResultMap">
-        SELECT t.*, m.address AS merchant_address
+        SELECT
+            t.*,
+            m.address AS merchant_address,
+            m.category AS merchant_category,
+            rv.review_id,
+            rv.status AS review_status
         FROM transactions t
         LEFT JOIN merchants m ON t.merchant_id = m.id
+        LEFT JOIN reviews rv ON rv.transaction_id = t.id
         WHERE t.id = #{transactionId} AND t.user_id = #{userId}
     </select>
 

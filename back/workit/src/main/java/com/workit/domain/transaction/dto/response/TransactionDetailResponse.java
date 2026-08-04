@@ -1,6 +1,7 @@
 package com.workit.domain.transaction.dto.response;
 
 import com.workit.domain.transaction.vo.TransactionVO;
+import com.workit.domain.transaction.vo.TransactionReviewAction;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -25,8 +26,14 @@ public class TransactionDetailResponse {
     private LocalDateTime approvedAt;
     private LocalDateTime cancelledAt;
     private Long reservationId;
+    private Long reviewId;
+    private TransactionReviewAction reviewAction;
+    private LocalDateTime reviewDeadline;
 
-    public static TransactionDetailResponse from(TransactionVO vo) {
+    public static TransactionDetailResponse from(
+            TransactionVO vo,
+            TransactionReviewAction reviewAction,
+            LocalDateTime reviewDeadline) {
         TransactionDetailResponse response = new TransactionDetailResponse();
         response.setTransactionId(vo.getId());
         response.setUserId(vo.getUserId());
@@ -45,6 +52,9 @@ public class TransactionDetailResponse {
         response.setApprovedAt(vo.getApprovedAt());
         response.setCancelledAt(vo.getCancelledAt());
         response.setReservationId(vo.getReservationId());
+        response.setReviewId("ACTIVE".equals(vo.getReviewStatus()) ? vo.getReviewId() : null);
+        response.setReviewAction(reviewAction);
+        response.setReviewDeadline(reviewDeadline);
         return response;
     }
 }
