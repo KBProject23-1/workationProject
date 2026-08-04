@@ -34,6 +34,9 @@ public class TransactionVO {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime cancelledAt;
+    private String merchantCategory;
+    private Long reviewId;
+    private String reviewStatus;
 
     private String merchantAddress;
     private String merchantTaxpayerNumber;

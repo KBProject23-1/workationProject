@@ -10,6 +10,7 @@ import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.util.TransactionNumberGenerator;
 import com.workit.domain.transaction.vo.TransactionVO;
+import com.workit.domain.transaction.vo.TransactionReviewAction;
 import com.workit.domain.wallet.mapper.WalletMapper;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
@@ -22,6 +23,7 @@ import static com.workit.global.constant.PaymentPolicy.MIN_CHARGE_AMOUNT;
 import static com.workit.global.constant.PaymentPolicy.MAX_TRANSACTION_AMOUNT;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -79,7 +81,43 @@ public class TransactionServiceImpl implements TransactionService {
         if (transaction == null) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
         }
-        return TransactionDetailResponse.from(transaction);
+
+        boolean reviewSupported = "RESTAURANT".equals(transaction.getMerchantCategory())
+                || "ACTIVITY".equals(transaction.getMerchantCategory());
+        LocalDateTime reviewDeadline = reviewSupported
+                ? transaction.getApprovedAt().plusDays(30)
+                : null;
+        TransactionReviewAction reviewAction = findReviewAction(
+                transaction,
+                reviewSupported,
+                reviewDeadline
+        );
+
+        return TransactionDetailResponse.from(transaction, reviewAction, reviewDeadline);
+    }
+
+    private TransactionReviewAction findReviewAction(
+            TransactionVO transaction,
+            boolean reviewSupported,
+            LocalDateTime reviewDeadline) {
+        if (!reviewSupported
+                || !"PAYMENT".equals(transaction.getTransactionType())
+                || !"PAID".equals(transaction.getStatus())) {
+            return TransactionReviewAction.NONE;
+        }
+
+        boolean deadlinePassed = LocalDateTime.now().isAfter(reviewDeadline);
+        if (transaction.getReviewId() == null) {
+            return deadlinePassed
+                    ? TransactionReviewAction.NONE
+                    : TransactionReviewAction.WRITE;
+        }
+        if (!"ACTIVE".equals(transaction.getReviewStatus())) {
+            return TransactionReviewAction.NONE;
+        }
+        return deadlinePassed
+                ? TransactionReviewAction.DELETE
+                : TransactionReviewAction.EDIT;
     }
 
     @Override
