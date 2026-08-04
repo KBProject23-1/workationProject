@@ -19,4 +19,15 @@
         ORDER BY required DESC, id ASC
     </select>
 
+    <!--
+        CI 중복 가입 조회.
+        - knowledge.md: 검색용 개인정보는 SHA-256 hash 로 저장 → user_auth.identity_ci_hash 조회
+        - Mapper 는 조회만 담당 (비즈니스 판단은 Service)
+    -->
+    <select id="countByCiHash" resultType="int">
+        SELECT COUNT(*)
+        FROM user_auth
+        WHERE identity_ci_hash = #{ciHash}
+    </select>
+
 </mapper>
