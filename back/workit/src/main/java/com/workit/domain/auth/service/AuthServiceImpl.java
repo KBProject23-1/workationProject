@@ -56,6 +56,12 @@ public class AuthServiceImpl implements AuthService {
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
             "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
 
+    /**
+     * 이메일 전체 최대 길이 (RFC 5321 기준 최대 254자)
+     * - 비정상적으로 긴 이메일은 형식 검증/DB 조회 전에 차단한다 (checkEmailAvailability)
+     */
+    private static final int MAX_EMAIL_LENGTH = 254;
+
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
 
@@ -85,20 +91,27 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
         }
 
-        // 2. 이메일 형식 검증
-        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        // 2. trim 후 길이 검증 — RFC 5321 기준 최대 254자 초과 시 INVALID_EMAIL_FORMAT
+        //    - 비정상적으로 긴 이메일은 hash 생성/DB 조회 전에 차단한다
+        String trimmedEmail = email.trim();
+        if (trimmedEmail.length() > MAX_EMAIL_LENGTH) {
+            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
+        }
+
+        // 3. lowercase 정규화 + 이메일 형식 검증
+        String normalizedEmail = trimmedEmail.toLowerCase(Locale.ROOT);
         if (!EMAIL_PATTERN.matcher(normalizedEmail).matches()) {
             throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
         }
 
-        // 3. 검색용 SHA-256 hash 생성 후 users.email_hash 기준 중복 조회
+        // 4. 검색용 SHA-256 hash 생성 후 users.email_hash 기준 중복 조회
         //    - email_encrypt(AES 원문) 복호화 금지, 원문 검색 금지 (knowledge.md: 검색용 hash 저장)
         //    - 소문자 정규화 후 hash — email_hash 기준 UNIQUE 제약과 중복 체크가 대소문자에 무관하게 동작하도록
         //      회원가입 완료 시에도 동일하게 소문자 정규화 후 hash 해야 한다
         String emailHash = sha256Hex(normalizedEmail);
         boolean available = authMapper.countByEmailHash(emailHash) == 0;
 
-        // 4. 중복 여부 반환 (중복이어도 성공 응답, 판단은 프론트 가입 흐름에서 처리)
+        // 5. 중복 여부 반환 (중복이어도 성공 응답, 판단은 프론트 가입 흐름에서 처리)
         return EmailAvailabilityResponseDTO.of(available);
     }
 

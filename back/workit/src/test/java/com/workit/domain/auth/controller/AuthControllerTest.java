@@ -46,6 +46,9 @@ class AuthControllerTest {
         private static final Pattern EMAIL_PATTERN = Pattern.compile(
                 "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
 
+        // RFC 5321 기준 이메일 전체 최대 길이 (Service 상수와 동일 정책)
+        private static final int MAX_EMAIL_LENGTH = 254;
+
         @Override
         public TermsListResponseDTO getTermsList() {
             return TermsListResponseDTO.of(Collections.emptyList());
@@ -66,6 +69,7 @@ class AuthControllerTest {
         @Override
         public EmailAvailabilityResponseDTO checkEmailAvailability(String email) {
             if (email == null || email.trim().isEmpty()
+                    || email.trim().length() > MAX_EMAIL_LENGTH
                     || !EMAIL_PATTERN.matcher(email.trim()).matches()) {
                 throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
             }
@@ -296,6 +300,52 @@ class AuthControllerTest {
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
         assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 최대 길이(254자) 정상 (200 + SUCCESS + available=true)")
+    void checkEmail_maxLength() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", buildLongEmail(254)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("사용 가능한 이메일입니다.", json.get("message").asText());
+        assertTrue(json.get("data").get("available").asBoolean());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
+    void checkEmail_tooLong() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", buildLongEmail(255)))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    /**
+     * 지정한 전체 길이의 이메일 생성 — 로컬파트 64자 + @ + 도메인 + .com (RFC 5321 형식 유지)
+     * - Java 8 호환을 위해 String.repeat 대신 반복문 사용
+     */
+    private String buildLongEmail(int totalLength) {
+        int domainLength = totalLength - 65; // 로컬파트 64자 + @ 1자 제외
+        StringBuilder sb = new StringBuilder(totalLength);
+        for (int i = 0; i < 64; i++) {
+            sb.append('a');
+        }
+        sb.append('@');
+        for (int i = 0; i < domainLength - 4; i++) {
+            sb.append('b');
+        }
+        sb.append(".com");
+        return sb.toString();
     }
 
     // ---------- 최종 회원가입 완료 ----------

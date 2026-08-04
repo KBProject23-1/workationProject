@@ -115,6 +115,9 @@ class AuthServiceImplTest {
         /** users PK 자동 증가 흉내 — insert 마다 1씩 증가 */
         private long nextUserId = 1L;
 
+        /** countByEmailHash 호출 횟수 — 길이 검증 실패 시 DB 조회가 발생하지 않는지 검증용 */
+        int emailHashLookupCount = 0;
+
         FakeAuthMapper(List<TermsVO> terms) {
             this(terms, Collections.emptySet());
         }
@@ -190,6 +193,7 @@ class AuthServiceImplTest {
 
         @Override
         public int countByEmailHash(String emailHash) {
+            emailHashLookupCount++;
             return existingEmailHashes.contains(emailHash) ? 1 : 0;
         }
 
@@ -524,6 +528,65 @@ class AuthServiceImplTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> service.checkEmailAvailability("not-an-email"));
         assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 최대 길이(254자) 초과 → INVALID_EMAIL_FORMAT + DB 조회 미발생")
+    void checkEmailAvailability_tooLong_throws() {
+        FakeAuthMapper mapper = new FakeAuthMapper(Collections.emptyList(),
+                Collections.emptySet(), Collections.emptySet());
+        AuthService service = new AuthServiceImpl(
+                mapper,
+                new MockIdentityVerificationProvider(),
+                new SignupTokenProvider(TEST_JWT_SECRET, 10),
+                new InMemorySignupVerificationStore(),
+                new FakeWalletService()
+        );
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.checkEmailAvailability(buildLongEmail(255)));
+
+        assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
+        // 길이 검증 실패 시 DB(hash) 조회가 발생하지 않아야 한다
+        assertEquals(0, mapper.emailHashLookupCount);
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 최대 길이(254자) 경계 → 정상 처리 + hash 조회 1회")
+    void checkEmailAvailability_maxLengthBoundary_success() {
+        FakeAuthMapper mapper = new FakeAuthMapper(Collections.emptyList(),
+                Collections.emptySet(), Collections.emptySet());
+        AuthService service = new AuthServiceImpl(
+                mapper,
+                new MockIdentityVerificationProvider(),
+                new SignupTokenProvider(TEST_JWT_SECRET, 10),
+                new InMemorySignupVerificationStore(),
+                new FakeWalletService()
+        );
+
+        EmailAvailabilityResponseDTO result = service.checkEmailAvailability(buildLongEmail(254));
+
+        assertNotNull(result);
+        assertTrue(result.isAvailable());
+        assertEquals(1, mapper.emailHashLookupCount);
+    }
+
+    /**
+     * 지정한 전체 길이의 이메일 생성 — 로컬파트 64자 + @ + 도메인 + .com (RFC 5321 형식 유지)
+     * - Java 8 호환을 위해 String.repeat 대신 반복문 사용
+     */
+    private String buildLongEmail(int totalLength) {
+        int domainLength = totalLength - 65; // 로컬파트 64자 + @ 1자 제외
+        StringBuilder sb = new StringBuilder(totalLength);
+        for (int i = 0; i < 64; i++) {
+            sb.append('a');
+        }
+        sb.append('@');
+        for (int i = 0; i < domainLength - 4; i++) {
+            sb.append('b');
+        }
+        sb.append(".com");
+        return sb.toString();
     }
 
     // ---------- 최종 회원가입 완료 ----------
