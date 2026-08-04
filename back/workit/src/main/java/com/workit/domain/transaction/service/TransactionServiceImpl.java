@@ -13,6 +13,7 @@ import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.wallet.mapper.WalletMapper;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
+import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import static com.workit.global.constant.PaymentPolicy.MIN_CHARGE_AMOUNT;
 import static com.workit.global.constant.PaymentPolicy.MAX_TRANSACTION_AMOUNT;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -28,20 +30,39 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TransactionServiceImpl implements TransactionService {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final TransactionMapper transactionMapper;
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
     private final CardMapper cardMapper;
 
     @Override
-    public List<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
-                                                             String paymentSourceType, String transactionType, Long cardId) {
-        List<TransactionVO> transactions = transactionMapper.findTransactions(
+    public PageResponseDTO<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
+                                                             String paymentSourceType, String transactionType, Long cardId,
+                                                             int page, int size) {
+        // 잘못된 페이징 값이 들어와도 목록이 깨지지 않도록 보정
+        int safePage = Math.max(page, 0);
+        int safeSize = (size < 1 || size > MAX_PAGE_SIZE) ? DEFAULT_PAGE_SIZE : size;
+
+        long totalElements = transactionMapper.countTransactions(
                 userId, startDate, endDate, paymentSourceType, transactionType, cardId
         );
-        return transactions.stream()
+
+        if (totalElements == 0) {
+            return PageResponseDTO.of(Collections.emptyList(), safePage, safeSize, 0);
+        }
+
+        List<TransactionListItemResponse> content = transactionMapper.findTransactions(
+                        userId, startDate, endDate, paymentSourceType, transactionType, cardId,
+                        safePage * safeSize, safeSize
+                )
+                .stream()
                 .map(TransactionListItemResponse::from)
                 .collect(Collectors.toList());
+
+        return PageResponseDTO.of(content, safePage, safeSize, totalElements);
     }
 
     @Override

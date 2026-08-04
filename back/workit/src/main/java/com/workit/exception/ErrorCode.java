@@ -12,4 +12,14 @@ public interface ErrorCode {
 
     /** 클라이언트에 전달할 기본 메시지 */
     String getMessage();
+
+    /**
+     * 클라이언트에 전달할 에러 코드명 (예: INVALID_CREDENTIALS)
+     *
+     * 모든 구현체가 enum 이므로 enum 이름(name)을 그대로 코드명으로 사용한다.
+     * default 메서드로 제공되어 도메인별 enum 에서 별도 구현이 필요 없다.
+     */
+    default String getErrorCode() {
+        return ((Enum<?>) this).name();
+    }
 }

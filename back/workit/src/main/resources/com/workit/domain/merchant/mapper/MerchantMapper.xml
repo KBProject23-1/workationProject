@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.merchant.mapper.MerchantMapper">
+
+    <resultMap id="accommodationListItemMap"
+               type="com.workit.domain.merchant.vo.AccommodationListItemVO">
+        <id property="merchantId" column="merchant_id"/>
+        <result property="name" column="name"/>
+        <result property="address" column="address"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+        <result property="accommodationType" column="accommodation_type"/>
+        <result property="rating" column="rating"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="price" column="price"/>
+    </resultMap>
+
+    <resultMap id="accommodationDetailMap"
+               type="com.workit.domain.merchant.vo.AccommodationDetailVO">
+        <id property="merchantId" column="merchant_id"/>
+        <result property="regionId" column="region_id"/>
+        <result property="name" column="name"/>
+        <result property="address" column="address"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+        <result property="phoneNumber" column="phone_number"/>
+        <result property="accommodationType" column="accommodation_type"/>
+        <result property="description" column="description"/>
+        <result property="checkInTime" column="check_in_time"/>
+        <result property="checkOutTime" column="check_out_time"/>
+        <result property="rating" column="rating"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="price" column="price"/>
+    </resultMap>
+
+    <resultMap id="restaurantListItemMap"
+               type="com.workit.domain.merchant.vo.RestaurantListItemVO">
+        <id property="merchantId" column="merchant_id"/>
+        <result property="name" column="name"/>
+        <result property="address" column="address"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+        <result property="foodType" column="food_type"/>
+        <result property="priceLevel" column="price_level"/>
+        <result property="rating" column="rating"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="price" column="price"/>
+    </resultMap>
+
+    <resultMap id="restaurantDetailMap"
+               type="com.workit.domain.merchant.vo.RestaurantDetailVO">
+        <id property="merchantId" column="merchant_id"/>
+        <result property="regionId" column="region_id"/>
+        <result property="name" column="name"/>
+        <result property="address" column="address"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+        <result property="phoneNumber" column="phone_number"/>
+        <result property="foodType" column="food_type"/>
+        <result property="priceLevel" column="price_level"/>
+        <result property="rating" column="rating"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="price" column="price"/>
+    </resultMap>
+
+    <select id="selectRestaurantDetails" resultMap="restaurantDetailMap">
+        SELECT
+            m.id AS merchant_id,
+            m.region_id,
+            m.name,
+            m.address,
+            m.latitude,
+            m.longitude,
+            m.phone_number,
+            r.food_type,
+            r.price_level,
+            m.rating,
+            m.thumbnail_url,
+            m.price
+        FROM merchants m
+        JOIN restaurants r ON r.merchant_id = m.id
+        WHERE m.id = #{merchantId}
+          AND m.category = 'RESTAURANT'
+    </select>
+
+    <select id="selectAccommodationDetails" resultMap="accommodationDetailMap">
+        SELECT
+            m.id AS merchant_id,
+            m.region_id,
+            m.name,
+            m.address,
+            m.latitude,
+            m.longitude,
+            m.phone_number,
+            a.accommodation_type,
+            a.description,
+            a.check_in_time,
+            a.check_out_time,
+            m.rating,
+            m.thumbnail_url,
+            m.price
+        FROM merchants m
+        JOIN accommodations a ON a.merchant_id = m.id
+        WHERE m.id = #{merchantId}
+          AND m.category = 'ACCOMMODATION'
+    </select>
+
+    <select id="selectMerchantTagNames" resultType="string">
+        SELECT t.name
+        FROM merchant_tags mt
+        JOIN tags t ON t.id = mt.tag_id
+        WHERE mt.merchant_id = #{merchantId}
+        ORDER BY t.id ASC
+    </select>
+
+    <sql id="accommodationListFrom">
+        FROM merchants m
+        JOIN accommodations a ON a.merchant_id = m.id
+    </sql>
+
+    <sql id="accommodationListWhere">
+        WHERE m.category = 'ACCOMMODATION'
+          AND m.region_id = #{regionId}
+        <if test="accommodationType != null">
+          AND a.accommodation_type = #{accommodationType}
+        </if>
+        <if test="minPrice != null">
+          AND m.price &gt;= #{minPrice}
+        </if>
+        <if test="maxPrice != null">
+          AND m.price &lt;= #{maxPrice}
+        </if>
+        <if test="minRating != null">
+          AND m.rating &gt;= #{minRating}
+        </if>
+    </sql>
+
+    <select id="selectAccommodationList" resultMap="accommodationListItemMap">
+        SELECT
+            m.id AS merchant_id,
+            m.name,
+            m.address,
+            m.latitude,
+            m.longitude,
+            a.accommodation_type,
+            m.rating,
+            m.thumbnail_url,
+            m.price
+        <include refid="accommodationListFrom"/>
+        <include refid="accommodationListWhere"/>
+        <choose>
+            <when test="sort == 'PRICE_ASC'">
+                ORDER BY m.price ASC, m.rating DESC, m.id DESC
+            </when>
+            <when test="sort == 'PRICE_DESC'">
+                ORDER BY m.price DESC, m.rating DESC, m.id DESC
+            </when>
+            <otherwise>
+                ORDER BY m.rating DESC, m.id DESC
+            </otherwise>
+        </choose>
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countAccommodationList" resultType="long">
+        SELECT COUNT(*)
+        <include refid="accommodationListFrom"/>
+        <include refid="accommodationListWhere"/>
+    </select>
+
+    <sql id="restaurantListFrom">
+        FROM merchants m
+        JOIN restaurants r ON r.merchant_id = m.id
+    </sql>
+
+    <sql id="restaurantListWhere">
+        WHERE m.category = 'RESTAURANT'
+          AND m.region_id = #{regionId}
+        <if test="foodType != null">
+          AND r.food_type = #{foodType}
+        </if>
+        <if test="minPrice != null">
+          AND m.price &gt;= #{minPrice}
+        </if>
+        <if test="maxPrice != null">
+          AND m.price &lt;= #{maxPrice}
+        </if>
+        <if test="minRating != null">
+          AND m.rating &gt;= #{minRating}
+        </if>
+    </sql>
+
+    <select id="selectRestaurantList" resultMap="restaurantListItemMap">
+        SELECT
+            m.id AS merchant_id,
+            m.name,
+            m.address,
+            m.latitude,
+            m.longitude,
+            r.food_type,
+            r.price_level,
+            m.rating,
+            m.thumbnail_url,
+            m.price
+        <include refid="restaurantListFrom"/>
+        <include refid="restaurantListWhere"/>
+        <choose>
+            <when test="sort == 'PRICE_ASC'">
+                ORDER BY m.price ASC, m.rating DESC, m.id DESC
+            </when>
+            <when test="sort == 'PRICE_DESC'">
+                ORDER BY m.price DESC, m.rating DESC, m.id DESC
+            </when>
+            <otherwise>
+                ORDER BY m.rating DESC, m.id DESC
+            </otherwise>
+        </choose>
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countRestaurantList" resultType="long">
+        SELECT COUNT(*)
+        <include refid="restaurantListFrom"/>
+        <include refid="restaurantListWhere"/>
+    </select>
+
+</mapper>
