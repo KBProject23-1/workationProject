@@ -1,11 +1,13 @@
 package com.workit.domain.review.service;
 
 import com.workit.domain.review.dto.response.MerchantReviewListResponseDTO;
+import com.workit.domain.review.dto.response.MyReviewListResponseDTO;
 import com.workit.domain.review.dto.response.ReviewDetailResponseDTO;
 import com.workit.domain.review.exception.ReviewErrorCode;
 import com.workit.domain.review.mapper.ReviewMapper;
 import com.workit.domain.review.vo.MerchantReviewStatisticsVO;
 import com.workit.domain.review.vo.MerchantReviewVO;
+import com.workit.domain.review.vo.MyReviewListItemVO;
 import com.workit.domain.review.vo.ReviewDetailVO;
 import com.workit.exception.BusinessException;
 import org.junit.jupiter.api.Test;
@@ -111,6 +113,31 @@ class ReviewServiceImplTest {
         assertEquals(ReviewErrorCode.REVIEW_NOT_FOUND, exception.getErrorCode());
     }
 
+    @Test
+    void 로그인사용자의리뷰목록을카테고리정보와조회한다() {
+        MyReviewListItemVO review = new MyReviewListItemVO();
+        review.setReviewId(31L);
+        review.setMerchantName("테스트 공유오피스");
+        review.setMerchantCategory("OFFICE");
+        review.setRating(4);
+
+        ReviewService service = new ReviewServiceImpl(
+                new StubReviewMapper(
+                        true,
+                        Collections.emptyList(),
+                        createStatistics(),
+                        null,
+                        Collections.singletonList(review)
+                )
+        );
+
+        List<MyReviewListResponseDTO> response = service.findMyReviewList(1L);
+
+        assertEquals(1, response.size());
+        assertEquals("테스트 공유오피스", response.get(0).getMerchantName());
+        assertEquals("OFFICE", response.get(0).getMerchantCategory());
+    }
+
     private MerchantReviewStatisticsVO createStatistics() {
         MerchantReviewStatisticsVO statistics = new MerchantReviewStatisticsVO();
         statistics.setAverageRating(new BigDecimal("4.5"));
@@ -129,6 +156,7 @@ class ReviewServiceImplTest {
         private final List<MerchantReviewVO> reviews;
         private final MerchantReviewStatisticsVO statistics;
         private final ReviewDetailVO reviewDetail;
+        private final List<MyReviewListItemVO> myReviews;
 
         private StubReviewMapper(
                 boolean merchantExists,
@@ -142,10 +170,20 @@ class ReviewServiceImplTest {
                 List<MerchantReviewVO> reviews,
                 MerchantReviewStatisticsVO statistics,
                 ReviewDetailVO reviewDetail) {
+            this(merchantExists, reviews, statistics, reviewDetail, Collections.emptyList());
+        }
+
+        private StubReviewMapper(
+                boolean merchantExists,
+                List<MerchantReviewVO> reviews,
+                MerchantReviewStatisticsVO statistics,
+                ReviewDetailVO reviewDetail,
+                List<MyReviewListItemVO> myReviews) {
             this.merchantExists = merchantExists;
             this.reviews = reviews;
             this.statistics = statistics;
             this.reviewDetail = reviewDetail;
+            this.myReviews = myReviews;
         }
 
         @Override
@@ -166,6 +204,11 @@ class ReviewServiceImplTest {
         @Override
         public ReviewDetailVO selectReviewDetails(Long reviewId) {
             return reviewDetail;
+        }
+
+        @Override
+        public List<MyReviewListItemVO> selectMyReviewList(Long userId) {
+            return myReviews;
         }
     }
 }
