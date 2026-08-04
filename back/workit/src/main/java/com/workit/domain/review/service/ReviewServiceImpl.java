@@ -9,6 +9,7 @@ import com.workit.domain.review.mapper.ReviewMapper;
 import com.workit.domain.review.vo.MerchantReviewStatisticsVO;
 import com.workit.domain.review.vo.ReviewDetailVO;
 import com.workit.exception.BusinessException;
+import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,14 +23,20 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReviewServiceImpl implements ReviewService {
 
+    private static final int MAX_PAGE_SIZE = 50;
+
     private final ReviewMapper reviewMapper;
 
     @Override
     @Transactional(readOnly = true)
-    public MerchantReviewListResponseDTO findMerchantReviewList(Long merchantId) {
+    public MerchantReviewListResponseDTO findMerchantReviewList(
+            Long merchantId,
+            int page,
+            int size) {
         if (merchantId == null || merchantId < 1) {
             throw new IllegalArgumentException("가맹점 번호는 1 이상이어야 합니다.");
         }
+        validatePageRequest(page, size);
 
         if (!reviewMapper.selectMerchantExists(merchantId)) {
             throw new BusinessException(ReviewErrorCode.MERCHANT_NOT_FOUND);
@@ -38,12 +45,15 @@ public class ReviewServiceImpl implements ReviewService {
         MerchantReviewStatisticsVO statistics =
                 reviewMapper.selectMerchantReviewStatistics(merchantId);
         Map<Integer, Long> ratingDistribution = createRatingDistribution(statistics);
-
-        return MerchantReviewListResponseDTO.of(
-                reviewMapper.selectMerchantReviewList(merchantId)
+        int offset = page * size;
+        List<MerchantReviewItemResponseDTO> reviews =
+                reviewMapper.selectMerchantReviewList(merchantId, offset, size)
                         .stream()
                         .map(MerchantReviewItemResponseDTO::from)
-                        .collect(Collectors.toList()),
+                        .collect(Collectors.toList());
+
+        return MerchantReviewListResponseDTO.of(
+                PageResponseDTO.of(reviews, page, size, statistics.getReviewCount()),
                 statistics,
                 ratingDistribution
         );
@@ -66,15 +76,27 @@ public class ReviewServiceImpl implements ReviewService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<MyReviewListResponseDTO> findMyReviewList(Long userId) {
+    public PageResponseDTO<MyReviewListResponseDTO> findMyReviewList(
+            Long userId,
+            int page,
+            int size) {
         if (userId == null || userId < 1) {
             throw new IllegalArgumentException("사용자 번호는 1 이상이어야 합니다.");
         }
+        validatePageRequest(page, size);
 
-        return reviewMapper.selectMyReviewList(userId)
+        long totalElements = reviewMapper.countMyReviewList(userId);
+        int offset = page * size;
+        List<MyReviewListResponseDTO> content = reviewMapper.selectMyReviewList(
+                        userId,
+                        offset,
+                        size
+                )
                 .stream()
                 .map(MyReviewListResponseDTO::from)
                 .collect(Collectors.toList());
+
+        return PageResponseDTO.of(content, page, size, totalElements);
     }
 
     // 별점 1점부터 5점까지 누락 없이 분포 구성
@@ -86,5 +108,20 @@ public class ReviewServiceImpl implements ReviewService {
         ratingDistribution.put(4, statistics.getFourStarCount());
         ratingDistribution.put(5, statistics.getFiveStarCount());
         return ratingDistribution;
+    }
+
+    // Merchant 목록과 동일한 페이지 번호·크기 범위 검증
+    private void validatePageRequest(int page, int size) {
+        if (page < 0) {
+            throw new IllegalArgumentException("페이지 번호는 0 이상이어야 합니다.");
+        }
+
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("페이지 크기는 1 이상 50 이하여야 합니다.");
+        }
+
+        if (page > Integer.MAX_VALUE / size) {
+            throw new IllegalArgumentException("요청한 페이지 범위가 너무 큽니다.");
+        }
     }
 }
