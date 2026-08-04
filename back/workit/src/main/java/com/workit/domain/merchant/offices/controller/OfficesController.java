@@ -21,7 +21,7 @@ import java.time.LocalDate;
 @RestController
 @RequestMapping("/api/v1/merchants")
 @RequiredArgsConstructor
-public class MerchantController {
+public class OfficesController {
 
     private final MerchantService merchantService;
     private final WorkationService workationService;
