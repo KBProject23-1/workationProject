@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.review.mapper.ReviewMapper">
+
+    <resultMap id="merchantReviewMap" type="com.workit.domain.review.vo.MerchantReviewVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="nickname" column="nickname"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="atmosphere" column="atmosphere"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="imageUrl" column="image_url"/>
+    </resultMap>
+
+    <resultMap id="merchantReviewStatisticsMap"
+               type="com.workit.domain.review.vo.MerchantReviewStatisticsVO">
+        <result property="averageRating" column="average_rating"/>
+        <result property="reviewCount" column="review_count"/>
+        <result property="oneStarCount" column="one_star_count"/>
+        <result property="twoStarCount" column="two_star_count"/>
+        <result property="threeStarCount" column="three_star_count"/>
+        <result property="fourStarCount" column="four_star_count"/>
+        <result property="fiveStarCount" column="five_star_count"/>
+    </resultMap>
+
+    <resultMap id="reviewDetailMap" type="com.workit.domain.review.vo.ReviewDetailVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="nickname" column="nickname"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="atmosphere" column="atmosphere"/>
+        <result property="imageUrl" column="image_url"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="reservationId" column="reservation_id"/>
+        <result property="reservationCode" column="reservation_code"/>
+        <result property="reservationStartDate" column="reservation_start_date"/>
+        <result property="reservationEndDate" column="reservation_end_date"/>
+        <result property="transactionId" column="transaction_id"/>
+        <result property="transactionNumber" column="transaction_number"/>
+        <result property="transactionAmount" column="transaction_amount"/>
+        <result property="transactionApprovedAt" column="transaction_approved_at"/>
+    </resultMap>
+
+    <select id="selectMerchantExists" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1
+            FROM merchants
+            WHERE id = #{merchantId}
+        )
+    </select>
+
+    <select id="selectMerchantReviewList" resultMap="merchantReviewMap">
+        SELECT
+            r.review_id,
+            up.nickname,
+            r.rating,
+            r.content,
+            r.atmosphere,
+            r.created_at,
+            r.image_url
+        FROM reviews r
+        JOIN user_profile up ON up.user_id = r.user_id
+        WHERE r.merchant_id = #{merchantId}
+          AND r.status = 'ACTIVE'
+        ORDER BY r.created_at DESC, r.review_id DESC
+    </select>
+
+    <select id="selectMerchantReviewStatistics" resultMap="merchantReviewStatisticsMap">
+        SELECT
+            COALESCE(ROUND(AVG(rating), 1), 0.0) AS average_rating,
+            COUNT(*) AS review_count,
+            COALESCE(SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END), 0) AS one_star_count,
+            COALESCE(SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END), 0) AS two_star_count,
+            COALESCE(SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END), 0) AS three_star_count,
+            COALESCE(SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END), 0) AS four_star_count,
+            COALESCE(SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END), 0) AS five_star_count
+        FROM reviews
+        WHERE merchant_id = #{merchantId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="selectReviewDetails" resultMap="reviewDetailMap">
+        SELECT
+            rv.review_id,
+            up.nickname,
+            rv.rating,
+            rv.content,
+            rv.atmosphere,
+            rv.image_url,
+            rv.created_at,
+            rv.updated_at,
+            m.id AS merchant_id,
+            m.name AS merchant_name,
+            m.category AS merchant_category,
+            rs.id AS reservation_id,
+            rs.reservation_code,
+            rs.start_date AS reservation_start_date,
+            rs.end_date AS reservation_end_date,
+            tr.id AS transaction_id,
+            tr.transaction_number,
+            tr.amount AS transaction_amount,
+            tr.approved_at AS transaction_approved_at
+        FROM reviews rv
+        JOIN user_profile up ON up.user_id = rv.user_id
+        JOIN merchants m ON m.id = rv.merchant_id
+        LEFT JOIN reservations rs ON rs.id = rv.reservation_id
+        LEFT JOIN transactions tr ON tr.id = rv.transaction_id
+        WHERE rv.review_id = #{reviewId}
+          AND rv.status = 'ACTIVE'
+    </select>
+
+</mapper>
