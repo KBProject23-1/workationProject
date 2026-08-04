@@ -23,8 +23,13 @@ class MockIdentityVerificationProviderTest {
         assertFalse(result.getCi().trim().isEmpty());
         assertNotNull(result.getName());
         assertFalse(result.getName().trim().isEmpty());
+        assertNotNull(result.getPhoneNumber());
+        assertFalse(result.getPhoneNumber().trim().isEmpty());
         // Mock CI 는 입력 ID 기반으로 생성된다
         assertEquals("MOCK-CI-imp_ver_1234567890", result.getCi());
+        // Mock 휴대폰 번호도 제공된다 (users.phone_number_* 저장 대상)
+        // imp_ver_1234567890 → 숫자 1234567890 → 뒤 8자리 34567890 → 01034567890
+        assertEquals("01034567890", result.getPhoneNumber());
     }
 
     @Test

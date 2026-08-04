@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
@@ -9,16 +10,29 @@ import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.util.SignupTokenProvider;
+import com.workit.domain.auth.vo.UserAuthVO;
+import com.workit.domain.auth.vo.UserProfileVO;
+import com.workit.domain.auth.vo.UserVO;
+import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
+import com.workit.global.util.PasswordEncryptor;
 import com.workit.global.util.PersonalDataCipher;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -34,12 +48,19 @@ public class AuthServiceImpl implements AuthService {
     private final IdentityVerificationProvider identityVerificationProvider;
     private final SignupTokenProvider signupTokenProvider;
     private final SignupVerificationStore signupVerificationStore;
+    private final WalletService walletService;
 
     /**
      * 이메일 형식 검증 패턴 (일반적인 이메일 주소 규칙)
      */
     private static final Pattern EMAIL_PATTERN = Pattern.compile(
             "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+
+    /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
+    private static final String USER_STATUS_ACTIVE = "ACTIVE";
+
+    /** user_profile.nickname VARCHAR(50) — 초과 시 DB 오류(500) 대신 400 으로 처리 */
+    private static final int NICKNAME_MAX_LENGTH = 50;
 
     @Override
     @Transactional(readOnly = true)
@@ -107,13 +128,14 @@ public class AuthServiceImpl implements AuthService {
         // 3. 회원가입 임시 데이터 생성 + Redis 임시 저장
         //    - JWT Payload 에 개인정보를 담지 않는 대신, 회원가입 완료 시 복원할 데이터를
         //      signup:verification:{temporaryUserKey} 키로 짧은 TTL 동안 보관한다
-        //    - CI/name 은 원문 대신 AES-256 암호화본만 저장 (knowledge.md: Redis 회원 정보 원문 저장 금지)
+        //    - CI/name/phone 은 원문 대신 AES-256 암호화본만 저장 (knowledge.md: Redis 회원 정보 원문 저장 금지)
         String temporaryUserKey = UUID.randomUUID().toString();
         SignupVerificationData verificationData = SignupVerificationData.builder()
                 .verificationId(identityVerificationId)
                 .ciHash(ciHash)
                 .encryptedCi(PersonalDataCipher.encrypt(result.getCi()))
                 .encryptedName(PersonalDataCipher.encrypt(result.getName()))
+                .encryptedPhone(PersonalDataCipher.encrypt(result.getPhoneNumber()))
                 .build();
         signupVerificationStore.save(temporaryUserKey, verificationData);
 
@@ -122,6 +144,240 @@ public class AuthServiceImpl implements AuthService {
 
         // 5. 응답 생성 — API Contract 유지 (identityToken, name)
         return IdentityVerificationResponseDTO.of(identityToken, result.getName());
+    }
+
+    @Override
+    @Transactional
+    public void signup(SignupRequestDTO request) {
+
+        // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
+        validateSignupRequest(request);
+
+        // 2. 회원가입 전용 JWT 검증
+        //    - 서명/만료 검증 + sub == signup-verification 확인 (SignupTokenProvider.verifySignupToken)
+        //    - 만료: EXPIRED_SIGNUP_TOKEN(401), 위변조/용도 오류: INVALID_SIGNUP_TOKEN(400)
+        //    - JWT Payload 에서 temporaryUserKey 추출 (Payload 에 개인정보 없음)
+        Claims claims = verifySignupToken(request.getIdentityToken());
+        String temporaryUserKey = claims.get("temporaryUserKey", String.class);
+        if (temporaryUserKey == null || temporaryUserKey.trim().isEmpty()) {
+            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN);
+        }
+
+        // 3. Redis 임시 인증 데이터 조회 (없으면 인증 만료로 간주 — 다시 본인인증 필요)
+        //    - 회원가입 완료 전까지는 TTL(기본 10분) 내 데이터가 존재해야 한다
+        SignupVerificationData verificationData = signupVerificationStore.find(temporaryUserKey);
+        if (verificationData == null) {
+            throw new BusinessException(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND);
+        }
+
+        // 4. CI 중복 재검증 (Race Condition 방지)
+        //    - 본인인증 완료 ~ 최종 가입 완료 사이 시간차 동안 동일 CI 로 가입될 수 있으므로 완료 시점에 다시 검증
+        //    - user_auth.identity_ci_hash (UNIQUE) 기준 조회
+        if (authMapper.countByCiHash(verificationData.getCiHash()) > 0) {
+            throw new BusinessException(AuthErrorCode.DUPLICATE_USER);
+        }
+
+        // 5. 이메일 처리
+        //    - null/blank/형식 검증 → 소문자 정규화 → SHA-256 hash 생성
+        //    - users.email_hash 기준 중복 재검증 (이메일 원문 DB 조회 금지)
+        String normalizedEmail = normalizeEmail(request.getEmail());
+        String emailHash = sha256Hex(normalizedEmail);
+        if (authMapper.countByEmailHash(emailHash) > 0) {
+            throw new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
+        }
+
+        // 6. 닉네임 검증 + 중복 검증 (user_profile.nickname UNIQUE, VARCHAR(50))
+        String nickname = request.getNickname().trim();
+        if (nickname.length() > NICKNAME_MAX_LENGTH) {
+            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_REQUEST);
+        }
+        if (authMapper.countByNickname(nickname) > 0) {
+            throw new BusinessException(AuthErrorCode.DUPLICATE_NICKNAME);
+        }
+
+        // 7. 약관 동의 검증 (DB terms 마스터 기준)
+        //    - agreedTermsIds 가 null/빈 배열이면 필수 약관 동의 자체가 없으므로 실패
+        //    - DB 의 필수 약관(required = 1) ID 가 모두 포함되어야 가입 가능
+        //    - 선택 약관은 포함하지 않아도 가입 가능
+        //    - 중복 ID 는 제거해 저장 (user_terms_agreements 에 중복 행 방지)
+        List<Long> agreedTermsIds = request.getAgreedTermsIds();
+        if (agreedTermsIds == null || agreedTermsIds.isEmpty()) {
+            throw new BusinessException(AuthErrorCode.MISSING_REQUIRED_TERMS);
+        }
+        List<Long> distinctAgreedTermIds = new ArrayList<>(new LinkedHashSet<>(agreedTermsIds));
+
+        // 7-1. 존재하지 않는 약관 ID 검증
+        //    - terms 마스터에 없는 ID 가 섞여 있으면 user_terms_agreements FK 위반으로
+        //      500 이 발생하므로 insert 전에 INVALID_TERM_ID(400) 로 사전 차단한다
+        //    - null 요소가 포함된 경우에도 IN 쿼리가 매칭되지 않아 크기 비교로 걸러진다
+        List<Long> existingTermIds = authMapper.selectExistingTermIds(distinctAgreedTermIds);
+        if (existingTermIds == null || existingTermIds.size() != distinctAgreedTermIds.size()) {
+            throw new BusinessException(AuthErrorCode.INVALID_TERM_ID);
+        }
+
+        // 7-2. 필수 약관 누락 검증
+        List<Long> requiredTermIds = authMapper.selectRequiredTermsIds();
+        if (requiredTermIds == null || !distinctAgreedTermIds.containsAll(requiredTermIds)) {
+            throw new BusinessException(AuthErrorCode.MISSING_REQUIRED_TERMS);
+        }
+
+        // 8. 저장 데이터 준비 (Service Layer 에서만 암호화/해시 수행 — Controller/Mapper 금지)
+        //    - password: BCrypt 단방향 해시 (원문 저장/AES 사용 금지)
+        //    - email/name/phone: AES-256 양방향 암호화 + 검색용 SHA-256 hash
+        //    - CI: AES-256 암호화 + SHA-256 hash (Redis 에서 복원)
+        String passwordHash = PasswordEncryptor.encode(request.getPassword());
+
+        // 9. 회원 정보 DB 저장 (users → user_auth → user_profile → user_terms_agreements) + 전자지갑 생성
+        //    - 사전 중복 체크(SELECT)와 실제 insert 사이의 Race Condition 은
+        //      DB UNIQUE 제약(email_hash, identity_ci_hash, nickname)이 최종 방어선이 된다.
+        //    - SELECT 체크를 통과했지만 동시 요청에 의해 UNIQUE 위반이 발생하면
+        //      DuplicateKeyException → 409 로 변환해 깔끔한 응답을 반환한다.
+        try {
+            insertUserWithAuthAndProfile(verificationData, normalizedEmail, emailHash, passwordHash,
+                    nickname, distinctAgreedTermIds);
+        } catch (DuplicateKeyException e) {
+            throw mapDuplicateKeyException(e);
+        }
+
+        // 10. 회원가입 완료 후 Redis 임시 데이터 삭제 (1회성 — 재사용 방지)
+        //    - Redis 는 DB 트랜잭션의 일부가 아니므로, DB 커밋이 확정된 후(afterCommit)에만 삭제한다.
+        //    - 트랜잭션 롤백 시 Redis 데이터가 그대로 남아 사용자가 동일 인증으로 재시도할 수 있다.
+        deleteVerificationDataAfterCommit(temporaryUserKey);
+    }
+
+    /**
+     * users → user_auth → user_profile → user_terms_agreements insert + 전자지갑 생성 (동일 트랜잭션)
+     * - 회원가입 전체 과정이 하나의 트랜잭션 — 하나라도 실패하면 전부 롤백된다
+     */
+    private void insertUserWithAuthAndProfile(SignupVerificationData verificationData,
+                                              String normalizedEmail,
+                                              String emailHash,
+                                              String passwordHash,
+                                              String nickname,
+                                              List<Long> agreedTermIds) {
+        // users insert (회원 기본 정보)
+        // - phone 은 Redis 의 AES 암호화본을 그대로 사용 (원문 재암호화 불필요)
+        // - phone_hash 는 복호화 후 SHA-256 계산 — users.phone_number_hash (UNIQUE)
+        String phoneNumber = PersonalDataCipher.decrypt(verificationData.getEncryptedPhone());
+        UserVO user = new UserVO();
+        user.setEmailHash(emailHash);
+        user.setEmailEncrypt(PersonalDataCipher.encrypt(normalizedEmail));
+        user.setNameEncrypt(verificationData.getEncryptedName());
+        user.setPhoneNumberHash(sha256Hex(phoneNumber));
+        user.setPhoneNumberEncrypt(verificationData.getEncryptedPhone());
+        user.setStatus(USER_STATUS_ACTIVE);
+        authMapper.insertUser(user);
+
+        // user_auth insert (인증 정보 — 비밀번호/CI)
+        UserAuthVO userAuth = new UserAuthVO();
+        userAuth.setUserId(user.getId());
+        userAuth.setPasswordHash(passwordHash);
+        userAuth.setIdentityCiHash(verificationData.getCiHash());
+        userAuth.setIdentityCiEncrypt(verificationData.getEncryptedCi());
+        authMapper.insertUserAuth(userAuth);
+
+        // user_profile insert (닉네임)
+        UserProfileVO userProfile = new UserProfileVO();
+        userProfile.setUserId(user.getId());
+        userProfile.setNickname(nickname);
+        authMapper.insertUserProfile(userProfile);
+
+        // user_terms_agreements insert (약관 동의 저장 — 동의한 약관 ID 목록 전체)
+        authMapper.insertUserTerms(user.getId(), agreedTermIds);
+
+        // 전자지갑 생성 (knowledge.md Signup Flow: 8. Create wallet)
+        // 같은 트랜잭션 내에서 생성 — 지갑 생성 실패 시 DB insert 전체가 롤백된다
+        walletService.createWallet(user.getId());
+    }
+
+    /**
+     * DB UNIQUE 제약 위반(DuplicateKeyException)을 도메인 에러 코드로 매핑한다.
+     * - 사용자 간 Race Condition 으로 인한 UNIQUE 충돌 시 500 대신 명확한 409 를 반환하기 위함
+     */
+    private BusinessException mapDuplicateKeyException(DuplicateKeyException e) {
+        String message = String.valueOf(e.getMessage());
+        if (message.contains("ux_users_email") || message.contains("users.email_hash")) {
+            return new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
+        }
+        if (message.contains("ux_users_pass_ci") || message.contains("user_auth.identity_ci_hash")) {
+            return new BusinessException(AuthErrorCode.DUPLICATE_USER);
+        }
+        if (message.contains("ux_user_profile_nickname") || message.contains("user_profile.nickname")) {
+            return new BusinessException(AuthErrorCode.DUPLICATE_NICKNAME);
+        }
+        if (message.contains("ux_users_phone") || message.contains("users.phone_number_hash")) {
+            // 동일 휴대폰으로 이미 가입된 회원 — 1인 1계정 정책상 CI 중복과 동일하게 처리
+            return new BusinessException(AuthErrorCode.DUPLICATE_USER);
+        }
+        // 식별되지 않은 UNIQUE 충돌 — 응답에 제약조건명/테이블명 노출 금지 (knowledge.md)
+        return new BusinessException(AuthErrorCode.DUPLICATE_USER);
+    }
+
+    /**
+     * DB 트랜잭션이 커밋된 후(afterCommit)에만 Redis 임시 데이터를 삭제한다.
+     * - 트랜잭션이 진행 중일 때 Redis 를 지우면 롤백 시 사용자가 재시도할 수 없게 된다.
+     * - 실제 트랜잭션 밖(테스트 등)에서는 즉시 삭제한다.
+     */
+    private void deleteVerificationDataAfterCommit(String temporaryUserKey) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    signupVerificationStore.delete(temporaryUserKey);
+                }
+            });
+        } else {
+            signupVerificationStore.delete(temporaryUserKey);
+        }
+    }
+
+    // ---------- private helpers ----------
+
+    /**
+     * 회원가입 요청 값 검증
+     * - identityToken/email/password/nickname 누락 → INVALID_SIGNUP_REQUEST
+     * - pin 은 이번 API 범위 제외 (별도 PIN 등록 API 에서 처리) — 검증/저장하지 않는다
+     */
+    private void validateSignupRequest(SignupRequestDTO request) {
+        if (request == null
+                || isBlank(request.getIdentityToken())
+                || isBlank(request.getEmail())
+                || isBlank(request.getPassword())
+                || isBlank(request.getNickname())) {
+            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_REQUEST);
+        }
+    }
+
+    /**
+     * 이메일 정규화 + 형식 검증
+     * - null/blank/형식 오류 → INVALID_EMAIL_FORMAT (기존 checkEmailAvailability 와 동일 정책)
+     * - 소문자 정규화 후 반환 (email_hash 가 대소문자 무관하게 동작하도록)
+     */
+    private String normalizeEmail(String email) {
+        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        if (!EMAIL_PATTERN.matcher(normalized).matches()) {
+            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
+        }
+        return normalized;
+    }
+
+    /**
+     * 회원가입 전용 JWT 검증 — 서명/만료 + sub == signup-verification 확인
+     *
+     * @throws BusinessException EXPIRED_SIGNUP_TOKEN(만료) / INVALID_SIGNUP_TOKEN(위변조·용도 오류)
+     */
+    private Claims verifySignupToken(String token) {
+        try {
+            return signupTokenProvider.verifySignupToken(token);
+        } catch (ExpiredJwtException e) {
+            throw new BusinessException(AuthErrorCode.EXPIRED_SIGNUP_TOKEN);
+        } catch (JwtException e) {
+            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN);
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     /**

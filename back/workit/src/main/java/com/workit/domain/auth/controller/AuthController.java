@@ -1,5 +1,6 @@
 package com.workit.domain.auth.controller;
 
+import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
@@ -60,5 +61,18 @@ public class AuthController {
         return GlobalResponseFactory.success(
                 authService.verifyIdentity(request.getIdentityVerificationId()),
                 "본인인증 성공. 가입을 진행합니다.");
+    }
+
+    // 1.4 최종 회원가입 완료 (회원가입 2단계 — DB 최종 저장)
+    // - docs: 최종 회원가입 완료(DB 최종 저장) (POST /api/v1/auth/signup)
+    // - 비로그인 공개 API: 본인인증(verify-identity)과 이메일 중복 확인(check-email) 완료 후 호출
+    // - Controller 에는 비즈니스 로직 없음 — Service 에서 JWT 검증/Redis 조회/중복 검증/DB 저장 수행
+    @PostMapping("/signup")
+    public ResponseEntity<CommonResponse<Void>> signupPost(
+            @RequestBody SignupRequestDTO request) {
+
+        authService.signup(request);
+
+        return GlobalResponseFactory.success(null, "회원가입이 완료되었습니다.");
     }
 }

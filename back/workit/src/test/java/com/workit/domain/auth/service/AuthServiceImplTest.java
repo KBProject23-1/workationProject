@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
@@ -9,18 +10,34 @@ import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.MockIdentityVerificationProvider;
 import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.TermsVO;
+import com.workit.domain.auth.vo.UserAuthVO;
+import com.workit.domain.auth.vo.UserProfileVO;
+import com.workit.domain.auth.vo.UserVO;
+import com.workit.domain.wallet.dto.request.ChargeRequest;
+import com.workit.domain.wallet.dto.request.RefundRequest;
+import com.workit.domain.wallet.dto.response.ChargeResponse;
+import com.workit.domain.wallet.dto.response.RefundResponse;
+import com.workit.domain.wallet.dto.response.WalletResponse;
+import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
+import com.workit.global.util.PasswordEncryptor;
 import com.workit.global.util.PersonalDataCipher;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,11 +69,24 @@ class AuthServiceImplTest {
     // SHA-256("new@example.com") — 가입 가능한 이메일
     private static final String EMAIL_HASH_NEW =
             "f0030501023327437b06e5c6f87df7871b8e704ae608d1d0b7b24fdd2a06c716";
+    // SHA-256("test@example.com") — 회원가입 완료 테스트용 이메일
+    private static final String EMAIL_HASH_TEST =
+            "973dfe463ec85785f5f95af5ba3906eedb2d931c24e69824a89ea65dba4e813b";
+
+    // Mock Provider 의 휴대폰 번호는 입력 id 로부터 유도된다.
+    // imp_ver_1234567890 → 숫자 1234567890 → 뒤 8자리 34567890 → "01034567890"
+    // SHA-256("01034567890") — users.phone_number_hash 저장값 검증용
+    private static final String PHONE_HASH =
+            "b741eec0f41484b79603ed742c3b036a996bfc22ed56672e995cc3f9cf9adfc9";
+    private static final String MOCK_PHONE_NUMBER = "01034567890";
 
     private AuthService authService;
     private InMemorySignupVerificationStore signupVerificationStore;
+    private FakeAuthMapper authMapper;
+    private FakeWalletService walletService;
 
-    // 수동 Fake Mapper - 테스트에서 원하는 약관 목록 / CI·이메일 해시 중복 상태를 그대로 돌려준다
+    // 수동 Fake Mapper - 테스트에서 원하는 약관 목록 / CI·이메일·닉네임 중복 상태를 그대로 돌려주고,
+    // 회원가입 완료 시 insert 되는 데이터를 캡처해 테스트가 검증할 수 있게 한다
     private static class FakeAuthMapper implements AuthMapper {
 
         private final List<TermsVO> terms;
@@ -67,6 +97,24 @@ class AuthServiceImplTest {
         /** 이미 가입된 회원으로 간주할 이메일 SHA-256 해시 집합 */
         private final Set<String> existingEmailHashes;
 
+        /** 이미 가입된 회원으로 간주할 닉네임 집합 */
+        private final Set<String> existingNicknames;
+
+        /** 회원가입 완료 시 insert 된 users 목록 (검증용) */
+        final List<UserVO> insertedUsers = new ArrayList<>();
+
+        /** 회원가입 완료 시 insert 된 user_auth 목록 (검증용) */
+        final List<UserAuthVO> insertedUserAuths = new ArrayList<>();
+
+        /** 회원가입 완료 시 insert 된 user_profile 목록 (검증용) */
+        final List<UserProfileVO> insertedUserProfiles = new ArrayList<>();
+
+        /** 회원가입 완료 시 insert 된 약관 동의(user_terms_agreements) 목록 (검증용) */
+        final List<UserTermsInsert> insertedUserTerms = new ArrayList<>();
+
+        /** users PK 자동 증가 흉내 — insert 마다 1씩 증가 */
+        private long nextUserId = 1L;
+
         FakeAuthMapper(List<TermsVO> terms) {
             this(terms, Collections.emptySet());
         }
@@ -76,14 +124,63 @@ class AuthServiceImplTest {
         }
 
         FakeAuthMapper(List<TermsVO> terms, Set<String> existingCiHashes, Set<String> existingEmailHashes) {
+            this(terms, existingCiHashes, existingEmailHashes, Collections.emptySet());
+        }
+
+        FakeAuthMapper(List<TermsVO> terms, Set<String> existingCiHashes,
+                       Set<String> existingEmailHashes, Set<String> existingNicknames) {
             this.terms = terms;
-            this.existingCiHashes = existingCiHashes;
-            this.existingEmailHashes = existingEmailHashes;
+            // 테스트에서 중복 상태를 동적으로 추가할 수 있도록 가변 집합으로 복사한다
+            this.existingCiHashes = new java.util.HashSet<>(existingCiHashes);
+            this.existingEmailHashes = new java.util.HashSet<>(existingEmailHashes);
+            this.existingNicknames = new java.util.HashSet<>(existingNicknames);
         }
 
         @Override
         public List<TermsVO> selectTermsList() {
             return terms;
+        }
+
+        @Override
+        public List<Long> selectRequiredTermsIds() {
+            List<Long> ids = new ArrayList<>();
+            for (TermsVO term : terms) {
+                if (Boolean.TRUE.equals(term.getRequired())) {
+                    ids.add(term.getId());
+                }
+            }
+            return ids;
+        }
+
+        @Override
+        public List<Long> selectExistingTermIds(List<Long> termIds) {
+            List<Long> existing = new ArrayList<>();
+            for (Long termId : termIds) {
+                for (TermsVO term : terms) {
+                    if (termId != null && termId.equals(term.getId())) {
+                        existing.add(termId);
+                        break;
+                    }
+                }
+            }
+            return existing;
+        }
+
+        @Override
+        public int insertUserTerms(Long userId, List<Long> termIds) {
+            insertedUserTerms.add(new UserTermsInsert(userId, termIds));
+            return 1;
+        }
+
+        /** user_terms_agreements insert 캡처용 — (userId, termIds) 쌍을 보관해 테스트가 검증한다 */
+        static class UserTermsInsert {
+            final long userId;
+            final List<Long> termIds;
+
+            UserTermsInsert(long userId, List<Long> termIds) {
+                this.userId = userId;
+                this.termIds = termIds;
+            }
         }
 
         @Override
@@ -94,6 +191,56 @@ class AuthServiceImplTest {
         @Override
         public int countByEmailHash(String emailHash) {
             return existingEmailHashes.contains(emailHash) ? 1 : 0;
+        }
+
+        @Override
+        public int countByNickname(String nickname) {
+            return existingNicknames.contains(nickname) ? 1 : 0;
+        }
+
+        @Override
+        public int insertUser(UserVO user) {
+            user.setId(nextUserId++);
+            insertedUsers.add(user);
+            return 1;
+        }
+
+        @Override
+        public int insertUserAuth(UserAuthVO userAuth) {
+            insertedUserAuths.add(userAuth);
+            return 1;
+        }
+
+        @Override
+        public int insertUserProfile(UserProfileVO userProfile) {
+            insertedUserProfiles.add(userProfile);
+            return 1;
+        }
+    }
+
+    // 수동 Fake WalletService - createWallet 이 호출되었는지(생성된 userId)를 기록한다
+    static class FakeWalletService implements WalletService {
+
+        final List<Long> createdWalletUserIds = new ArrayList<>();
+
+        @Override
+        public void createWallet(Long userId) {
+            createdWalletUserIds.add(userId);
+        }
+
+        @Override
+        public WalletResponse getMyWallet(Long userId) {
+            throw new UnsupportedOperationException("테스트에서 사용하지 않음");
+        }
+
+        @Override
+        public ChargeResponse charge(Long userId, ChargeRequest request) {
+            throw new UnsupportedOperationException("테스트에서 사용하지 않음");
+        }
+
+        @Override
+        public RefundResponse refund(Long userId, RefundRequest request) {
+            throw new UnsupportedOperationException("테스트에서 사용하지 않음");
         }
     }
 
@@ -152,11 +299,14 @@ class AuthServiceImplTest {
                 term(3L, "마케팅 정보 수신 동의", false)
         );
         signupVerificationStore = new InMemorySignupVerificationStore();
+        authMapper = new FakeAuthMapper(terms);
+        walletService = new FakeWalletService();
         authService = new AuthServiceImpl(
-                new FakeAuthMapper(terms),
+                authMapper,
                 new MockIdentityVerificationProvider(),
                 new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                signupVerificationStore
+                signupVerificationStore,
+                walletService
         );
     }
 
@@ -196,7 +346,8 @@ class AuthServiceImplTest {
                 new FakeAuthMapper(Collections.emptyList()),
                 new MockIdentityVerificationProvider(),
                 new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                new InMemorySignupVerificationStore()
+                new InMemorySignupVerificationStore(),
+                new FakeWalletService()
         );
 
         TermsListResponseDTO result = emptyService.getTermsList();
@@ -245,6 +396,10 @@ class AuthServiceImplTest {
         // name 도 암호화본만 저장된다 (개인정보 원문 Redis 저장 금지)
         assertNotEquals("홍길동", saved.getEncryptedName());
         assertEquals("홍길동", PersonalDataCipher.decrypt(saved.getEncryptedName()));
+
+        // phone 도 암호화본만 저장된다 (원문 Redis 저장 금지)
+        assertNotEquals(MOCK_PHONE_NUMBER, saved.getEncryptedPhone());
+        assertEquals(MOCK_PHONE_NUMBER, PersonalDataCipher.decrypt(saved.getEncryptedPhone()));
     }
 
     @Test
@@ -269,7 +424,8 @@ class AuthServiceImplTest {
                         Collections.singleton(CI_HASH_9999999999)),
                 new MockIdentityVerificationProvider(),
                 new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                signupVerificationStore
+                signupVerificationStore,
+                new FakeWalletService()
         );
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -307,7 +463,8 @@ class AuthServiceImplTest {
                         Collections.emptySet(), existingEmailHashes),
                 new MockIdentityVerificationProvider(),
                 new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                new InMemorySignupVerificationStore()
+                new InMemorySignupVerificationStore(),
+                new FakeWalletService()
         );
     }
 
@@ -368,4 +525,358 @@ class AuthServiceImplTest {
                 () -> service.checkEmailAvailability("not-an-email"));
         assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
     }
+
+    // ---------- 최종 회원가입 완료 ----------
+
+    /** 회원가입 요청 DTO 생성 헬퍼 — 기본값으로 필수 약관(1, 2) 전체 동의 상태를 만든다 */
+    private SignupRequestDTO signupRequest(String identityToken, String email, String nickname) {
+        return signupRequest(identityToken, email, nickname, Arrays.asList(1L, 2L));
+    }
+
+    /** 회원가입 요청 DTO 생성 헬퍼 — 동의 약관 ID 목록 지정 */
+    private SignupRequestDTO signupRequest(String identityToken, String email, String nickname,
+                                           List<Long> agreedTermsIds) {
+        SignupRequestDTO request = new SignupRequestDTO();
+        request.setIdentityToken(identityToken);
+        request.setEmail(email);
+        request.setPassword("password123!");
+        request.setNickname(nickname);
+        request.setAgreedTermsIds(agreedTermsIds);
+        return request;
+    }
+
+    /** verifyIdentity 를 거쳐 발급된 유효한 identityToken 과 저장소 상태를 재사용한다 */
+    private String issueValidIdentityToken() {
+        IdentityVerificationResponseDTO result =
+                authService.verifyIdentity("imp_ver_1234567890");
+        return result.getIdentityToken();
+    }
+
+    @Test
+    @DisplayName("정상 회원가입 - users/user_auth/user_profile insert + 지갑 생성 + Redis 삭제 + 암호화 저장")
+    void signup_success() {
+        String token = issueValidIdentityToken();
+
+        authService.signup(signupRequest(token, "test@example.com", "tester"));
+
+        // users insert 검증
+        assertEquals(1, authMapper.insertedUsers.size());
+        UserVO user = authMapper.insertedUsers.get(0);
+        assertNotNull(user.getId());
+        assertEquals("ACTIVE", user.getStatus());
+        // email_hash / email_encrypt
+        assertEquals(EMAIL_HASH_TEST, user.getEmailHash());
+        assertEquals("test@example.com", PersonalDataCipher.decrypt(user.getEmailEncrypt()));
+        // name_encrypt
+        assertEquals("홍길동", PersonalDataCipher.decrypt(user.getNameEncrypt()));
+        // phone_number_hash / phone_number_encrypt
+        assertEquals(PHONE_HASH, user.getPhoneNumberHash());
+        assertEquals(MOCK_PHONE_NUMBER, PersonalDataCipher.decrypt(user.getPhoneNumberEncrypt()));
+
+        // user_auth insert 검증
+        assertEquals(1, authMapper.insertedUserAuths.size());
+        UserAuthVO userAuth = authMapper.insertedUserAuths.get(0);
+        assertEquals(user.getId(), userAuth.getUserId());
+        // password 는 BCrypt 해시 (원문과 다르고 matches 검증 통과)
+        assertNotEquals("password123!", userAuth.getPasswordHash());
+        assertTrue(PasswordEncryptor.matches("password123!", userAuth.getPasswordHash()));
+        // CI hash / encrypt
+        assertEquals(CI_HASH_1234567890, userAuth.getIdentityCiHash());
+        assertEquals("MOCK-CI-imp_ver_1234567890",
+                PersonalDataCipher.decrypt(userAuth.getIdentityCiEncrypt()));
+
+        // user_profile insert 검증
+        assertEquals(1, authMapper.insertedUserProfiles.size());
+        UserProfileVO profile = authMapper.insertedUserProfiles.get(0);
+        assertEquals(user.getId(), profile.getUserId());
+        assertEquals("tester", profile.getNickname());
+
+        // user_terms_agreements insert 검증 (약관 동의 저장 — 필수 약관 1, 2)
+        assertEquals(1, authMapper.insertedUserTerms.size());
+        assertEquals(user.getId(), authMapper.insertedUserTerms.get(0).userId);
+        assertEquals(Arrays.asList(1L, 2L), authMapper.insertedUserTerms.get(0).termIds);
+
+        // 전자지갑 생성 검증
+        assertEquals(Collections.singletonList(user.getId()), walletService.createdWalletUserIds);
+
+        // 회원가입 완료 후 Redis 임시 데이터 삭제 검증
+        assertTrue(signupVerificationStore.data.isEmpty());
+    }
+
+    @Test
+    @DisplayName("CI 중복 실패 - 최종 가입 시점에 동일 CI 가입자가 있으면 DUPLICATE_USER")
+    void signup_duplicateCi_throws() {
+        // verifyIdentity 단계와 동일한 CI 해시가 이미 가입된 상태로 구성
+        String token = issueValidIdentityToken();
+
+        authMapper.existingCiHashes.add(CI_HASH_1234567890);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.DUPLICATE_USER, ex.getErrorCode());
+
+        // 중복 감지 시 어떤 insert 도 발생하지 않아야 한다
+        assertTrue(authMapper.insertedUsers.isEmpty());
+        assertTrue(authMapper.insertedUserAuths.isEmpty());
+        assertTrue(authMapper.insertedUserProfiles.isEmpty());
+        // Redis 데이터는 삭제되지 않고 남아 있어야 재시도 가능
+        assertFalse(signupVerificationStore.data.isEmpty());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 실패 - 동일 email_hash 가 있으면 DUPLICATE_EMAIL")
+    void signup_duplicateEmail_throws() {
+        String token = issueValidIdentityToken();
+
+        authMapper.existingEmailHashes.add(EMAIL_HASH_TEST);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.DUPLICATE_EMAIL, ex.getErrorCode());
+        assertTrue(authMapper.insertedUsers.isEmpty());
+    }
+
+    @Test
+    @DisplayName("닉네임 중복 실패 - 동일 nickname 이 있으면 DUPLICATE_NICKNAME")
+    void signup_duplicateNickname_throws() {
+        String token = issueValidIdentityToken();
+
+        authMapper.existingNicknames.add("tester");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.DUPLICATE_NICKNAME, ex.getErrorCode());
+        assertTrue(authMapper.insertedUsers.isEmpty());
+    }
+
+    @Test
+    @DisplayName("JWT 만료 - 만료된 identityToken 은 EXPIRED_SIGNUP_TOKEN")
+    void signup_expiredToken_throws() {
+        // verifyIdentity 는 유효한 임시 데이터를 저장하지만, 토큰은 과거 만료 시각으로 발급한다
+        SignupVerificationData data = SignupVerificationData.builder()
+                .verificationId("imp_ver_1234567890")
+                .ciHash(CI_HASH_1234567890)
+                .encryptedCi(PersonalDataCipher.encrypt("MOCK-CI-imp_ver_1234567890"))
+                .encryptedName(PersonalDataCipher.encrypt("홍길동"))
+                .encryptedPhone(PersonalDataCipher.encrypt(MOCK_PHONE_NUMBER))
+                .build();
+        signupVerificationStore.save("expired-key", data);
+
+        String expiredToken = new SignupTokenProvider(TEST_JWT_SECRET, 10)
+                .issue("expired-key", new Date(System.currentTimeMillis() - 60_000L));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(expiredToken, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.EXPIRED_SIGNUP_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("JWT 위변조 - 서명이 틀린 identityToken 은 INVALID_SIGNUP_TOKEN")
+    void signup_tamperedToken_throws() {
+        String token = issueValidIdentityToken();
+        // 끝에서 두 번째 base64 글자를 바꾼다.
+        // 마지막 글자는 256비트 서명의 패딩 비트만 담고 있어 'a'→'b' 교체 시
+        // 복호화된 서명이 동일해질 수 있어(플레이크) 반드시 유효 비트를 바꾸는 위치를 사용한다
+        String tampered = token.substring(0, token.length() - 2)
+                + (token.charAt(token.length() - 2) == 'a' ? "b" : "a")
+                + token.charAt(token.length() - 1);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(tampered, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.INVALID_SIGNUP_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("용도 오류 - 회원가입 전용 토큰이 아닌 JWT(sub 불일치)는 INVALID_SIGNUP_TOKEN")
+    void signup_wrongSubjectToken_throws() {
+        // 같은 시크릿으로 서명했지만 sub 만 다른 토큰 (회원가입 토큰 오용 방지 검증)
+        String otherToken = Jwts.builder()
+                .setSubject("access-token")
+                .claim("temporaryUserKey", "temp-key-1")
+                .setExpiration(new Date(System.currentTimeMillis() + 60_000L))
+                .signWith(Keys.hmacShaKeyFor(TEST_JWT_SECRET.getBytes(StandardCharsets.UTF_8)),
+                        SignatureAlgorithm.HS256)
+                .compact();
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(otherToken, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.INVALID_SIGNUP_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Redis 데이터 없음 - 토큰은 유효하지만 임시 데이터가 없으면 SIGNUP_VERIFICATION_NOT_FOUND")
+    void signup_verificationNotFound_throws() {
+        // 임시 데이터 저장 없이 유효한 토큰만 발급한다
+        String token = new SignupTokenProvider(TEST_JWT_SECRET, 10).issue("no-data-key");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+
+        assertEquals(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND, ex.getErrorCode());
+        assertTrue(authMapper.insertedUsers.isEmpty());
+    }
+
+    @Test
+    @DisplayName("필수 값 누락 - identityToken/email/password/nickname 누락은 INVALID_SIGNUP_REQUEST")
+    void signup_missingRequired_throws() {
+        // identityToken 누락
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest("", "test@example.com", "tester")));
+        assertEquals(AuthErrorCode.INVALID_SIGNUP_REQUEST, ex.getErrorCode());
+
+        // email 누락
+        assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest("some-token", "", "tester")));
+
+        // nickname 누락
+        assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest("some-token", "test@example.com", "")));
+
+        // null 요청
+        assertThrows(BusinessException.class, () -> authService.signup(null));
+    }
+
+    @Test
+    @DisplayName("이메일 형식 오류 - 잘못된 이메일은 INVALID_EMAIL_FORMAT")
+    void signup_invalidEmailFormat_throws() {
+        String token = issueValidIdentityToken();
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "not-an-email", "tester")));
+
+        assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("약관 동의 - 모든 필수 약관 동의 시 가입 성공 + 약관 동의 저장 (필수 + 선택)")
+    void signup_allRequiredTermsAgreed_success() {
+        String token = issueValidIdentityToken();
+
+        // 필수(1, 2) + 선택(3) 전부 동의
+        authService.signup(signupRequest(token, "test@example.com", "tester",
+                Arrays.asList(1L, 2L, 3L)));
+
+        assertEquals(1, authMapper.insertedUsers.size());
+        // 동의한 약관이 그대로 저장된다
+        assertEquals(1, authMapper.insertedUserTerms.size());
+        assertEquals(authMapper.insertedUsers.get(0).getId(),
+                authMapper.insertedUserTerms.get(0).userId);
+        assertEquals(Arrays.asList(1L, 2L, 3L), authMapper.insertedUserTerms.get(0).termIds);
+    }
+
+    @Test
+    @DisplayName("약관 동의 - 필수 약관 일부 누락 시 MISSING_REQUIRED_TERMS")
+    void signup_missingRequiredTerms_throws() {
+        String token = issueValidIdentityToken();
+
+        // 필수 약관 2 번을 누락하고 1 번만 동의
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                        Collections.singletonList(1L))));
+
+        assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, ex.getErrorCode());
+
+        // 실패 시 어떤 insert 도 발생하지 않아야 한다
+        assertTrue(authMapper.insertedUsers.isEmpty());
+        assertTrue(authMapper.insertedUserAuths.isEmpty());
+        assertTrue(authMapper.insertedUserProfiles.isEmpty());
+        assertTrue(authMapper.insertedUserTerms.isEmpty());
+    }
+
+    @Test
+    @DisplayName("약관 동의 - 존재하지 않는 약관 ID 포함 시 INVALID_TERM_ID")
+    void signup_invalidTermId_throws() {
+        String token = issueValidIdentityToken();
+
+        // 필수(1, 2)는 동의했지만 terms 에 존재하지 않는 99 번이 섞여 있음
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                        Arrays.asList(1L, 2L, 99L))));
+
+        assertEquals(AuthErrorCode.INVALID_TERM_ID, ex.getErrorCode());
+
+        // 실패 시 어떤 insert 도 발생하지 않아야 한다 (FK 위반 500 대신 400)
+        assertTrue(authMapper.insertedUsers.isEmpty());
+        assertTrue(authMapper.insertedUserTerms.isEmpty());
+    }
+
+    @Test
+    @DisplayName("약관 동의 - null 요소 포함 시에도 INVALID_TERM_ID")
+    void signup_nullTermId_throws() {
+        String token = issueValidIdentityToken();
+
+        // [1, 2, null] — null 요소는 terms 에 존재할 수 없으므로 검증 실패
+        List<Long> agreedWithNull = new ArrayList<>(Arrays.asList(1L, 2L, null));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                        agreedWithNull)));
+
+        assertEquals(AuthErrorCode.INVALID_TERM_ID, ex.getErrorCode());
+        assertTrue(authMapper.insertedUsers.isEmpty());
+    }
+
+    @Test
+    @DisplayName("약관 동의 - 선택 약관 미동의 시에도 가입 성공")
+    void signup_optionalTermsNotAgreed_success() {
+        String token = issueValidIdentityToken();
+
+        // 필수(1, 2)만 동의하고 선택(3)은 미동의
+        authService.signup(signupRequest(token, "test@example.com", "tester",
+                Arrays.asList(1L, 2L)));
+
+        assertEquals(1, authMapper.insertedUsers.size());
+        assertEquals(Arrays.asList(1L, 2L), authMapper.insertedUserTerms.get(0).termIds);
+    }
+
+    @Test
+    @DisplayName("약관 동의 - agreedTermsIds 누락/빈 배열 시 MISSING_REQUIRED_TERMS")
+    void signup_agreedTermsMissing_throws() {
+        String token = issueValidIdentityToken();
+
+        // null
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester", null)));
+        assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, nullEx.getErrorCode());
+
+        // 빈 배열
+        BusinessException emptyEx = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                        Collections.emptyList())));
+        assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, emptyEx.getErrorCode());
+
+        assertTrue(authMapper.insertedUsers.isEmpty());
+        assertTrue(authMapper.insertedUserTerms.isEmpty());
+    }
+
+    @Test
+    @DisplayName("약관 동의 - 중복 ID 전달 시 중복 제거 후 저장")
+    void signup_duplicateTermIds_deduplicated() {
+        String token = issueValidIdentityToken();
+
+        authService.signup(signupRequest(token, "test@example.com", "tester",
+                Arrays.asList(1L, 1L, 2L, 2L)));
+
+        assertEquals(1, authMapper.insertedUserTerms.size());
+        assertEquals(Arrays.asList(1L, 2L), authMapper.insertedUserTerms.get(0).termIds);
+    }
+
+    @Test
+    @DisplayName("이메일 소문자 정규화 - 대문자 이메일도 소문자 hash 로 저장된다")
+    void signup_emailLowercased() {
+        String token = issueValidIdentityToken();
+
+        authService.signup(signupRequest(token, "TEST@EXAMPLE.COM", "tester"));
+
+        // SHA-256("test@example.com") 과 동일해야 한다 (소문자 정규화)
+        assertEquals(EMAIL_HASH_TEST, authMapper.insertedUsers.get(0).getEmailHash());
+        assertEquals("test@example.com",
+                PersonalDataCipher.decrypt(authMapper.insertedUsers.get(0).getEmailEncrypt()));
+    }
 }
+
