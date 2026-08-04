@@ -3,6 +3,7 @@ package com.workit.domain.settlement.mapper;
 import com.workit.domain.expense.vo.WorkationExpenseVO;
 import com.workit.domain.settlement.vo.SettlementCategoryVO;
 import com.workit.domain.settlement.vo.SettlementValidationVO;
+import com.workit.domain.settlement.vo.SpentDayCountVO;
 import com.workit.domain.workation.vo.BudgetType;
 import org.apache.ibatis.annotations.Param;
 
@@ -24,6 +25,10 @@ public interface SettlementMapper {
     List<WorkationExpenseVO> selectExpenseDetails(@Param("workationId") Long workationId,
                                                   @Param("userId") Long userId,
                                                   @Param("budgetType") BudgetType budgetType);
+
+    // 예산 유형별 지출 발생 일수. 하루 평균·안 쓴 날 계산에 쓴다
+    List<SpentDayCountVO> selectSpentDayCounts(@Param("workationId") Long workationId,
+                                               @Param("budgetType") BudgetType budgetType);
 
     int countExpenses(@Param("workationId") Long workationId,
                       @Param("budgetType") BudgetType budgetType);

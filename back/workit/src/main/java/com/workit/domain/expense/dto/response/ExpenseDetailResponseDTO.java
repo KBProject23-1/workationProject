@@ -33,6 +33,8 @@ public class ExpenseDetailResponseDTO {
     private final String categoryName;
     private final Boolean isAutoCategorized;
     private final ExpenseSourceType sourceType;
+    // 앱 내 결제 건만 값이 있다. 수기 입력 건은 null
+    private final String approvedNumber;
     private final String memo;
     private final List<CategoryOption> availableCategories;
     private final LocalDateTime createdAt;
@@ -79,6 +81,7 @@ public class ExpenseDetailResponseDTO {
                 .categoryName(vo.getDisplayCategoryName())
                 .isAutoCategorized(vo.getIsAutoCategorized())
                 .sourceType(vo.getSourceType())
+                .approvedNumber(vo.getApprovedNumber())
                 .memo(vo.getMemo())
                 .availableCategories(toOptions(categories))
                 .createdAt(vo.getCreatedAt())

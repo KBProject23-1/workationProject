@@ -115,6 +115,21 @@
         ORDER BY we.budget_type, we.spent_at, we.id
     </select>
 
+    <!--
+        예산 유형별로 지출이 발생한 날짜 수.
+        하루에 여러 건을 써도 1일로 세야 하므로 DATE 단위로 중복을 제거한다.
+    -->
+    <select id="selectSpentDayCounts" resultType="com.workit.domain.settlement.vo.SpentDayCountVO">
+        SELECT budget_type,
+               COUNT(DISTINCT DATE(spent_at)) AS spent_day_count
+          FROM workation_expenses
+         WHERE workation_id = #{workationId}
+        <if test="budgetType != null">
+            AND budget_type = #{budgetType}
+        </if>
+         GROUP BY budget_type
+    </select>
+
     <select id="countExpenses" resultType="int">
         SELECT COUNT(*)
           FROM workation_expenses

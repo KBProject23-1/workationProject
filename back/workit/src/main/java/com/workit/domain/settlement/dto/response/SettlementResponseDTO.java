@@ -3,7 +3,10 @@ package com.workit.domain.settlement.dto.response;
 import lombok.Builder;
 import lombok.Getter;
 
+import com.workit.domain.workation.vo.WorkationStatus;
+
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 // 6.1 정산 내역 조회 응답
@@ -24,6 +27,9 @@ public class SettlementResponseDTO {
         private final LocalDate startDate;
         private final LocalDate endDate;
         private final Integer totalDays;
+        // 지난 워케이션 상세 화면에서 정산완료 배지와 정산일을 표시한다
+        private final WorkationStatus status;
+        private final LocalDateTime settledAt;
     }
 
     @Getter

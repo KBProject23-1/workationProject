@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.workation.mapper.RegionMapper">
+
+    <!-- 지역은 마스터 데이터라 사용자별 조건이 없다 -->
+    <select id="selectRegionList" resultType="com.workit.domain.workation.vo.Region">
+        SELECT id, name
+          FROM region
+         ORDER BY id
+    </select>
+
+</mapper>
