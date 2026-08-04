@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.merchant.offices.mapper.MerchantMapper">
+    <select id="selectOfficeListByCursor"
+            resultType="com.workit.domain.merchant.offices.vo.MerchantOfficeItemVO">
+
+        SELECT m.id AS merchant_id,
+        m.name,
+        m.address,
+        m.thumbnail_url,
+        m.price,
+        m.rating,
+        COALESCE(COUNT(r.review_id), 0) AS review_count,
+        o.noise_level,
+        0 AS bookmarked
+        FROM merchants m
+        INNER JOIN offices o
+        ON o.merchant_id = m.id
+        LEFT JOIN reviews r
+        ON r.merchant_id = m.id
+        AND r.status = 'ACTIVE'
+        WHERE m.category = 'OFFICE'
+
+        <if test="regionId != null">
+            AND m.region_id = #{regionId}
+        </if>
+
+        <!-- 요청 기간 중 예약 가능한 날짜가 하루라도 있는 오피스 조회 -->
+        <if test="startDate != null and endDate != null">
+            AND EXISTS (
+            SELECT 1
+            FROM reservation_products rp
+            INNER JOIN product_daily_inventories pdi
+            ON pdi.product_id = rp.id
+            WHERE rp.merchant_id = m.id
+            AND pdi.inventory_date BETWEEN #{startDate} AND #{endDate}
+            AND pdi.is_available = 1
+            AND pdi.remaining_capacity > 0
+            )
+        </if>
+
+        <if test="cursorRating != null and sort == 'RATING_HIGH' and cursorMerchantId != null">
+            AND (
+            m.rating <![CDATA[ < ]]> #{cursorRating}
+            OR (
+            m.rating = #{cursorRating}
+            AND m.id <![CDATA[ < ]]> #{cursorMerchantId}
+            )
+            )
+        </if>
+        <if test="cursorRating != null and sort == 'RATING_LOW' and cursorMerchantId != null">
+            AND (
+            m.rating <![CDATA[ > ]]> #{cursorRating}
+            OR (
+            m.rating = #{cursorRating}
+            AND m.id <![CDATA[ > ]]> #{cursorMerchantId}
+            )
+            )
+        </if>
+        <if test="cursorPrice != null and sort == 'PRICE_LOW' and cursorMerchantId != null">
+            AND (
+            m.price <![CDATA[ > ]]> #{cursorPrice}
+            OR (
+            m.price = #{cursorPrice}
+            AND m.id <![CDATA[ > ]]> #{cursorMerchantId}
+            )
+            )
+        </if>
+        <if test="cursorPrice != null and sort == 'PRICE_HIGH' and cursorMerchantId != null">
+            AND (
+            m.price <![CDATA[ < ]]> #{cursorPrice}
+            OR (
+            m.price = #{cursorPrice}
+            AND m.id <![CDATA[ < ]]> #{cursorMerchantId}
+            )
+            )
+        </if>
+
+        GROUP BY m.id,
+        m.name,
+        m.address,
+        m.thumbnail_url,
+        m.price,
+        m.rating,
+        o.noise_level
+
+        <choose>
+            <when test="sort == 'RATING_LOW'">
+                ORDER BY m.rating ASC,
+                m.id ASC
+            </when>
+            <when test="sort == 'PRICE_LOW'">
+                ORDER BY m.price ASC,
+                m.id ASC
+            </when>
+            <when test="sort == 'PRICE_HIGH'">
+                ORDER BY m.price DESC,
+                m.id DESC
+            </when>
+            <otherwise>
+                ORDER BY m.rating DESC,
+                m.id DESC
+            </otherwise>
+        </choose>
+
+        LIMIT #{size}
+    </select>
+
+    <select id="selectOfficeDetailById" resultType="com.workit.domain.merchant.offices.vo.MerchantOfficeDetailVO">
+        SELECT m.id AS merchant_id,
+               m.name,
+               m.address,
+               m.latitude,
+               m.longitude,
+               m.phone_number,
+               m.thumbnail_url,
+               m.price,
+               m.rating,
+               COALESCE(COUNT(r.review_id), 0) AS review_count,
+               o.description,
+               0 AS bookmarked
+        FROM merchants m
+                 INNER JOIN offices o ON o.merchant_id = m.id
+                 LEFT JOIN reviews r ON r.merchant_id = m.id
+                 AND r.status = 'ACTIVE'
+        WHERE m.id = #{merchantId}
+          AND m.category = 'OFFICE'
+        GROUP BY m.id, m.name, m.address, m.latitude, m.longitude, m.phone_number, m.thumbnail_url, m.price, m.rating, o.description
+    </select>
+
+    <select id="selectOfficeTagsByMerchantId" resultType="com.workit.domain.merchant.offices.vo.MerchantOfficeDetailTagVO">
+        SELECT t.id AS tag_id,
+               t.name
+        FROM merchant_tags mt
+                 INNER JOIN tags t ON t.id = mt.tag_id
+        WHERE mt.merchant_id = #{merchantId}
+        ORDER BY t.name
+    </select>
+</mapper>
