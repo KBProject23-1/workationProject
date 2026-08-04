@@ -18,4 +18,12 @@ public interface AuthMapper {
      * - 반환값이 0 초과면 이미 가입된 회원
      */
     int countByCiHash(String ciHash);
+
+    /**
+     * 이메일(SHA-256 해시) 기준 중복 가입 조회
+     * - users.email_hash (UNIQUE) 대상
+     * - 반환값이 0 초과면 이미 가입된 회원 → 사용 불가 이메일
+     * - email_encrypt(원문 복호화)는 조회하지 않고 hash 만 사용 (보안 정책)
+     */
+    int countByEmailHash(String emailHash);
 }

@@ -30,4 +30,16 @@
         WHERE identity_ci_hash = #{ciHash}
     </select>
 
+    <!--
+        회원가입 이메일 중복 확인.
+        - users.email_hash (SHA-256, UNIQUE) 대상 조회
+        - email_encrypt(원문)은 복호화하지 않고 hash 만 사용 (knowledge.md: 검색용 hash 저장)
+        - Mapper 는 조회만 담당 (비즈니스 판단은 Service)
+    -->
+    <select id="countByEmailHash" resultType="int">
+        SELECT COUNT(*)
+        FROM users
+        WHERE email_hash = #{emailHash}
+    </select>
+
 </mapper>

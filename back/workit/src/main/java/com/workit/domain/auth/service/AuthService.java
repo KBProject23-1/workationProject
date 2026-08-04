@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 
@@ -14,4 +15,11 @@ public interface AuthService {
      * 회원가입 전용 임시 JWT(identityToken)/name 반환
      */
     IdentityVerificationResponseDTO verifyIdentity(String identityVerificationId);
+
+    /**
+     * 회원가입 이메일 중복 확인
+     * email 검증 → SHA-256 hash 생성 → users.email_hash 기준 조회 → 사용 가능 여부 반환
+     * - 중복이어도 4xx 가 아니라 available=false 로 반환 (회원가입 화면 실시간 체크용)
+     */
+    EmailAvailabilityResponseDTO checkEmailAvailability(String email);
 }
