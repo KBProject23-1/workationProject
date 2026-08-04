@@ -5,6 +5,8 @@ import com.workit.domain.settlement.exception.SettlementErrorCode;
 import com.workit.domain.settlement.service.SettlementService;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.exception.BusinessException;
+import com.workit.global.dto.CommonResponse;
+import com.workit.global.response.GlobalResponseFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -32,14 +34,15 @@ public class SettlementController {
     // 6.1 정산 내역 조회
     // budgetType 미지정 시 법인·개인 모두 반환
     @GetMapping
-    public ResponseEntity<SettlementResponseDTO> settlementGet(
+    public ResponseEntity<CommonResponse<SettlementResponseDTO>> settlementGet(
             @PathVariable("workationId") Long workationId,
             @RequestParam(value = "budgetType", required = false) BudgetType budgetType) {
 
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
 
-        return ResponseEntity.ok(settlementService.getSettlement(userId, workationId, budgetType));
+        return GlobalResponseFactory.success(
+                settlementService.getSettlement(userId, workationId, budgetType));
     }
 
     // 6.2 정산 내역 Excel 다운로드
