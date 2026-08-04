@@ -1,6 +1,6 @@
 package com.workit.domain.merchant.offices.enums;
 
-import com.workit.domain.merchant.offices.exception.MerchantErrorCode;
+import com.workit.domain.merchant.offices.exception.MerchantOfficesErrorCode;
 import com.workit.exception.BusinessException;
 
 import java.util.Locale;
@@ -23,7 +23,7 @@ public enum MerchantOfficeSortType {
                 && !normalized.equals(RATING_LOW.name())
                 && !normalized.equals(PRICE_HIGH.name())
                 && !normalized.equals(PRICE_LOW.name())) {
-            throw new BusinessException(MerchantErrorCode.INVALID_SEARCH_CONDITION);
+            throw new BusinessException(MerchantOfficesErrorCode.INVALID_SEARCH_CONDITION);
         }
 
         return MerchantOfficeSortType.valueOf(normalized);

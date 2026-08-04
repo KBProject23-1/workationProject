@@ -7,8 +7,8 @@ import com.workit.domain.merchant.offices.enums.MerchantOfficeSortType;
 import com.workit.domain.merchant.offices.dto.response.MerchantOfficeItemResponseDTO;
 import com.workit.domain.merchant.offices.dto.response.MerchantOfficeListResponseDTO;
 import com.workit.domain.merchant.offices.dto.response.MerchantOfficeDetailResponseDTO;
-import com.workit.domain.merchant.offices.exception.MerchantErrorCode;
-import com.workit.domain.merchant.offices.mapper.MerchantMapper;
+import com.workit.domain.merchant.offices.exception.MerchantOfficesErrorCode;
+import com.workit.domain.merchant.offices.mapper.OfficesMapper;
 import com.workit.domain.merchant.offices.vo.MerchantOfficeItemVO;
 import com.workit.domain.merchant.offices.vo.MerchantOfficeDetailVO;
 import com.workit.domain.merchant.offices.vo.MerchantOfficeDetailTagVO;
@@ -34,24 +34,24 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class MerchantServiceImpl implements MerchantService {
+public class OfficesServiceImpl implements OfficesService {
 
     private static final int MAX_SIZE = 50;
     private static final ObjectMapper OFFICE_CURSOR_OBJECT_MAPPER = new ObjectMapper();
 
-    private final MerchantMapper merchantMapper;
+    private final OfficesMapper merchantMapper;
 
     @Override
     @Transactional(readOnly = true)
     public MerchantOfficeDetailResponseDTO findOfficeDetail(Long merchantId) {
         try {
             if (merchantId == null || merchantId < 1) {
-                throw new BusinessException(MerchantErrorCode.INVALID_MERCHANT_ID);
+                throw new BusinessException(MerchantOfficesErrorCode.INVALID_MERCHANT_ID);
             }
 
             MerchantOfficeDetailVO office = merchantMapper.selectOfficeDetailById(merchantId);
             if (office == null) {
-                throw new BusinessException(MerchantErrorCode.OFFICE_NOT_FOUND);
+                throw new BusinessException(MerchantOfficesErrorCode.OFFICE_NOT_FOUND);
             }
 
             List<MerchantOfficeDetailTagVO> tags = merchantMapper.selectOfficeTagsByMerchantId(merchantId);
@@ -61,10 +61,10 @@ public class MerchantServiceImpl implements MerchantService {
             throw e;
         } catch (MyBatisSystemException e) {
             log.error("Merchant office detail 조회 중 MyBatis 오류 - merchantId={}", merchantId, e);
-            throw new BusinessException(MerchantErrorCode.INTERNAL_SERVER_ERROR);
+            throw new BusinessException(MerchantOfficesErrorCode.INTERNAL_SERVER_ERROR);
         } catch (Exception e) {
             log.error("Merchant office detail 조회 중 처리 오류 - merchantId={}", merchantId, e);
-            throw new BusinessException(MerchantErrorCode.INTERNAL_SERVER_ERROR);
+            throw new BusinessException(MerchantOfficesErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -119,26 +119,26 @@ public class MerchantServiceImpl implements MerchantService {
             throw e;
         } catch (MyBatisSystemException e) {
             log.error("Merchant office list 조회 중 MyBatis 오류", e);
-            throw new BusinessException(MerchantErrorCode.INTERNAL_SERVER_ERROR);
+            throw new BusinessException(MerchantOfficesErrorCode.INTERNAL_SERVER_ERROR);
         } catch (Exception e) {
             log.error("Merchant office list 조회 중 처리 오류", e);
-            throw new BusinessException(MerchantErrorCode.INTERNAL_SERVER_ERROR);
+            throw new BusinessException(MerchantOfficesErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
 
     private void validateOfficeListCondition(Long regionId, LocalDate startDate, LocalDate endDate) {
         if (regionId == null || startDate == null || endDate == null) {
-            throw new BusinessException(MerchantErrorCode.INVALID_SEARCH_CONDITION);
+            throw new BusinessException(MerchantOfficesErrorCode.INVALID_SEARCH_CONDITION);
         }
 
         if (regionId < 1 || endDate.isBefore(startDate)) {
-            throw new BusinessException(MerchantErrorCode.INVALID_SEARCH_CONDITION);
+            throw new BusinessException(MerchantOfficesErrorCode.INVALID_SEARCH_CONDITION);
         }
     }
 
     private int normalizeSize(int size) {
         if (size < 1 || size > MAX_SIZE) {
-            throw new BusinessException(MerchantErrorCode.INVALID_SEARCH_CONDITION);
+            throw new BusinessException(MerchantOfficesErrorCode.INVALID_SEARCH_CONDITION);
         }
         return size;
     }
@@ -212,7 +212,7 @@ public class MerchantServiceImpl implements MerchantService {
         } catch (IllegalArgumentException | NullPointerException | JsonProcessingException | ClassCastException |
                 UnsupportedEncodingException | BusinessException e) {
             log.warn("오피스 커서 디코딩 실패 - cursor={}, sort={}", cursor, sort);
-            throw new BusinessException(MerchantErrorCode.INVALID_OFFICE_CURSOR);
+            throw new BusinessException(MerchantOfficesErrorCode.INVALID_OFFICE_CURSOR);
         }
     }
 

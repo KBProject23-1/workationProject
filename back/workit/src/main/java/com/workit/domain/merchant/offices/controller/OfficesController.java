@@ -3,7 +3,7 @@ package com.workit.domain.merchant.offices.controller;
 import com.workit.domain.merchant.offices.dto.response.MerchantOfficeListResponseDTO;
 import com.workit.domain.merchant.offices.dto.response.MerchantOfficeDetailResponseDTO;
 import com.workit.domain.merchant.offices.enums.MerchantOfficeSortType;
-import com.workit.domain.merchant.offices.service.MerchantService;
+import com.workit.domain.merchant.offices.service.OfficesService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
 import com.workit.domain.workation.dto.response.WorkationCurrentResponseDTO;
@@ -23,7 +23,7 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class OfficesController {
 
-    private final MerchantService merchantService;
+    private final OfficesService merchantService;
     private final WorkationService workationService;
 
     @GetMapping("/offices")

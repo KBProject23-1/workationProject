@@ -3,7 +3,7 @@ package com.workit.domain.merchant.offices.exception;
 import com.workit.exception.ErrorCode;
 import org.springframework.http.HttpStatus;
 
-public enum MerchantErrorCode implements ErrorCode {
+public enum MerchantOfficesErrorCode implements ErrorCode {
 
     INVALID_SEARCH_CONDITION(HttpStatus.BAD_REQUEST, "조회 조건이 올바르지 않습니다."),
     INVALID_OFFICE_CURSOR(HttpStatus.BAD_REQUEST, "공유오피스 조회 커서가 올바르지 않습니다."),
@@ -14,7 +14,7 @@ public enum MerchantErrorCode implements ErrorCode {
     private final HttpStatus status;
     private final String message;
 
-    MerchantErrorCode(HttpStatus status, String message) {
+    MerchantOfficesErrorCode(HttpStatus status, String message) {
         this.status = status;
         this.message = message;
     }
