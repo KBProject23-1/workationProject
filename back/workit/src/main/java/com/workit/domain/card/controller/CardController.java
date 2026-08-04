@@ -11,7 +11,6 @@ import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -54,8 +53,7 @@ public class CardController {
     ) {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(CommonResponse.success(cardService.linkCards(userId, requestBody.getLinkableCardIds())));
+        return GlobalResponseFactory.created(cardService.linkCards(userId, requestBody.getLinkableCardIds()));
     }
 
     /** 대표 카드 설정 */
@@ -81,7 +79,7 @@ public class CardController {
         return GlobalResponseFactory.success(cardService.updateNickname(userId, cardsId, requestBody.getCardNickname()));
     }
 
-    /** 카드 삭제(소프트) - 204 No Content 는 스펙상 바디를 가질 수 없어 공통 응답 포맷을 적용하지 않는다 */
+    /** 카드 삭제(소프트) */
     @DeleteMapping("/{cardsId}")
     public ResponseEntity<Void> deleteCard(
             @PathVariable Long cardsId,
@@ -90,6 +88,6 @@ public class CardController {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
         cardService.deleteCard(userId, cardsId);
-        return ResponseEntity.noContent().build();
+        return GlobalResponseFactory.noContent();
     }
 }

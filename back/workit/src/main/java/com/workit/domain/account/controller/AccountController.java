@@ -10,7 +10,6 @@ import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -53,8 +52,7 @@ public class AccountController {
     ) {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(CommonResponse.success(accountService.linkAccounts(userId, requestBody.getLinkableAccountIds())));
+        return GlobalResponseFactory.created(accountService.linkAccounts(userId, requestBody.getLinkableAccountIds()));
     }
 
     /** 주 계좌 변경 */

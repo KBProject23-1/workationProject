@@ -26,6 +26,21 @@ public final class GlobalResponseFactory {
         return ResponseEntity.ok(CommonResponse.success(data, message));
     }
 
+    /** 201 Created - 기본 메시지("요청 성공") */
+    public static <T> ResponseEntity<CommonResponse<T>> created(T data) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse.success(data));
+    }
+
+    /** 201 Created - 커스텀 메시지 */
+    public static <T> ResponseEntity<CommonResponse<T>> created(T data, String message) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(CommonResponse.success(data, message));
+    }
+
+    /** 204 No Content - HTTP 스펙상 바디를 가질 수 없어 공통 응답 포맷을 감싸지 않는다 */
+    public static ResponseEntity<Void> noContent() {
+        return ResponseEntity.noContent().build();
+    }
+
     /** 실패 - ErrorCode 기반 (상태 코드, 에러 코드명, 기본 메시지 사용) */
     public static <T> ResponseEntity<CommonResponse<T>> error(HttpStatus status, ErrorCode errorCode) {
         return ResponseEntity.status(status)
