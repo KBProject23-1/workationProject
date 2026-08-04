@@ -6,6 +6,8 @@ import com.workit.domain.wallet.dto.response.ChargeResponse;
 import com.workit.domain.wallet.dto.response.RefundResponse;
 import com.workit.domain.wallet.dto.response.WalletResponse;
 import com.workit.domain.wallet.service.WalletService;
+import com.workit.global.dto.CommonResponse;
+import com.workit.global.response.GlobalResponseFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,33 +23,33 @@ public class WalletController {
 
     /** 지갑 조회 */
     @GetMapping("/me")
-    public ResponseEntity<WalletResponse> getMyWallet(
+    public ResponseEntity<CommonResponse<WalletResponse>> getMyWallet(
             HttpServletRequest request
     ) {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
-        return ResponseEntity.ok(walletService.getMyWallet(userId));
+        return GlobalResponseFactory.success(walletService.getMyWallet(userId));
     }
 
     /** 지갑 충전 */
     @PostMapping("/charge")
-    public ResponseEntity<ChargeResponse> charge(
+    public ResponseEntity<CommonResponse<ChargeResponse>> charge(
             @RequestBody ChargeRequest requestBody,
             HttpServletRequest request
     ) {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
-        return ResponseEntity.ok(walletService.charge(userId, requestBody));
+        return GlobalResponseFactory.success(walletService.charge(userId, requestBody));
     }
 
     /** 지갑 환불 */
     @PostMapping("/refund")
-    public ResponseEntity<RefundResponse> refund(
+    public ResponseEntity<CommonResponse<RefundResponse>> refund(
             @RequestBody RefundRequest requestBody,
             HttpServletRequest request
     ) {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
-        return ResponseEntity.ok(walletService.refund(userId, requestBody));
+        return GlobalResponseFactory.success(walletService.refund(userId, requestBody));
     }
 }

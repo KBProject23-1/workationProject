@@ -53,7 +53,7 @@ public class AccountServiceImpl implements AccountService {
 
             LinkableAccountVO linkable = accountMapper.findLinkableAccountById(linkableId, userId);
             if (linkable == null) {
-                throw new BusinessException(AccountErrorCode.LINKABLE_ACCOUNT_NOT_FOUND);
+                throw new BusinessException(AccountErrorCode.ACCOUNT_LINKABLE_NOT_FOUND);
             }
 
             boolean isPrimary = !hasExistingAccount && i == 0;
@@ -101,7 +101,7 @@ public class AccountServiceImpl implements AccountService {
             throw new BusinessException(AccountErrorCode.ACCOUNT_NOT_FOUND);
         }
         if (Boolean.TRUE.equals(account.getIsPrimary())) {
-            throw new BusinessException(AccountErrorCode.PRIMARY_ACCOUNT_DELETE_NOT_ALLOWED);
+            throw new BusinessException(AccountErrorCode.ACCOUNT_PRIMARY_DELETE_NOT_ALLOWED);
         }
 
         accountMapper.deleteAccount(accountId, userId);
