@@ -1,5 +1,6 @@
 package com.workit.domain.reservation.controller;
 
+import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
 import com.workit.domain.reservation.service.ReservationService;
@@ -56,6 +57,19 @@ public class ReservationController {
 
         return ResponseEntity.ok(
                 reservationService.findReservationDetails(userId, reservationId)
+        );
+    }
+
+    // 로그인 사용자의 예약 취소 상세를 조회
+    @GetMapping("/{reservationId}/cancellation")
+    public ResponseEntity<ReservationCancellationDetailResponseDTO> reservationCancellationDetails(
+            @PathVariable("reservationId") Long reservationId) {
+
+        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
+        Long userId = 1L;
+
+        return ResponseEntity.ok(
+                reservationService.findReservationCancellationDetails(userId, reservationId)
         );
     }
 }

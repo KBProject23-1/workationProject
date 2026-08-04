@@ -49,6 +49,22 @@
         <result property="reviewStatus" column="review_status"/>
     </resultMap>
 
+    <resultMap id="reservationCancellationDetailMap"
+               type="com.workit.domain.reservation.vo.ReservationCancellationDetailVO">
+        <id property="reservationId" column="reservation_id"/>
+        <result property="reservationCode" column="reservation_code"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="productName" column="product_name"/>
+        <result property="productDetailType" column="product_detail_type"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="totalAmount" column="total_amount"/>
+        <result property="canceledAt" column="canceled_at"/>
+        <result property="cancelFee" column="cancel_fee"/>
+        <result property="refundAmount" column="refund_amount"/>
+    </resultMap>
+
     <sql id="reservationListFrom">
         <!-- 목록 화면에 필요한 예약 상품과 가맹점 정보만 조인한다. -->
         FROM reservations r
@@ -160,6 +176,31 @@
         WHERE r.id = #{reservationId}
           AND r.user_id = #{userId}
           AND r.status IN ('CONFIRMED', 'COMPLETED')
+    </select>
+
+    <select id="selectReservationCancellationDetails"
+            resultMap="reservationCancellationDetailMap">
+        <!-- 로그인 사용자가 소유한 취소 예약만 상세 조회한다. -->
+        SELECT
+            r.id AS reservation_id,
+            r.reservation_code,
+            m.name AS merchant_name,
+            rp.product_name,
+            rp.product_detail_type,
+            rp.thumbnail_url,
+            r.start_date,
+            r.end_date,
+            r.total_amount,
+            rc.canceled_at,
+            rc.cancel_fee,
+            rc.refund_amount
+        FROM reservations r
+        JOIN reservation_products rp ON rp.id = r.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+        JOIN reservation_cancels rc ON rc.reservation_id = r.id
+        WHERE r.id = #{reservationId}
+          AND r.user_id = #{userId}
+          AND r.status = 'CANCELED'
     </select>
 
 </mapper>

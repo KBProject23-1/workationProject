@@ -1,6 +1,7 @@
 package com.workit.domain.reservation.mapper;
 
 import com.workit.domain.reservation.vo.ReservationCategory;
+import com.workit.domain.reservation.vo.ReservationCancellationDetailVO;
 import com.workit.domain.reservation.vo.ReservationDetailVO;
 import com.workit.domain.reservation.vo.ReservationListItemVO;
 import com.workit.domain.reservation.vo.ReservationStatus;
@@ -36,6 +37,14 @@ public interface ReservationMapper {
 
 //  로그인 사용자가 소유한 예약 확정·이용 완료 상세를 조회한다.
     ReservationDetailVO selectReservationDetails(
+            @Param("userId") Long userId,
+            @Param("reservationId") Long reservationId
+    );
+
+    /**
+     * 로그인 사용자가 소유한 예약 취소 상세를 조회
+     */
+    ReservationCancellationDetailVO selectReservationCancellationDetails(
             @Param("userId") Long userId,
             @Param("reservationId") Long reservationId
     );
