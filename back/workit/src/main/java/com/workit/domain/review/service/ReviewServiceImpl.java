@@ -2,6 +2,7 @@ package com.workit.domain.review.service;
 
 import com.workit.domain.review.dto.response.MerchantReviewItemResponseDTO;
 import com.workit.domain.review.dto.response.MerchantReviewListResponseDTO;
+import com.workit.domain.review.dto.response.MyReviewListResponseDTO;
 import com.workit.domain.review.dto.response.ReviewDetailResponseDTO;
 import com.workit.domain.review.exception.ReviewErrorCode;
 import com.workit.domain.review.mapper.ReviewMapper;
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
@@ -60,6 +62,19 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         return ReviewDetailResponseDTO.from(review);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MyReviewListResponseDTO> findMyReviewList(Long userId) {
+        if (userId == null || userId < 1) {
+            throw new IllegalArgumentException("사용자 번호는 1 이상이어야 합니다.");
+        }
+
+        return reviewMapper.selectMyReviewList(userId)
+                .stream()
+                .map(MyReviewListResponseDTO::from)
+                .collect(Collectors.toList());
     }
 
     // 별점 1점부터 5점까지 누락 없이 분포 구성

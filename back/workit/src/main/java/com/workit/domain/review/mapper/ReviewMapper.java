@@ -2,6 +2,7 @@ package com.workit.domain.review.mapper;
 
 import com.workit.domain.review.vo.MerchantReviewStatisticsVO;
 import com.workit.domain.review.vo.MerchantReviewVO;
+import com.workit.domain.review.vo.MyReviewListItemVO;
 import com.workit.domain.review.vo.ReviewDetailVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -18,4 +19,6 @@ public interface ReviewMapper {
     );
 
     ReviewDetailVO selectReviewDetails(@Param("reviewId") Long reviewId);
+
+    List<MyReviewListItemVO> selectMyReviewList(@Param("userId") Long userId);
 }

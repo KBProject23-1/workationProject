@@ -47,6 +47,23 @@
         <result property="transactionApprovedAt" column="transaction_approved_at"/>
     </resultMap>
 
+    <resultMap id="myReviewListItemMap"
+               type="com.workit.domain.review.vo.MyReviewListItemVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="merchantThumbnailUrl" column="merchant_thumbnail_url"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="atmosphere" column="atmosphere"/>
+        <result property="imageUrl" column="image_url"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="reservationId" column="reservation_id"/>
+        <result property="transactionId" column="transaction_id"/>
+    </resultMap>
+
     <select id="selectMerchantExists" resultType="boolean">
         SELECT EXISTS(
             SELECT 1
@@ -113,6 +130,31 @@
         LEFT JOIN transactions tr ON tr.id = rv.transaction_id
         WHERE rv.review_id = #{reviewId}
           AND rv.status = 'ACTIVE'
+    </select>
+
+    <select id="selectMyReviewList" resultMap="myReviewListItemMap">
+        SELECT
+            rv.review_id,
+            m.id AS merchant_id,
+            m.name AS merchant_name,
+            m.category AS merchant_category,
+            m.thumbnail_url AS merchant_thumbnail_url,
+            rv.rating,
+            rv.content,
+            rv.atmosphere,
+            rv.image_url,
+            rv.created_at,
+            rv.updated_at,
+            rv.reservation_id,
+            rv.transaction_id
+        FROM reviews rv
+        JOIN merchants m ON m.id = rv.merchant_id
+        WHERE rv.user_id = #{userId}
+          AND rv.status = 'ACTIVE'
+        ORDER BY
+            FIELD(m.category, 'ACCOMMODATION', 'OFFICE', 'RESTAURANT', 'ACTIVITY'),
+            rv.created_at DESC,
+            rv.review_id DESC
     </select>
 
 </mapper>
