@@ -10,6 +10,7 @@ import com.workit.domain.review.vo.MerchantReviewVO;
 import com.workit.domain.review.vo.MyReviewListItemVO;
 import com.workit.domain.review.vo.ReviewDetailVO;
 import com.workit.exception.BusinessException;
+import com.workit.global.dto.PageResponseDTO;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -34,9 +35,11 @@ class ReviewServiceImplTest {
                 new StubReviewMapper(true, Collections.singletonList(review), statistics)
         );
 
-        MerchantReviewListResponseDTO response = service.findMerchantReviewList(1L);
+        MerchantReviewListResponseDTO response = service.findMerchantReviewList(1L, 0, 10);
 
-        assertEquals("워케이션러", response.getReviews().get(0).getNickname());
+        assertEquals("워케이션러", response.getReviews().getContent().get(0).getNickname());
+        assertEquals(2L, response.getReviews().getTotalElements());
+        assertEquals(1, response.getReviews().getTotalPages());
         assertEquals(new BigDecimal("4.5"), response.getAverageRating());
         assertEquals(2L, response.getReviewCount());
         assertEquals(1L, response.getRatingDistribution().get(4));
@@ -51,7 +54,7 @@ class ReviewServiceImplTest {
 
         BusinessException exception = assertThrows(
                 BusinessException.class,
-                () -> service.findMerchantReviewList(999L)
+                () -> service.findMerchantReviewList(999L, 0, 10)
         );
 
         assertEquals(ReviewErrorCode.MERCHANT_NOT_FOUND, exception.getErrorCode());
@@ -65,7 +68,7 @@ class ReviewServiceImplTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> service.findMerchantReviewList(0L)
+                () -> service.findMerchantReviewList(0L, 0, 10)
         );
     }
 
@@ -131,11 +134,25 @@ class ReviewServiceImplTest {
                 )
         );
 
-        List<MyReviewListResponseDTO> response = service.findMyReviewList(1L);
+        PageResponseDTO<MyReviewListResponseDTO> response =
+                service.findMyReviewList(1L, 0, 10);
 
-        assertEquals(1, response.size());
-        assertEquals("테스트 공유오피스", response.get(0).getMerchantName());
-        assertEquals("OFFICE", response.get(0).getMerchantCategory());
+        assertEquals(1, response.getContent().size());
+        assertEquals(1L, response.getTotalElements());
+        assertEquals("테스트 공유오피스", response.getContent().get(0).getMerchantName());
+        assertEquals("OFFICE", response.getContent().get(0).getMerchantCategory());
+    }
+
+    @Test
+    void 리뷰목록페이지크기는오십을초과할수없다() {
+        ReviewService service = new ReviewServiceImpl(
+                new StubReviewMapper(true, Collections.emptyList(), createStatistics())
+        );
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.findMyReviewList(1L, 0, 51)
+        );
     }
 
     private MerchantReviewStatisticsVO createStatistics() {
@@ -192,7 +209,10 @@ class ReviewServiceImplTest {
         }
 
         @Override
-        public List<MerchantReviewVO> selectMerchantReviewList(Long merchantId) {
+        public List<MerchantReviewVO> selectMerchantReviewList(
+                Long merchantId,
+                int offset,
+                int size) {
             return reviews;
         }
 
@@ -207,8 +227,16 @@ class ReviewServiceImplTest {
         }
 
         @Override
-        public List<MyReviewListItemVO> selectMyReviewList(Long userId) {
+        public List<MyReviewListItemVO> selectMyReviewList(
+                Long userId,
+                int offset,
+                int size) {
             return myReviews;
+        }
+
+        @Override
+        public long countMyReviewList(Long userId) {
+            return myReviews.size();
         }
     }
 }

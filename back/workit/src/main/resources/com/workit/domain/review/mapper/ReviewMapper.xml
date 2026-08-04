@@ -86,6 +86,7 @@
         WHERE r.merchant_id = #{merchantId}
           AND r.status = 'ACTIVE'
         ORDER BY r.created_at DESC, r.review_id DESC
+        LIMIT #{size} OFFSET #{offset}
     </select>
 
     <select id="selectMerchantReviewStatistics" resultMap="merchantReviewStatisticsMap">
@@ -155,6 +156,14 @@
             FIELD(m.category, 'ACCOMMODATION', 'OFFICE', 'RESTAURANT', 'ACTIVITY'),
             rv.created_at DESC,
             rv.review_id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countMyReviewList" resultType="long">
+        SELECT COUNT(*)
+        FROM reviews
+        WHERE user_id = #{userId}
+          AND status = 'ACTIVE'
     </select>
 
 </mapper>

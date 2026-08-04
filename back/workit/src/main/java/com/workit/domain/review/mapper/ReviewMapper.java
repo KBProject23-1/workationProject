@@ -12,7 +12,11 @@ public interface ReviewMapper {
 
     boolean selectMerchantExists(@Param("merchantId") Long merchantId);
 
-    List<MerchantReviewVO> selectMerchantReviewList(@Param("merchantId") Long merchantId);
+    List<MerchantReviewVO> selectMerchantReviewList(
+            @Param("merchantId") Long merchantId,
+            @Param("offset") int offset,
+            @Param("size") int size
+    );
 
     MerchantReviewStatisticsVO selectMerchantReviewStatistics(
             @Param("merchantId") Long merchantId
@@ -20,5 +24,11 @@ public interface ReviewMapper {
 
     ReviewDetailVO selectReviewDetails(@Param("reviewId") Long reviewId);
 
-    List<MyReviewListItemVO> selectMyReviewList(@Param("userId") Long userId);
+    List<MyReviewListItemVO> selectMyReviewList(
+            @Param("userId") Long userId,
+            @Param("offset") int offset,
+            @Param("size") int size
+    );
+
+    long countMyReviewList(@Param("userId") Long userId);
 }
