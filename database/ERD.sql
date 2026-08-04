@@ -8,8 +8,8 @@ CREATE TABLE `users`
 (
     `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
     `email_hash`           VARCHAR(100) NOT NULL COMMENT '유저 이메일 (로그인 ID) SHA-256',
-    `email_encrypt`        VARCHAR(100) NOT NULL COMMENT '유저 이메일 (로그인 ID) AES',
-    `name_encrypt`         VARCHAR(50)  NOT NULL COMMENT '유저 이름 AES',
+    `email_encrypt`        VARCHAR(400) NOT NULL COMMENT '유저 이메일 (로그인 ID) AES',
+    `name_encrypt`         VARCHAR(100) NOT NULL COMMENT '유저 이름 AES',
     `phone_number_hash`    VARCHAR(255) NOT NULL COMMENT '유저 핸드폰 번호 SHA-256',
     `phone_number_encrypt` VARCHAR(255) NOT NULL COMMENT '유저 핸드폰 번호 AES',
     `status`               VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
