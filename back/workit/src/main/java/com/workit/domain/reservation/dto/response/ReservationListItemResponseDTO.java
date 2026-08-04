@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+//예약 목록의 예약 확정·이용 완료·취소 항목을 표현하는 응답 DTO
 @Getter
 @Builder
 public class ReservationListItemResponseDTO {

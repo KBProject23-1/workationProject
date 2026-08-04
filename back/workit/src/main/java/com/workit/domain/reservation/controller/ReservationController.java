@@ -1,5 +1,6 @@
 package com.workit.domain.reservation.controller;
 
+import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
 import com.workit.domain.reservation.service.ReservationService;
 import com.workit.domain.reservation.vo.ReservationCategory;
@@ -8,12 +9,16 @@ import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
+/**
+ * 예약 목록과 예약 상세 조회 요청을 처리하는 컨트롤러
+ */
 @RestController
 @RequestMapping("/api/v1/reservations")
 @RequiredArgsConstructor
@@ -37,6 +42,20 @@ public class ReservationController {
 
         return ResponseEntity.ok(
                 reservationService.findReservationList(userId, statuses, category, page, size)
+        );
+    }
+
+
+//    로그인 사용자의 예약 확정·이용 완료 상세를 조회
+    @GetMapping("/{reservationId}")
+    public ResponseEntity<ReservationDetailResponseDTO> reservationDetails(
+            @PathVariable("reservationId") Long reservationId) {
+
+        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
+        Long userId = 1L;
+
+        return ResponseEntity.ok(
+                reservationService.findReservationDetails(userId, reservationId)
         );
     }
 }
