@@ -4,6 +4,159 @@
 
 <mapper namespace="com.workit.domain.reservation.mapper.ReservationMapper">
 
+    <resultMap id="reservationCreateWorkationMap"
+               type="com.workit.domain.reservation.vo.ReservationCreateWorkationVO">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="regionId" column="region_id"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+    </resultMap>
+
+    <resultMap id="reservationCreateProductMap"
+               type="com.workit.domain.reservation.vo.ReservationCreateProductVO">
+        <id property="id" column="id"/>
+        <result property="productName" column="product_name"/>
+        <result property="productDetailType" column="product_detail_type"/>
+        <result property="maxHeadcount" column="max_headcount"/>
+        <result property="pricePerUnit" column="price_per_unit"/>
+        <result property="priceUnit" column="price_unit"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="merchantRegionId" column="merchant_region_id"/>
+    </resultMap>
+
+    <resultMap id="reservationDailyInventoryMap"
+               type="com.workit.domain.reservation.vo.ReservationDailyInventoryVO">
+        <id property="id" column="id"/>
+        <result property="inventoryDate" column="inventory_date"/>
+        <result property="remainingCapacity" column="remaining_capacity"/>
+        <result property="available" column="is_available"/>
+    </resultMap>
+
+    <select id="selectWorkationForUpdate" resultMap="reservationCreateWorkationMap">
+        SELECT id, user_id, region_id, start_date, end_date
+        FROM workations
+        WHERE id = #{workationId}
+          AND user_id = #{userId}
+          AND status = 'ACTIVE'
+        FOR UPDATE
+    </select>
+
+    <select id="selectReservationProductForUpdate" resultMap="reservationCreateProductMap">
+        SELECT
+            rp.id,
+            rp.product_name,
+            rp.product_detail_type,
+            rp.max_headcount,
+            rp.price_per_unit,
+            rp.price_unit,
+            m.id AS merchant_id,
+            m.name AS merchant_name,
+            m.category AS merchant_category,
+            m.region_id AS merchant_region_id
+        FROM reservation_products rp
+        JOIN merchants m ON m.id = rp.merchant_id
+        WHERE rp.id = #{productId}
+        FOR UPDATE
+    </select>
+
+    <select id="countOverlappingReservation" resultType="int">
+        SELECT COUNT(*)
+        FROM reservations r
+        JOIN reservation_products rp ON rp.id = r.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+        WHERE r.user_id = #{userId}
+          AND r.workation_id = #{workationId}
+          AND r.status IN ('CONFIRMED', 'COMPLETED')
+          AND m.category = #{category}
+        <choose>
+            <when test="includeEndDate">
+                AND r.start_date &lt;= #{endDate}
+                AND r.end_date &gt;= #{startDate}
+            </when>
+            <otherwise>
+                AND r.start_date &lt; #{endDate}
+                AND r.end_date &gt; #{startDate}
+            </otherwise>
+        </choose>
+    </select>
+
+    <select id="selectDailyInventoriesForUpdate" resultMap="reservationDailyInventoryMap">
+        SELECT id, inventory_date, remaining_capacity, is_available
+        FROM product_daily_inventories
+        WHERE product_id = #{productId}
+          AND inventory_date &gt;= #{startDate}
+        <choose>
+            <when test="includeEndDate">
+                AND inventory_date &lt;= #{endDate}
+            </when>
+            <otherwise>
+                AND inventory_date &lt; #{endDate}
+            </otherwise>
+        </choose>
+        ORDER BY inventory_date ASC
+        FOR UPDATE
+    </select>
+
+    <insert id="insertReservation"
+            parameterType="com.workit.domain.reservation.vo.ReservationCreateVO"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO reservations (
+            user_id,
+            workation_id,
+            product_id,
+            reservation_code,
+            start_date,
+            end_date,
+            headcount,
+            quantity,
+            total_amount,
+            status,
+            created_at
+        ) VALUES (
+            #{userId},
+            #{workationId},
+            #{productId},
+            #{reservationCode},
+            #{startDate},
+            #{endDate},
+            #{headcount},
+            #{quantity},
+            #{totalAmount},
+            #{status},
+            NOW()
+        )
+    </insert>
+
+    <update id="updateReservationCode">
+        UPDATE reservations
+        SET reservation_code = #{reservationCode}
+        WHERE id = #{reservationId}
+    </update>
+
+    <update id="updateDailyInventory">
+        UPDATE product_daily_inventories
+        SET remaining_capacity = remaining_capacity - #{reservedCount}
+        WHERE id = #{dailyInventoryId}
+          AND is_available = 1
+          AND remaining_capacity &gt;= #{reservedCount}
+    </update>
+
+    <insert id="insertReservationDailyInventory">
+        INSERT INTO reservation_daily_inventories (
+            reservation_id,
+            daily_inventory_id,
+            reserved_count
+        ) VALUES (
+            #{reservationId},
+            #{dailyInventoryId},
+            #{reservedCount}
+        )
+    </insert>
+
     <resultMap id="reservationListItemMap"
                type="com.workit.domain.reservation.vo.ReservationListItemVO">
         <id property="reservationId" column="reservation_id"/>

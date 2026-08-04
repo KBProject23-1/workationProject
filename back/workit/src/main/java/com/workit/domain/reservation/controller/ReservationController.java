@@ -1,6 +1,8 @@
 package com.workit.domain.reservation.controller;
 
+import com.workit.domain.reservation.dto.request.ReservationCreateRequestDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
+import com.workit.domain.reservation.dto.response.ReservationCreateResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
 import com.workit.domain.reservation.service.ReservationService;
@@ -10,11 +12,14 @@ import com.workit.global.dto.CommonResponse;
 import com.workit.global.dto.PageResponseDTO;
 import com.workit.global.response.GlobalResponseFactory;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -28,6 +33,19 @@ import java.util.List;
 public class ReservationController {
 
     private final ReservationService reservationService;
+
+    // 상품 가격과 재고를 다시 검증하고 지갑 결제가 완료된 예약을 생성한다.
+    @PostMapping
+    public ResponseEntity<CommonResponse<ReservationCreateResponseDTO>> reservationAdd(
+            @RequestBody ReservationCreateRequestDTO request) {
+
+        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
+        Long userId = 1L;
+
+        ReservationCreateResponseDTO response = reservationService.addReservation(userId, request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(CommonResponse.success(response));
+    }
 
     /**
      * 로그인 사용자의 예약 목록을 상태·카테고리별로 조회
