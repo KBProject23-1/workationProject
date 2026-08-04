@@ -5,8 +5,10 @@ import lombok.Getter;
 
 // 본인인증 검증 응답
 // API 스펙(docs): identityToken, name
-// - identityToken: CI 가 AES-256 으로 암호화된 임시 토큰
-//   (실제 PortOne 연동/회원가입 플로우에서 JWT 발급으로 교체 예정 — jjwt 이미 의존성 존재)
+// - identityToken: 회원가입 전용 임시 JWT (Payload: sub, temporaryUserKey, iat, exp)
+//   - 개인정보(name, phoneNumber, CI 원문, AES 암호화 CI)는 Payload 에 포함하지 않는다
+//   - 회원가입 완료 API(#66)에서 서명 검증 후
+//     Redis(signup:verification:{temporaryUserKey})에서 인증 데이터를 복원해 DB 에 저장한다
 // - name: 화면 표시 전용 (예: "홍길동님 환영합니다")
 @Getter
 @Builder

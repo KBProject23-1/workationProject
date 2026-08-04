@@ -9,7 +9,10 @@ public enum AuthErrorCode implements ErrorCode {
 
     // 본인인증(PASS) 관련
     // docs: 본인인증 검증 및 회원 중복 체크 → 400
-    INVALID_VERIFICATION_ID(HttpStatus.BAD_REQUEST, "PASS 인증이 유효하지 않습니다. 다시 시도해주세요.");
+    INVALID_VERIFICATION_ID(HttpStatus.BAD_REQUEST, "PASS 인증이 유효하지 않습니다. 다시 시도해주세요."),
+
+    // 본인인증 통과 후 CI 기준 중복 가입 감지 → 409 (docs errorCode: DUPLICATE_USER)
+    DUPLICATE_USER(HttpStatus.CONFLICT, "이미 가입된 회원입니다. 로그인을 진행해주세요.");
 
     private final HttpStatus status;
     private final String message;

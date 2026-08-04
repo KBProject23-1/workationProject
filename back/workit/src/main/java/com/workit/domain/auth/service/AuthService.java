@@ -10,7 +10,8 @@ public interface AuthService {
 
     /**
      * PASS 본인인증 결과 검증
-     * Provider 검증 → CI AES-256 암호화 → identityToken/name 반환
+     * Provider 검증 → CI SHA-256 중복 체크 → 임시 데이터 Redis 저장 →
+     * 회원가입 전용 임시 JWT(identityToken)/name 반환
      */
     IdentityVerificationResponseDTO verifyIdentity(String identityVerificationId);
 }

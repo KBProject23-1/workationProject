@@ -37,6 +37,8 @@ tasks.withType(JavaCompile) {
 dependencies {
     // Servlet / JSP / JSTL
     compileOnly('javax.servlet:javax.servlet-api:4.0.1')
+    // MockMvc Controller 테스트 시 servlet API 필요 (메인 코드 영향 없음, 동일 버전 재사용)
+    testImplementation('javax.servlet:javax.servlet-api:4.0.1')
     implementation('javax.servlet.jsp:javax.servlet.jsp-api:2.3.3')
     implementation('javax.servlet:jstl:1.2')
 
