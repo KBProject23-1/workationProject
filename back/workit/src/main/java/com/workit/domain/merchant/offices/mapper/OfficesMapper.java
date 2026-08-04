@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-public interface MerchantMapper {
+public interface OfficesMapper {
 
     List<MerchantOfficeItemVO> selectOfficeListByCursor(
             @Param("cursorRating") BigDecimal cursorRating,

@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<mapper namespace="com.workit.domain.merchant.offices.mapper.MerchantMapper">
+<mapper namespace="com.workit.domain.merchant.offices.mapper.OfficesMapper">
     <select id="selectOfficeListByCursor"
             resultType="com.workit.domain.merchant.offices.vo.MerchantOfficeItemVO">
 

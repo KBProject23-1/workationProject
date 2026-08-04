@@ -5,7 +5,7 @@ import com.workit.domain.merchant.offices.dto.response.MerchantOfficeDetailRespo
 import com.workit.domain.merchant.offices.enums.MerchantOfficeSortType;
 import java.time.LocalDate;
 
-public interface MerchantService {
+public interface OfficesService {
 
     MerchantOfficeListResponseDTO findOfficeList(
             String cursor,
