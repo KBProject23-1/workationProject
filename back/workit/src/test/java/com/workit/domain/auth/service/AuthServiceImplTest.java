@@ -941,5 +941,41 @@ class AuthServiceImplTest {
         assertEquals("test@example.com",
                 PersonalDataCipher.decrypt(authMapper.insertedUsers.get(0).getEmailEncrypt()));
     }
+
+    @Test
+    @DisplayName("회원가입 완료 - 최대 길이(254자) 이메일 정상 가입 (trim/lowercase 후 암호화·hash 저장)")
+    void signup_emailMaxLength_success() {
+        String token = issueValidIdentityToken();
+        String maxLengthEmail = buildLongEmail(254);
+
+        authService.signup(signupRequest(token, maxLengthEmail, "tester"));
+
+        assertEquals(1, authMapper.insertedUsers.size());
+        UserVO user = authMapper.insertedUsers.get(0);
+        // 원문은 AES 암호화 저장 — 복호화 시 입력값과 동일
+        assertEquals(maxLengthEmail, PersonalDataCipher.decrypt(user.getEmailEncrypt()));
+        // email_hash 는 SHA-256 hex (64자)
+        assertEquals(64, user.getEmailHash().length());
+        // 전자지갑 생성까지 정상
+        assertEquals(Collections.singletonList(user.getId()), walletService.createdWalletUserIds);
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 255자 이상 이메일 → INVALID_EMAIL_FORMAT + hash 조회/insert 미발생")
+    void signup_emailTooLong_throws() {
+        String token = issueValidIdentityToken();
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest(token, buildLongEmail(255), "tester")));
+
+        assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
+        // 길이 검증은 hash 생성 전에 수행되므로 DB(email_hash) 조회가 없어야 한다
+        assertEquals(0, authMapper.emailHashLookupCount);
+        // 어떤 insert 도 발생하지 않아야 한다 (DB insert 이전 차단)
+        assertTrue(authMapper.insertedUsers.isEmpty());
+        assertTrue(authMapper.insertedUserAuths.isEmpty());
+        assertTrue(authMapper.insertedUserProfiles.isEmpty());
+        assertTrue(authMapper.insertedUserTerms.isEmpty());
+    }
 }
 

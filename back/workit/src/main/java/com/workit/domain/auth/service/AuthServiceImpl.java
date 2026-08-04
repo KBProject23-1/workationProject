@@ -15,6 +15,7 @@ import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
+import com.workit.global.util.EmailValidator;
 import com.workit.global.util.PasswordEncryptor;
 import com.workit.global.util.PersonalDataCipher;
 import io.jsonwebtoken.Claims;
@@ -34,9 +35,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,18 +48,6 @@ public class AuthServiceImpl implements AuthService {
     private final SignupTokenProvider signupTokenProvider;
     private final SignupVerificationStore signupVerificationStore;
     private final WalletService walletService;
-
-    /**
-     * 이메일 형식 검증 패턴 (일반적인 이메일 주소 규칙)
-     */
-    private static final Pattern EMAIL_PATTERN = Pattern.compile(
-            "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
-
-    /**
-     * 이메일 전체 최대 길이 (RFC 5321 기준 최대 254자)
-     * - 비정상적으로 긴 이메일은 형식 검증/DB 조회 전에 차단한다 (checkEmailAvailability)
-     */
-    private static final int MAX_EMAIL_LENGTH = 254;
 
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
@@ -84,34 +71,19 @@ public class AuthServiceImpl implements AuthService {
     @Transactional(readOnly = true)
     public EmailAvailabilityResponseDTO checkEmailAvailability(String email) {
 
-        // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
-        //    - null / blank 는 INVALID_EMAIL_FORMAT (docs: 400)
+        // 1. 이메일 검증 + 정규화 (null/blank → trim → 최대 길이 → lowercase → 형식)
+        //    - 실패 시 INVALID_EMAIL_FORMAT (docs: 400) — EmailValidator 공통 정책 (signup 과 동일)
         //    - 이메일 원문 로그 출력 금지 — 로그에 이메일 값 미포함
-        if (email == null || email.trim().isEmpty()) {
-            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
-        }
+        String normalizedEmail = normalizeAndValidateEmail(email);
 
-        // 2. trim 후 길이 검증 — RFC 5321 기준 최대 254자 초과 시 INVALID_EMAIL_FORMAT
-        //    - 비정상적으로 긴 이메일은 hash 생성/DB 조회 전에 차단한다
-        String trimmedEmail = email.trim();
-        if (trimmedEmail.length() > MAX_EMAIL_LENGTH) {
-            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
-        }
-
-        // 3. lowercase 정규화 + 이메일 형식 검증
-        String normalizedEmail = trimmedEmail.toLowerCase(Locale.ROOT);
-        if (!EMAIL_PATTERN.matcher(normalizedEmail).matches()) {
-            throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
-        }
-
-        // 4. 검색용 SHA-256 hash 생성 후 users.email_hash 기준 중복 조회
+        // 2. 검색용 SHA-256 hash 생성 후 users.email_hash 기준 중복 조회
         //    - email_encrypt(AES 원문) 복호화 금지, 원문 검색 금지 (knowledge.md: 검색용 hash 저장)
         //    - 소문자 정규화 후 hash — email_hash 기준 UNIQUE 제약과 중복 체크가 대소문자에 무관하게 동작하도록
         //      회원가입 완료 시에도 동일하게 소문자 정규화 후 hash 해야 한다
         String emailHash = sha256Hex(normalizedEmail);
         boolean available = authMapper.countByEmailHash(emailHash) == 0;
 
-        // 5. 중복 여부 반환 (중복이어도 성공 응답, 판단은 프론트 가입 흐름에서 처리)
+        // 3. 중복 여부 반환 (중복이어도 성공 응답, 판단은 프론트 가입 흐름에서 처리)
         return EmailAvailabilityResponseDTO.of(available);
     }
 
@@ -191,9 +163,9 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 5. 이메일 처리
-        //    - null/blank/형식 검증 → 소문자 정규화 → SHA-256 hash 생성
+        //    - 검증(blank/길이/형식) → 소문자 정규화 → SHA-256 hash 생성 (EmailValidator 공통 정책)
         //    - users.email_hash 기준 중복 재검증 (이메일 원문 DB 조회 금지)
-        String normalizedEmail = normalizeEmail(request.getEmail());
+        String normalizedEmail = normalizeAndValidateEmail(request.getEmail());
         String emailHash = sha256Hex(normalizedEmail);
         if (authMapper.countByEmailHash(emailHash) > 0) {
             throw new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
@@ -362,16 +334,17 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * 이메일 정규화 + 형식 검증
-     * - null/blank/형식 오류 → INVALID_EMAIL_FORMAT (기존 checkEmailAvailability 와 동일 정책)
-     * - 소문자 정규화 후 반환 (email_hash 가 대소문자 무관하게 동작하도록)
+     * 이메일 검증 + 정규화 (check-email / signup 공통 정책)
+     * - EmailValidator.normalize: null/blank → trim → 최대 길이(254) → lowercase → 형식 검증
+     * - 실패 시 IllegalArgumentException 을 INVALID_EMAIL_FORMAT 으로 변환 (docs: 400)
+     * - 반환값은 소문자 정규화된 이메일 (email_hash 가 대소문자 무관하게 동작하도록)
      */
-    private String normalizeEmail(String email) {
-        String normalized = email.trim().toLowerCase(Locale.ROOT);
-        if (!EMAIL_PATTERN.matcher(normalized).matches()) {
+    private String normalizeAndValidateEmail(String email) {
+        try {
+            return EmailValidator.normalize(email);
+        } catch (IllegalArgumentException e) {
             throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
         }
-        return normalized;
     }
 
     /**

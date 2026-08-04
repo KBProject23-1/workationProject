@@ -10,6 +10,7 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.exception.BusinessException;
 import com.workit.exception.CommonExceptionAdvice;
+import com.workit.global.util.EmailValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -42,12 +42,8 @@ class AuthControllerTest {
     // AuthService 수동 Stub - 실제 Service 의 계약(검증/중복 판단)을 그대로 흉내낸다
     private static class StubAuthService implements AuthService {
 
-        // Controller 테스트용 형식 검증 (실제 검증 로직은 Service 테스트에서 검증)
-        private static final Pattern EMAIL_PATTERN = Pattern.compile(
-                "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
-
-        // RFC 5321 기준 이메일 전체 최대 길이 (Service 상수와 동일 정책)
-        private static final int MAX_EMAIL_LENGTH = 254;
+        // Controller 테스트용 이메일 검증 — Service 와 동일한 EmailValidator 공통 정책 사용
+        // (실제 검증 로직은 Service 테스트에서 검증)
 
         @Override
         public TermsListResponseDTO getTermsList() {
@@ -68,16 +64,16 @@ class AuthControllerTest {
 
         @Override
         public EmailAvailabilityResponseDTO checkEmailAvailability(String email) {
-            if (email == null || email.trim().isEmpty()
-                    || email.trim().length() > MAX_EMAIL_LENGTH
-                    || !EMAIL_PATTERN.matcher(email.trim()).matches()) {
+            try {
+                String normalized = EmailValidator.normalize(email);
+                // "used@example.com" 은 이미 가입된 이메일로 간주
+                if ("used@example.com".equals(normalized)) {
+                    return EmailAvailabilityResponseDTO.of(false);
+                }
+                return EmailAvailabilityResponseDTO.of(true);
+            } catch (IllegalArgumentException e) {
                 throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
             }
-            // "used@example.com" 은 이미 가입된 이메일로 간주
-            if ("used@example.com".equals(email.trim())) {
-                return EmailAvailabilityResponseDTO.of(false);
-            }
-            return EmailAvailabilityResponseDTO.of(true);
         }
 
         @Override
@@ -122,7 +118,14 @@ class AuthControllerTest {
             if ("dup-ci-token".equals(token)) {
                 throw new BusinessException(AuthErrorCode.DUPLICATE_USER);
             }
-            if ("used@example.com".equals(request.getEmail().trim())) {
+            // 이메일 형식/길이 검증 (Stub — 실제 검증은 Service 테스트에서 검증)
+            String normalizedEmail;
+            try {
+                normalizedEmail = EmailValidator.normalize(request.getEmail());
+            } catch (IllegalArgumentException e) {
+                throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
+            }
+            if ("used@example.com".equals(normalizedEmail)) {
                 throw new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
             }
             if ("taken".equals(request.getNickname().trim())) {
@@ -467,6 +470,21 @@ class AuthControllerTest {
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("DUPLICATE_NICKNAME", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
+    void signup_emailTooLong() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", buildLongEmail(255), "tester")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
     }
 
     @Test
