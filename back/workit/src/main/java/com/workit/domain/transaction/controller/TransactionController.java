@@ -3,6 +3,7 @@ package com.workit.domain.transaction.controller;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.transaction.service.TransactionService;
+import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -10,7 +11,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
-import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
@@ -19,20 +19,22 @@ public class TransactionController {
 
     private final TransactionService transactionService;
 
-    /** 거래 내역 전체 목록 조회 (필터링) */
+    /** 거래 내역 전체 목록 조회 (필터링, 페이징) */
     @GetMapping("/api/v1/transactions")
-    public ResponseEntity<List<TransactionListItemResponse>> getTransactions(
+    public ResponseEntity<PageResponseDTO<TransactionListItemResponse>> getTransactions(
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String paymentSourceType,
             @RequestParam(required = false) String transactionType,
             @RequestParam(required = false) Long cardId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
             HttpServletRequest request
     ) {
         // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
         Long userId = 1L;
         return ResponseEntity.ok(transactionService.getTransactions(
-                userId, startDate, endDate, paymentSourceType, transactionType, cardId
+                userId, startDate, endDate, paymentSourceType, transactionType, cardId, page, size
         ));
     }
 

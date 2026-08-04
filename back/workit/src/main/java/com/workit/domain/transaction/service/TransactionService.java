@@ -2,13 +2,13 @@ package com.workit.domain.transaction.service;
 
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.*;
-
-import java.util.List;
+import com.workit.global.dto.PageResponseDTO;
 
 public interface TransactionService {
 
-    List<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
-                                                      String paymentSourceType, String transactionType, Long cardId);
+    PageResponseDTO<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
+                                                      String paymentSourceType, String transactionType, Long cardId,
+                                                      int page, int size);
 
     TransactionDetailResponse getTransactionDetail(Long userId, Long transactionId);
 

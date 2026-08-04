@@ -7,13 +7,23 @@ import java.util.List;
 
 public interface TransactionMapper {
 
-    // 목록 조회 (필터링, 최신순)
+    // 목록 조회 (필터링, 최신순, 페이징)
     List<TransactionVO> findTransactions(@Param("userId") Long userId,
                                          @Param("startDate") String startDate,
                                          @Param("endDate") String endDate,
                                          @Param("paymentSourceType") String paymentSourceType,
                                          @Param("transactionType") String transactionType,
-                                         @Param("cardId") Long cardId);
+                                         @Param("cardId") Long cardId,
+                                         @Param("offset") int offset,
+                                         @Param("size") int size);
+
+    // 목록 페이징용 전체 건수. 필터 조건이 목록과 같아야 한다
+    long countTransactions(@Param("userId") Long userId,
+                           @Param("startDate") String startDate,
+                           @Param("endDate") String endDate,
+                           @Param("paymentSourceType") String paymentSourceType,
+                           @Param("transactionType") String transactionType,
+                           @Param("cardId") Long cardId);
 
     // 단건 상세 조회 (좌표 포함, merchants 조인)
     TransactionVO findTransactionDetailById(@Param("transactionId") Long transactionId,
