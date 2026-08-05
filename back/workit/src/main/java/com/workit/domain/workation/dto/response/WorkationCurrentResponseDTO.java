@@ -3,6 +3,7 @@ package com.workit.domain.workation.dto.response;
 import com.workit.domain.workation.vo.BudgetSpentVO;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.domain.workation.vo.Region;
+import com.workit.domain.workation.vo.WorkationPhase;
 import com.workit.domain.workation.vo.WorkationStatus;
 import com.workit.domain.workation.vo.WorkationVO;
 import lombok.Builder;
@@ -67,13 +68,17 @@ public class WorkationCurrentResponseDTO {
         private int elapsedDays;
         private BigDecimal progressRate;
         private WorkationStatus status;
+        private WorkationPhase phase;
+        private int dday;
 
         public static WorkationSummary from(WorkationVO vo) {
 
             int totalDays = (int) ChronoUnit.DAYS.between(vo.getStartDate(), vo.getEndDate()) + 1;
 
-            // 경과일 : 시작 전이면 0, 종료 후면 전체 일수로 고정
+            // 사용자 기기 시계에 영향받지 않도록 서버 시간을 기준으로 한다
             LocalDate today = LocalDate.now();
+
+            // 경과일 : 시작 전이면 0, 종료 후면 전체 일수로 고정
             int elapsedDays;
             if (today.isBefore(vo.getStartDate())) {
                 elapsedDays = 0;
@@ -81,6 +86,20 @@ public class WorkationCurrentResponseDTO {
                 elapsedDays = totalDays;
             } else {
                 elapsedDays = (int) ChronoUnit.DAYS.between(vo.getStartDate(), today) + 1;
+            }
+
+            // 시작 전이면 시작일까지, 진행 중이면 종료일까지 남은 일수
+            WorkationPhase phase;
+            int dday;
+            if (today.isBefore(vo.getStartDate())) {
+                phase = WorkationPhase.BEFORE;
+                dday = (int) ChronoUnit.DAYS.between(today, vo.getStartDate());
+            } else if (today.isAfter(vo.getEndDate())) {
+                phase = WorkationPhase.PENDING_SETTLEMENT;
+                dday = 0;
+            } else {
+                phase = WorkationPhase.ONGOING;
+                dday = (int) ChronoUnit.DAYS.between(today, vo.getEndDate());
             }
 
             BigDecimal progressRate = BigDecimal.valueOf(elapsedDays)
@@ -97,6 +116,8 @@ public class WorkationCurrentResponseDTO {
                     .elapsedDays(elapsedDays)
                     .progressRate(progressRate)
                     .status(vo.getStatus())
+                    .phase(phase)
+                    .dday(dday)
                     .build();
         }
     }

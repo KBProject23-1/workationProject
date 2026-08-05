@@ -11,6 +11,7 @@ public class CategoryResponseDTO {
 
     private Long id;
     private String code;
+    private String defaultName;   // 마스터 기본 이름
     private String name;          // 별칭이 있으면 별칭, 없으면 기본 이름
     private String description;
     private Boolean isDefault;
@@ -21,6 +22,7 @@ public class CategoryResponseDTO {
         return CategoryResponseDTO.builder()
                 .id(vo.getId())
                 .code(vo.getCode())
+                .defaultName(vo.getName())
                 // 별칭이 있으면 별칭을 표시명으로 사용한다
                 .name(vo.getCustomName() != null ? vo.getCustomName() : vo.getName())
                 .description(vo.getDescription())

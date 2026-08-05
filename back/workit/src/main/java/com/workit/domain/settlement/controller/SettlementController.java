@@ -83,6 +83,8 @@ public class SettlementController {
         response.setContentType(contentType);
         response.setContentLength(file.length);
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(fileName));
+        // 다른 출처 응답의 헤더는 기본적으로 감춰져 프론트에서 읽지 못한다
+        response.setHeader("Access-Control-Expose-Headers", HttpHeaders.CONTENT_DISPOSITION);
 
         try (OutputStream out = response.getOutputStream()) {
             out.write(file);

@@ -136,7 +136,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
 
         WorkationExpenseVO vo = getOwnedExpense(userId, expenseId);
 
-        return ExpenseDetailResponseDTO.of(vo, availableCategories(userId, vo.getBudgetType()));
+        return ExpenseDetailResponseDTO.of(vo,
+                availableCategories(userId, vo.getWorkationId(), vo.getBudgetType()));
     }
 
     // =====================================================================================
@@ -172,7 +173,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         log.info("지출 수정 완료 - expenseId: {}", expenseId);
 
         WorkationExpenseVO updated = getOwnedExpense(userId, expenseId);
-        return ExpenseDetailResponseDTO.of(updated, availableCategories(userId, updated.getBudgetType()));
+        return ExpenseDetailResponseDTO.of(updated,
+                availableCategories(userId, updated.getWorkationId(), updated.getBudgetType()));
     }
 
     // =====================================================================================
@@ -331,8 +333,9 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         return vo;
     }
 
-    private List<ExpenseCategoryVO> availableCategories(Long userId, BudgetType budgetType) {
-        return categoryMapper.selectCategoryList(userId, budgetType);
+    // 예산에 배정되지 않은 카테고리로는 변경할 수 없으므로 배정된 것만 내려준다
+    private List<ExpenseCategoryVO> availableCategories(Long userId, Long workationId, BudgetType budgetType) {
+        return categoryMapper.selectBudgetedCategoryList(userId, workationId, budgetType);
     }
 
     private BudgetType requireBudgetType(BudgetType budgetType) {
