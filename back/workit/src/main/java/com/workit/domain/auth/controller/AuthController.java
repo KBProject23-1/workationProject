@@ -6,6 +6,7 @@ import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.global.dto.CommonResponse;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -123,5 +125,32 @@ public class AuthController {
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
 
         return GlobalResponseFactory.success(result, "로그인에 성공했습니다.");
+    }
+
+    // 1.6 로그인 토큰 재발급 (Refresh Token → Access Token)
+    // - docs: 로그인 토큰 재발급 (POST /api/v1/auth/refresh)
+    // - 비로그인 공개 API: Access Token 만료 시 Vue3 Axios Interceptor 가 호출
+    // - Refresh Token 은 HttpOnly Cookie(refreshToken)에서만 받는다 (Body 없음)
+    // - Service 에서 검증/회원 상태 확인/Redis hash 비교(재사용 감지)/재발급(Rotation)을 수행하고,
+    //   Controller 는 Rotation 으로 갱신된 신규 Refresh Token 을 HttpOnly Cookie 로 다시 구워주는 HTTP 처리만 담당한다
+    @PostMapping("/refresh")
+    public ResponseEntity<CommonResponse<RefreshTokenResponseDTO>> refreshPost(
+            @CookieValue(value = REFRESH_TOKEN_COOKIE_NAME, required = false) String refreshToken,
+            HttpServletResponse servletResponse) {
+
+        RefreshTokenResponseDTO result = authService.refreshAccessToken(refreshToken);
+
+        // Rotation 으로 갱신된 신규 Refresh Token Cookie (login 과 동일한 속성)
+        // - Max-Age 는 Refresh Token 만료와 동일(초) — jwt.refresh-token-expiration 기준
+        ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, result.getRefreshToken())
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite(refreshCookieSameSite)
+                .path("/")
+                .maxAge(result.getRefreshTokenMaxAgeSeconds())
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+
+        return GlobalResponseFactory.success(result, "액세스 토큰이 성공적으로 재발급되었습니다.");
     }
 }

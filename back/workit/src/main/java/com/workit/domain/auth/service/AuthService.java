@@ -5,6 +5,7 @@ import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 
 public interface AuthService {
@@ -57,4 +58,22 @@ public interface AuthService {
      * @return 로그인 성공 응답 (userId, name, token_info) + 쿠키용 refreshToken
      */
     LoginResponseDTO login(LoginRequestDTO request);
+
+    /**
+     * Refresh Token 기반 Access Token 재발급 (Refresh Token Rotation 적용)
+     *
+     * 흐름:
+     *   1. 쿠키에서 받은 Refresh Token 검증 — 서명/만료 + tokenType == REFRESH (JwtTokenProvider.parseRefreshToken)
+     *   2. sub(userId) 추출 → 회원 존재 + ACTIVE 상태 확인 (findUserById)
+     *   3. Redis(refresh:token:{userId}) 저장 hash 와 비교
+     *      - 저장 hash 없음(로그아웃/만료) → INVALID_REFRESH_TOKEN(401)
+     *      - 불일치(재사용 감지) → 세션 revoke(delete) + INVALID_REFRESH_TOKEN(401)
+     *   4. 신규 Access Token + 신규 Refresh Token 발급 (Rotation)
+     *   5. 신규 Refresh Token SHA-256 hash 를 Redis 에 교체 저장 (TTL 동일)
+     *   6. RefreshTokenResponseDTO 반환 (refreshToken 은 HttpOnly Cookie 전용 — JSON 제외)
+     *
+     * @param refreshToken HttpOnly Cookie 에서 받은 Refresh Token (없으면 null)
+     * @return 재발급 응답 (token_info) + 쿠키용 신규 refreshToken
+     */
+    RefreshTokenResponseDTO refreshAccessToken(String refreshToken);
 }
