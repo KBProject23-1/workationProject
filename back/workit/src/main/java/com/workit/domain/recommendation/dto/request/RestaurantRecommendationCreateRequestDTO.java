@@ -6,7 +6,6 @@ import lombok.NoArgsConstructor;
 
 @Getter
 @NoArgsConstructor
-public class RecommendationRecalculateRequestDTO {
-    private Long referenceMerchantId;
+public class RestaurantRecommendationCreateRequestDTO {
     private MealType mealType;
 }
