@@ -157,6 +157,25 @@ class JwtTokenProviderTest {
     }
 
     @Test
+    @DisplayName("용도 검증 실패 - tokenType claim 이 없는 토큰은 Access/Refresh 모두 거부")
+    void parseByType_missingTokenType_throws() {
+        // 같은 시크릿으로 서명했지만 tokenType claim 이 없는 토큰
+        String tokenWithoutType = Jwts.builder()
+                .setSubject(String.valueOf(USER_ID))
+                .claim("role", JwtTokenProvider.DEFAULT_ROLE)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + 60_000L))
+                .signWith(Keys.hmacShaKeyFor(TEST_SECRET.getBytes(StandardCharsets.UTF_8)),
+                        SignatureAlgorithm.HS256)
+                .compact();
+
+        // raw parse 는 통과하지만 (서명/만료 정상) 용도 검증은 거부된다
+        assertNotNull(provider.parse(tokenWithoutType));
+        assertThrows(JwtException.class, () -> provider.parseAccessToken(tokenWithoutType));
+        assertThrows(JwtException.class, () -> provider.parseRefreshToken(tokenWithoutType));
+    }
+
+    @Test
     @DisplayName("만료 확인 - isExpired 는 만료 토큰에 대해 true 반환")
     void isExpired_true() {
         Date past = new Date(System.currentTimeMillis() - 60_000L);
