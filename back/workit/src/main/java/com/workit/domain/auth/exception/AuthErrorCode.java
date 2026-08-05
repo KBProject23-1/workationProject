@@ -66,6 +66,14 @@ public enum AuthErrorCode implements ErrorCode {
     // 지원하지 않는 JWT 토큰 - 알고리즘/형식 불일치, 용도 오류 등 → 400
     UNSUPPORTED_TOKEN(HttpStatus.BAD_REQUEST, "지원하지 않는 토큰 형식입니다. 다시 로그인해 주세요."),
 
+    // 보호 API 접근 - 인증 토큰(JWT) 없이 접근 → 401
+    // (knowledge.md: 401 UNAUTHORIZED - JWT 없음)
+    AUTH_TOKEN_NOT_FOUND(HttpStatus.UNAUTHORIZED, "인증이 필요합니다. 로그인 후 다시 시도해 주세요."),
+
+    // 인증된 사용자가 권한이 없는 리소스에 접근 → 403
+    // (knowledge.md: 403 FORBIDDEN - 권한 부족)
+    AUTH_ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
+
     // 로그인 토큰 재발급 - Refresh Token 검증 실패 (쿠키 누락/만료/위변조/용도 오류/Redis 부재·불일치/비활성 회원) → 401
     // (docs: INVALID_REFRESH_TOKEN — 실패 원인을 구분해 노출하지 않아 세션 정보 유출을 방지)
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.");
