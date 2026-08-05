@@ -12,6 +12,7 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
+import com.workit.domain.auth.util.JwtTokenProvider;
 import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.UserAuthVO;
@@ -53,6 +54,8 @@ public class AuthServiceImpl implements AuthService {
     private final SignupTokenProvider signupTokenProvider;
     private final SignupVerificationStore signupVerificationStore;
     private final WalletService walletService;
+    private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenStore refreshTokenStore;
     private final LoginFailCounter loginFailCounter;
 
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
