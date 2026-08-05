@@ -12,7 +12,6 @@ import com.workit.global.dto.CommonResponse;
 import com.workit.global.dto.PageResponseDTO;
 import com.workit.global.response.GlobalResponseFactory;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -43,8 +42,7 @@ public class ReservationController {
         Long userId = 1L;
 
         ReservationCreateResponseDTO response = reservationService.addReservation(userId, request);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(CommonResponse.success(response));
+        return GlobalResponseFactory.created(response);
     }
 
     /**
