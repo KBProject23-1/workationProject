@@ -1559,5 +1559,119 @@ class AuthServiceImplTest {
         String text = dto.toString();
         assertFalse(text.contains("secret-refresh-token-value"));
     }
+
+    // ---------- 로그아웃 ----------
+
+    @Test
+    @DisplayName("정상 로그아웃 - Refresh Token 세션 삭제 (Redis hash 제거)")
+    void logout_success() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        assertTrue(refreshTokenStore.saved.containsKey(501L));
+
+        authService.logout(refreshToken);
+
+        // Redis(refresh:token:{userId}) 저장 hash 삭제 — 이후 재발급 불가
+        assertFalse(refreshTokenStore.saved.containsKey(501L));
+        assertTrue(refreshTokenStore.deletedUserIds.contains(501L));
+    }
+
+    @Test
+    @DisplayName("로그아웃 후 Refresh Token 재사용 불가 - refreshAccessToken 이 INVALID_REFRESH_TOKEN")
+    void logout_afterLogout_refreshFails() {
+        String refreshToken = issueRefreshTokenSession(501L);
+
+        authService.logout(refreshToken);
+
+        // 세션이 폐기되었으므로 기존 Refresh Token 으로 Access Token 재발급 불가
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("쿠키 누락 - null/blank Refresh Token → INVALID_REFRESH_TOKEN")
+    void logout_blankToken_throws() {
+        assertThrows(BusinessException.class, () -> authService.logout(null));
+        assertThrows(BusinessException.class, () -> authService.logout(""));
+        assertThrows(BusinessException.class, () -> authService.logout("   "));
+    }
+
+    @Test
+    @DisplayName("위변조된 Refresh Token - INVALID_REFRESH_TOKEN + 세션 유지")
+    void logout_tamperedToken_throws() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        // 끝에서 두 번째 base64 글자를 바꾼다 (signup/refresh 위변조 테스트와 동일한 방식)
+        String tampered = refreshToken.substring(0, refreshToken.length() - 2)
+                + (refreshToken.charAt(refreshToken.length() - 2) == 'a' ? "b" : "a")
+                + refreshToken.charAt(refreshToken.length() - 1);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.logout(tampered));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+        // JWT 서명 검증 실패 단계에서 차단 — 정상 세션은 그대로 유지된다
+        assertTrue(refreshTokenStore.saved.containsKey(501L));
+        assertTrue(refreshTokenStore.deletedUserIds.isEmpty());
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token - INVALID_REFRESH_TOKEN")
+    void logout_expiredToken_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        String expired = jwtTokenProvider.createRefreshToken(501L,
+                new Date(System.currentTimeMillis() - 60_000L));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.logout(expired));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Access Token 으로 로그아웃 요청 - 용도 오류 → INVALID_REFRESH_TOKEN")
+    void logout_accessTokenMisuse_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        String accessToken = jwtTokenProvider.createAccessToken(501L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.logout(accessToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Redis 저장 hash 없음(이미 로그아웃/TTL 만료) - INVALID_REFRESH_TOKEN + 추가 삭제 없음")
+    void logout_noStoredHash_throws() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        // 이미 로그아웃 되어 Redis 세션이 없는 상태
+        refreshTokenStore.delete(501L);
+        int deleteCountBefore = refreshTokenStore.deletedUserIds.size();
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.logout(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+        // 저장 hash 가 없으므로 추가 delete 호출이 발생하지 않는다
+        assertEquals(deleteCountBefore, refreshTokenStore.deletedUserIds.size());
+    }
+
+    @Test
+    @DisplayName("Redis hash 불일치 - 세션 revoke + INVALID_REFRESH_TOKEN")
+    void logout_hashMismatch_revokesSession() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        // 저장된 hash 를 다른 값으로 덮어쓴다 (클라이언트 토큰 != 저장소 토큰 = 위변조/재사용 의심)
+        refreshTokenStore.saved.put(501L, "forged-hash-value");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.logout(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+        // refreshAccessToken 의 재사용 감지와 동일 — 세션 revoke 로 저장 hash 삭제
+        assertFalse(refreshTokenStore.saved.containsKey(501L));
+        assertTrue(refreshTokenStore.deletedUserIds.contains(501L));
+    }
 }
 
