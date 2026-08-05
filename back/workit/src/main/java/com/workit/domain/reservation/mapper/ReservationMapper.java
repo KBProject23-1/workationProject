@@ -70,6 +70,9 @@ public interface ReservationMapper {
             @Param("reservedCount") int reservedCount
     );
 
+    // 이용 기간이 종료된 확정 예약의 완료 상태 변경
+    int updateCompletedReservationStatuses(@Param("today") LocalDate today);
+
     /**
      * 사용자·상태·카테고리 조건에 맞는 예약 목록 한 페이지를 조회한다.
      */

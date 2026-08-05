@@ -660,10 +660,7 @@ CREATE TABLE `reservation_products`
     `description`         TEXT           NULL COMMENT '예약 상품 설명',
     `product_detail_type` ENUM ('ROOM', 'OFFICE_SEAT', 'MEETING_ROOM') NOT NULL COMMENT '상품 세부 유형\nROOM: 숙소 객실\nOFFICE_SEAT: 공유오피스 좌석\nMEETING_ROOM: 공유오피스 회의실',
     `max_headcount`       INT            NOT NULL DEFAULT 1 COMMENT '상품 최대 수용 인원',
-    `bed_type`            VARCHAR(50)    NULL COMMENT '침대 유형',
-    `bed_count`           INT            NULL COMMENT '객실 내 침대 개수',
-    `price_per_unit`      DECIMAL(15, 2) NOT NULL COMMENT '상품 기준 단가',
-    `price_unit`          ENUM ('PER_DAY', 'PER_PERSON') NOT NULL COMMENT '가격 계산 단위\nPER_DAY: 일별\nPER_PERSON: 인원수별',
+    `unit_price`      DECIMAL(15, 2) NOT NULL COMMENT '상품 기준 단가',
     `merchant_id`         BIGINT         NOT NULL COMMENT '가맹점 고유번호(FK)',
     `thumbnail_url`       VARCHAR(255)   NULL COMMENT '예약 상세용 상품 대표 이미지',
 
@@ -678,13 +675,8 @@ CREATE TABLE `reservation_products`
             REFERENCES `merchants` (`id`),
 
     CONSTRAINT `CK_RESERVATION_PRODUCTS_MAX_HEADCOUNT`
-        CHECK (`max_headcount` > 0),
-
-    CONSTRAINT `CK_RESERVATION_PRODUCTS_PRICE`
-        CHECK (`price_per_unit` >= 0),
-
-    CONSTRAINT `CK_RESERVATION_PRODUCTS_BED_COUNT`
-        CHECK (`bed_count` IS NULL OR `bed_count` >= 0)
+        CHECK (`max_headcount` > 0)
+        
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci

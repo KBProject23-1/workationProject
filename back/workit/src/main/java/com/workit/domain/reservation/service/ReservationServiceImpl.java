@@ -55,6 +55,12 @@ public class ReservationServiceImpl implements ReservationService {
 
     @Override
     @Transactional
+    public int modifyCompletedReservationStatuses(LocalDate today) {
+        return reservationMapper.updateCompletedReservationStatuses(today);
+    }
+
+    @Override
+    @Transactional
     public ReservationCreateResponseDTO addReservation(
             Long userId,
             ReservationCreateRequestDTO request) {
@@ -292,21 +298,18 @@ public class ReservationServiceImpl implements ReservationService {
         }
     }
 
-    // 상품 유형, 가맹점 카테고리와 가격 단위의 조합을 검증
+    // 상품 유형과 가맹점 카테고리 및 단가의 조합 검증
     private void validateProductConfiguration(ReservationCreateProductVO product) {
         boolean validRoom = product.getProductDetailType() == ReservationProductDetailType.ROOM
-                && product.getMerchantCategory() == ReservationCategory.ACCOMMODATION
-                && "PER_DAY".equals(product.getPriceUnit());
+                && product.getMerchantCategory() == ReservationCategory.ACCOMMODATION;
         boolean validMeetingRoom = product.getProductDetailType() == ReservationProductDetailType.MEETING_ROOM
-                && product.getMerchantCategory() == ReservationCategory.OFFICE
-                && "PER_DAY".equals(product.getPriceUnit());
+                && product.getMerchantCategory() == ReservationCategory.OFFICE;
         boolean validOfficeSeat = product.getProductDetailType() == ReservationProductDetailType.OFFICE_SEAT
-                && product.getMerchantCategory() == ReservationCategory.OFFICE
-                && "PER_PERSON".equals(product.getPriceUnit());
+                && product.getMerchantCategory() == ReservationCategory.OFFICE;
         boolean validCommonValues = product.getMaxHeadcount() != null
                 && product.getMaxHeadcount() > 0
-                && product.getPricePerUnit() != null
-                && product.getPricePerUnit().compareTo(BigDecimal.ZERO) >= 0;
+                && product.getUnitPrice() != null
+                && product.getUnitPrice().compareTo(BigDecimal.ZERO) > 0;
 
         if (!validCommonValues || (!validRoom && !validMeetingRoom && !validOfficeSeat)) {
             throw new BusinessException(
@@ -407,7 +410,7 @@ public class ReservationServiceImpl implements ReservationService {
         int multiplier = product.getProductDetailType() == ReservationProductDetailType.OFFICE_SEAT
                 ? request.getHeadcount()
                 : request.getQuantity();
-        return product.getPricePerUnit()
+        return product.getUnitPrice()
                 .multiply(BigDecimal.valueOf(usageDays))
                 .multiply(BigDecimal.valueOf(multiplier));
     }

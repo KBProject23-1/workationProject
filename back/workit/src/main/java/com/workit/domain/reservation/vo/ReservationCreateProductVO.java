@@ -14,8 +14,7 @@ public class ReservationCreateProductVO {
     private String productName;
     private ReservationProductDetailType productDetailType;
     private Integer maxHeadcount;
-    private BigDecimal pricePerUnit;
-    private String priceUnit;
+    private BigDecimal unitPrice;
     private Long merchantId;
     private String merchantName;
     private ReservationCategory merchantCategory;
