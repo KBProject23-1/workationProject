@@ -452,6 +452,53 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
+    @Override
+    // Redis 삭제(side-effect)만 수행하므로 별도 @Transactional 을 사용하지 않는다
+    // (login/refreshAccessToken 과 동일 — Redis 는 DB 트랜잭션에 참여하지 않음)
+    public void logout(String refreshToken) {
+
+        // 1. 요청 값 검증 — 쿠키 누락/빈 값 → INVALID_REFRESH_TOKEN(401)
+        //    (refreshAccessToken 과 동일 정책 — 실패 원인 구분 노출 금지)
+        if (isBlank(refreshToken)) {
+            throw new BusinessException(AuthErrorCode.INVALID_REFRESH_TOKEN);
+        }
+
+        // 2. Refresh Token 검증 — 서명/만료 + tokenType == REFRESH 확인
+        //    - 만료(ExpiredJwtException)와 위변조/형식 오류/Access Token 오용(JwtException) 모두
+        //      INVALID_REFRESH_TOKEN(401) 로 통일 (refreshAccessToken 과 동일)
+        //    - Refresh Token 원문은 로그에 출력하지 않는다 (JWT 로그 유출 방지)
+        Claims claims;
+        try {
+            claims = jwtTokenProvider.parseRefreshToken(refreshToken);
+        } catch (JwtException e) {
+            throw new BusinessException(AuthErrorCode.INVALID_REFRESH_TOKEN);
+        }
+
+        // 3. sub(userId) 추출 — 검증된 claims 에서 직접 추출 (중복 파싱 방지)
+        Long userId = extractUserIdFromRefreshClaims(claims);
+
+        // 4. Redis hash 비교 — 로그아웃 대상 세션 확인
+        //    - 저장 hash 없음(이미 로그아웃/TTL 만료) → 삭제할 세션이 없으므로 실패
+        //    - 불일치(클라이언트 토큰 != 저장 토큰) → 위변조/재사용 의심 → 세션 revoke 후 실패
+        //      (refreshAccessToken 의 Rotation 재사용 감지와 동일 정책 — 탈취 토큰의 세션 폐기)
+        String storedHash = refreshTokenStore.find(userId);
+        String presentedHash = sha256Hex(refreshToken);
+        if (storedHash == null) {
+            throw new BusinessException(AuthErrorCode.INVALID_REFRESH_TOKEN);
+        }
+        if (!storedHash.equals(presentedHash)) {
+            refreshTokenStore.delete(userId);
+            throw new BusinessException(AuthErrorCode.INVALID_REFRESH_TOKEN);
+        }
+
+        // 5. Refresh Token 삭제 — 세션 무효화 (이후 재발급 불가)
+        refreshTokenStore.delete(userId);
+
+        // 6. Audit 로그 (knowledge.md Audit Log Policy 스타일 유지)
+        //    - userId 는 민감정보가 아니며, JWT/개인정보 원문은 로그에 포함하지 않는다
+        log.info("로그아웃 성공 - userId={}", userId);
+    }
+
     /**
      * 검증된 Refresh Token claims 에서 userId(sub) 를 추출한다.
      * - JwtTokenProvider.extractUserId 는 토큰을 다시 파싱하므로, 이미 검증된 claims 에서 직접 추출한다
