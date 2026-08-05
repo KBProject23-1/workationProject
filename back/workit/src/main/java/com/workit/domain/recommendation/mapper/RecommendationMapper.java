@@ -4,6 +4,8 @@ import com.workit.domain.recommendation.vo.AccommodationConditionVO;
 import com.workit.domain.recommendation.vo.RecommendationMerchantVO;
 import com.workit.domain.recommendation.vo.RecommendationRequestVO;
 import com.workit.domain.recommendation.vo.RecommendationResultVO;
+import com.workit.domain.recommendation.vo.RestaurantConditionVO;
+import com.workit.domain.recommendation.enums.MealType;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -13,8 +15,15 @@ public interface RecommendationMapper {
 
     List<RecommendationMerchantVO> selectAvailableAccommodations(AccommodationConditionVO condition);
 
+    RestaurantConditionVO selectRestaurantCondition(@Param("userId") Long userId);
+
+    List<RecommendationMerchantVO> selectRestaurants(@Param("regionId") Long regionId);
+
     RecommendationMerchantVO selectConfirmedOffice(@Param("userId") Long userId,
                                                     @Param("workationId") Long workationId);
+
+    RecommendationMerchantVO selectConfirmedAccommodation(@Param("userId") Long userId,
+                                                           @Param("workationId") Long workationId);
 
     List<RecommendationMerchantVO> selectReferenceCandidates(@Param("userId") Long userId,
                                                              @Param("workationId") Long workationId,
@@ -22,6 +31,13 @@ public interface RecommendationMapper {
 
     RecommendationMerchantVO selectOfficeInRegion(@Param("merchantId") Long merchantId,
                                                   @Param("regionId") Long regionId);
+
+    RecommendationMerchantVO selectRestaurantReferenceMerchant(@Param("merchantId") Long merchantId,
+                                                               @Param("regionId") Long regionId);
+
+    List<RecommendationMerchantVO> selectRestaurantReferenceCandidates(@Param("userId") Long userId,
+                                                                       @Param("workationId") Long workationId,
+                                                                       @Param("regionId") Long regionId);
 
     void insertRecommendationRequest(RecommendationRequestVO request);
 
@@ -33,6 +49,10 @@ public interface RecommendationMapper {
 
     RecommendationRequestVO selectLatestAccommodationRequest(@Param("userId") Long userId,
                                                              @Param("referenceMerchantId") Long referenceMerchantId);
+
+    RecommendationRequestVO selectLatestRestaurantRequest(@Param("userId") Long userId,
+                                                          @Param("referenceMerchantId") Long referenceMerchantId,
+                                                          @Param("mealType") MealType mealType);
 
     List<RecommendationResultVO> selectRecommendationResults(@Param("requestId") Long requestId,
                                                              @Param("cursorRanking") Integer cursorRanking,

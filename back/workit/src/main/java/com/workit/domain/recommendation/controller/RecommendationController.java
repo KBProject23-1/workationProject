@@ -4,6 +4,9 @@ import com.workit.domain.recommendation.dto.request.RecommendationRecalculateReq
 import com.workit.domain.recommendation.dto.response.AccommodationRecommendationResponseDTO;
 import com.workit.domain.recommendation.dto.response.RecommendationCandidateListResponseDTO;
 import com.workit.domain.recommendation.dto.response.RecommendationReferenceResponseDTO;
+import com.workit.domain.recommendation.dto.request.RestaurantRecommendationCreateRequestDTO;
+import com.workit.domain.recommendation.dto.response.RestaurantRecommendationResponseDTO;
+import com.workit.domain.recommendation.enums.MealType;
 import com.workit.domain.recommendation.enums.RecommendationType;
 import com.workit.domain.recommendation.service.RecommendationService;
 import com.workit.global.dto.CommonResponse;
@@ -44,27 +47,56 @@ public class RecommendationController {
     }
 
     @GetMapping("/reference-place")
-    public ResponseEntity<CommonResponse<RecommendationReferenceResponseDTO>> referencePlaceDetails(
-            @RequestParam("recommendationType") RecommendationType recommendationType) {
+    public ResponseEntity<CommonResponse<Object>> referencePlaceDetails(
+            @RequestParam("recommendationType") RecommendationType recommendationType,
+            @RequestParam(value = "mealType", required = false) MealType mealType) {
         // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
         Long userId = 1L;
-        return GlobalResponseFactory.success(recommendationService.findReferencePlace(userId, recommendationType));
+        Object response = recommendationType == RecommendationType.RESTAURANT
+                ? recommendationService.findRestaurantReferencePlace(userId, mealType)
+                : recommendationService.findReferencePlace(userId, recommendationType);
+        return GlobalResponseFactory.success(response);
     }
 
     @GetMapping("/reference-place-candidates")
-    public ResponseEntity<CommonResponse<RecommendationCandidateListResponseDTO>> referencePlaceCandidateList() {
+    public ResponseEntity<CommonResponse<RecommendationCandidateListResponseDTO>> referencePlaceCandidateList(
+            @RequestParam(value = "recommendationType", defaultValue = "ACCOMMODATION")
+            RecommendationType recommendationType) {
         // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
         Long userId = 1L;
-        return GlobalResponseFactory.success(recommendationService.findReferencePlaceCandidates(userId));
+        RecommendationCandidateListResponseDTO response = recommendationType == RecommendationType.RESTAURANT
+                ? recommendationService.findRestaurantReferencePlaceCandidates(userId)
+                : recommendationService.findReferencePlaceCandidates(userId);
+        return GlobalResponseFactory.success(response);
     }
 
     @PostMapping("/{recommendationRequestId}/recalculate")
-    public ResponseEntity<CommonResponse<AccommodationRecommendationResponseDTO>> accommodationRecommendationAdd(
+    public ResponseEntity<CommonResponse<Object>> recommendationAdd(
             @PathVariable("recommendationRequestId") Long recommendationRequestId,
             @RequestBody RecommendationRecalculateRequestDTO request) {
         // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
         Long userId = 1L;
-        return GlobalResponseFactory.created(recommendationService.recalculateAccommodation(
+        return GlobalResponseFactory.created(recommendationService.recalculateRecommendation(
                 userId, recommendationRequestId, request));
+    }
+
+    @PostMapping("/restaurants")
+    public ResponseEntity<CommonResponse<RestaurantRecommendationResponseDTO>> restaurantRecommendationAdd(
+            @RequestBody RestaurantRecommendationCreateRequestDTO request) {
+        // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
+        Long userId = 1L;
+        return GlobalResponseFactory.created(recommendationService.addRestaurantRecommendation(userId, request));
+    }
+
+    @GetMapping("/restaurants")
+    public ResponseEntity<CommonResponse<RestaurantRecommendationResponseDTO>> restaurantRecommendationList(
+            @RequestParam(value = "referenceMerchantId", required = false) Long referenceMerchantId,
+            @RequestParam("mealType") MealType mealType,
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
+        Long userId = 1L;
+        return GlobalResponseFactory.success(recommendationService.findRestaurantRecommendation(
+                userId, referenceMerchantId, mealType, cursor, size));
     }
 }
