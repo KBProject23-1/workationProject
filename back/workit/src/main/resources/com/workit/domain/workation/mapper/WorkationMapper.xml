@@ -188,11 +188,10 @@
         WHERE workation_id = #{workationId}
     </update>
 
-    <!-- 정산 완료 건이 삭제되지 않도록 SQL 에도 상태 조건을 둔다 -->
+    <!-- 지난 기록 삭제를 지원하므로 상태와 무관하게 삭제한다 -->
     <delete id="deleteWorkation">
         DELETE FROM workations
-        WHERE id     = #{id}
-          AND status = 'ACTIVE'
+        WHERE id = #{id}
     </delete>
 
     <update id="settleWorkation">

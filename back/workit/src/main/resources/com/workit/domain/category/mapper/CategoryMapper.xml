@@ -32,6 +32,22 @@
         ORDER BY ec.sort_order
     </select>
 
+    <!-- 해당 워케이션 예산에 배정된 카테고리만 조회한다 -->
+    <select id="selectBudgetedCategoryList"
+            resultType="com.workit.domain.category.vo.ExpenseCategoryVO">
+        SELECT
+        <include refid="categoryColumns"/>
+        FROM budgets b
+        JOIN expense_categories ec
+          ON ec.id = b.expense_category_id
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        WHERE b.workation_id = #{workationId}
+          AND b.budget_type = #{budgetType}
+        ORDER BY ec.sort_order
+    </select>
+
     <select id="selectCategoryById"
             resultType="com.workit.domain.category.vo.ExpenseCategoryVO">
         SELECT
