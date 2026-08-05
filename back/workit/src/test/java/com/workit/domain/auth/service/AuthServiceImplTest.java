@@ -1,14 +1,18 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
+import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.MockIdentityVerificationProvider;
+import com.workit.domain.auth.util.JwtTokenProvider;
 import com.workit.domain.auth.util.SignupTokenProvider;
+import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.TermsVO;
 import com.workit.domain.auth.vo.UserAuthVO;
 import com.workit.domain.auth.vo.UserProfileVO;
@@ -33,6 +37,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -84,6 +90,9 @@ class AuthServiceImplTest {
     private InMemorySignupVerificationStore signupVerificationStore;
     private FakeAuthMapper authMapper;
     private FakeWalletService walletService;
+    private JwtTokenProvider jwtTokenProvider;
+    private FakeRefreshTokenStore refreshTokenStore;
+    private FakeLoginFailCounter loginFailCounter;
 
     // 수동 Fake Mapper - 테스트에서 원하는 약관 목록 / CI·이메일·닉네임 중복 상태를 그대로 돌려주고,
     // 회원가입 완료 시 insert 되는 데이터를 캡처해 테스트가 검증할 수 있게 한다
@@ -117,6 +126,21 @@ class AuthServiceImplTest {
 
         /** countByEmailHash 호출 횟수 — 길이 검증 실패 시 DB 조회가 발생하지 않는지 검증용 */
         int emailHashLookupCount = 0;
+
+        /** 로그인 조회용 — email_hash 로 등록된 회원 (테스트에서 직접 등록) */
+        final Map<String, LoginUserVO> usersByEmailHash = new HashMap<>();
+
+        /** 로그인 조회용 — phone_number_hash 로 등록된 회원 (테스트에서 직접 등록) */
+        final Map<String, LoginUserVO> usersByPhoneHash = new HashMap<>();
+
+        /** 로그인 조회용 — device_id 로 등록된 회원 (테스트에서 직접 등록) */
+        final Map<String, LoginUserVO> usersByDeviceId = new HashMap<>();
+
+        /** findUserByEmailHash 호출 시 사용된 hash 기록 — email_hash 조회 확인용 */
+        final List<String> emailHashLoginLookups = new ArrayList<>();
+
+        /** findUserByPhoneHash 호출 시 사용된 hash 기록 — phone_hash 조회 확인용 */
+        final List<String> phoneHashLoginLookups = new ArrayList<>();
 
         FakeAuthMapper(List<TermsVO> terms) {
             this(terms, Collections.emptySet());
@@ -220,6 +244,23 @@ class AuthServiceImplTest {
             insertedUserProfiles.add(userProfile);
             return 1;
         }
+
+        @Override
+        public LoginUserVO findUserByEmailHash(String emailHash) {
+            emailHashLoginLookups.add(emailHash);
+            return usersByEmailHash.get(emailHash);
+        }
+
+        @Override
+        public LoginUserVO findUserByPhoneHash(String phoneHash) {
+            phoneHashLoginLookups.add(phoneHash);
+            return usersByPhoneHash.get(phoneHash);
+        }
+
+        @Override
+        public LoginUserVO findUserByDeviceId(String deviceId) {
+            return usersByDeviceId.get(deviceId);
+        }
     }
 
     // 수동 Fake WalletService - createWallet 이 호출되었는지(생성된 userId)를 기록한다
@@ -245,6 +286,53 @@ class AuthServiceImplTest {
         @Override
         public RefundResponse refund(Long userId, RefundRequest request) {
             throw new UnsupportedOperationException("테스트에서 사용하지 않음");
+        }
+    }
+
+    // 인메모리 Fake 저장소 - Redis 없이 Refresh Token 저장(로그인) 플로우를 검증한다
+    static class FakeRefreshTokenStore implements RefreshTokenStore {
+
+        /** userId → 저장된 refreshTokenHash (SHA-256) */
+        final Map<Long, String> saved = new HashMap<>();
+
+        /** userId → 저장 시 사용된 TTL(초) */
+        final Map<Long, Long> savedTtls = new HashMap<>();
+
+        /** delete 호출된 userId 목록 */
+        final List<Long> deletedUserIds = new ArrayList<>();
+
+        @Override
+        public void save(Long userId, String refreshTokenHash, long ttlSeconds) {
+            saved.put(userId, refreshTokenHash);
+            savedTtls.put(userId, ttlSeconds);
+        }
+
+        @Override
+        public void delete(Long userId) {
+            saved.remove(userId);
+            savedTtls.remove(userId);
+            deletedUserIds.add(userId);
+        }
+    }
+
+    // 인메모리 Fake 카운터 - Redis 없이 PIN 실패 횟수/잠금 플로우를 검증한다
+    static class FakeLoginFailCounter implements LoginFailCounter {
+
+        final Map<Long, Integer> counts = new HashMap<>();
+
+        @Override
+        public int getCount(Long userId) {
+            return counts.getOrDefault(userId, 0);
+        }
+
+        @Override
+        public void increment(Long userId) {
+            counts.put(userId, getCount(userId) + 1);
+        }
+
+        @Override
+        public void reset(Long userId) {
+            counts.remove(userId);
         }
     }
 
@@ -305,12 +393,18 @@ class AuthServiceImplTest {
         signupVerificationStore = new InMemorySignupVerificationStore();
         authMapper = new FakeAuthMapper(terms);
         walletService = new FakeWalletService();
+        jwtTokenProvider = new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160);
+        refreshTokenStore = new FakeRefreshTokenStore();
+        loginFailCounter = new FakeLoginFailCounter();
         authService = new AuthServiceImpl(
                 authMapper,
                 new MockIdentityVerificationProvider(),
                 new SignupTokenProvider(TEST_JWT_SECRET, 10),
                 signupVerificationStore,
-                walletService
+                walletService,
+                jwtTokenProvider,
+                refreshTokenStore,
+                loginFailCounter
         );
     }
 
@@ -349,9 +443,12 @@ class AuthServiceImplTest {
         AuthService emptyService = new AuthServiceImpl(
                 new FakeAuthMapper(Collections.emptyList()),
                 new MockIdentityVerificationProvider(),
-                new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                new InMemorySignupVerificationStore(),
-                new FakeWalletService()
+        new SignupTokenProvider(TEST_JWT_SECRET, 10),
+        new InMemorySignupVerificationStore(),
+        new FakeWalletService(),
+        new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160),
+        new FakeRefreshTokenStore(),
+        new FakeLoginFailCounter()
         );
 
         TermsListResponseDTO result = emptyService.getTermsList();
@@ -427,9 +524,12 @@ class AuthServiceImplTest {
                 new FakeAuthMapper(Collections.emptyList(),
                         Collections.singleton(CI_HASH_9999999999)),
                 new MockIdentityVerificationProvider(),
-                new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                signupVerificationStore,
-                new FakeWalletService()
+        new SignupTokenProvider(TEST_JWT_SECRET, 10),
+        signupVerificationStore,
+        new FakeWalletService(),
+        new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160),
+        new FakeRefreshTokenStore(),
+        new FakeLoginFailCounter()
         );
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -466,9 +566,12 @@ class AuthServiceImplTest {
                 new FakeAuthMapper(Collections.emptyList(),
                         Collections.emptySet(), existingEmailHashes),
                 new MockIdentityVerificationProvider(),
-                new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                new InMemorySignupVerificationStore(),
-                new FakeWalletService()
+        new SignupTokenProvider(TEST_JWT_SECRET, 10),
+        new InMemorySignupVerificationStore(),
+        new FakeWalletService(),
+        new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160),
+        new FakeRefreshTokenStore(),
+        new FakeLoginFailCounter()
         );
     }
 
@@ -538,9 +641,12 @@ class AuthServiceImplTest {
         AuthService service = new AuthServiceImpl(
                 mapper,
                 new MockIdentityVerificationProvider(),
-                new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                new InMemorySignupVerificationStore(),
-                new FakeWalletService()
+        new SignupTokenProvider(TEST_JWT_SECRET, 10),
+        new InMemorySignupVerificationStore(),
+        new FakeWalletService(),
+        new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160),
+        new FakeRefreshTokenStore(),
+        new FakeLoginFailCounter()
         );
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -559,9 +665,12 @@ class AuthServiceImplTest {
         AuthService service = new AuthServiceImpl(
                 mapper,
                 new MockIdentityVerificationProvider(),
-                new SignupTokenProvider(TEST_JWT_SECRET, 10),
-                new InMemorySignupVerificationStore(),
-                new FakeWalletService()
+        new SignupTokenProvider(TEST_JWT_SECRET, 10),
+        new InMemorySignupVerificationStore(),
+        new FakeWalletService(),
+        new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160),
+        new FakeRefreshTokenStore(),
+        new FakeLoginFailCounter()
         );
 
         EmailAvailabilityResponseDTO result = service.checkEmailAvailability(buildLongEmail(254));
@@ -976,6 +1085,265 @@ class AuthServiceImplTest {
         assertTrue(authMapper.insertedUserAuths.isEmpty());
         assertTrue(authMapper.insertedUserProfiles.isEmpty());
         assertTrue(authMapper.insertedUserTerms.isEmpty());
+    }
+
+    // ---------- 통합 로그인 ----------
+
+    /**
+     * 로그인 조회용 회원 등록 (Fake Mapper 에 email_hash/phone_hash/deviceId 별로 등록)
+     * - password/pin 은 BCrypt 해시로 저장 (Service 검증 대상)
+     * - name 은 AES 암호화본으로 저장 (응답 시 Service 에서 복호화)
+     */
+    private void registerLoginUser(Long userId, String email, String phoneNumber,
+                                   String password, String pin, String deviceId, String status) {
+        LoginUserVO user = new LoginUserVO();
+        user.setId(userId);
+        user.setStatus(status);
+        user.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
+        user.setPasswordHash(PasswordEncryptor.encode(password));
+        user.setPinHash(PasswordEncryptor.encode(pin));
+        authMapper.usersByEmailHash.put(sha256(email), user);
+        authMapper.usersByPhoneHash.put(sha256(phoneNumber), user);
+        authMapper.usersByDeviceId.put(deviceId, user);
+    }
+
+    /** 로그인 요청 DTO 생성 헬퍼 */
+    private LoginRequestDTO loginRequest(String loginType, String loginId, String password,
+                                         String pinNumber, String deviceId) {
+        LoginRequestDTO request = new LoginRequestDTO();
+        request.setLoginType(loginType);
+        request.setLoginId(loginId);
+        request.setPassword(password);
+        request.setPinNumber(pinNumber);
+        request.setDeviceId(deviceId);
+        return request;
+    }
+
+    /** 테스트용 SHA-256 hex — Service 의 hash 로직과 독립적으로 기대값을 계산한다 */
+    private static String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(bytes.length * 2);
+            for (byte b : bytes) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 알고리즘을 사용할 수 없습니다.", e);
+        }
+    }
+
+    @Test
+    @DisplayName("PASSWORD 이메일 로그인 성공 - userId/name/token_info 반환 + 토큰 발급 + Refresh Token Redis 저장")
+    void login_passwordEmail_success() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+
+        LoginResponseDTO result =
+                authService.login(loginRequest("PASSWORD", "user@example.com", "password123!", null, null));
+
+        assertNotNull(result);
+        assertEquals(501L, result.getUserId().longValue());
+        assertEquals("홍길동", result.getName());
+
+        // token_info (snake_case JSON 직렬화는 Controller 테스트에서 확인)
+        LoginResponseDTO.TokenInfo tokenInfo = result.getTokenInfo();
+        assertNotNull(tokenInfo);
+        assertEquals("Bearer", tokenInfo.getGrantType());
+        assertNotNull(tokenInfo.getAccessToken());
+        assertEquals(900L, tokenInfo.getAccessTokenExpiresIn());
+
+        // Access Token 검증 — sub == userId, tokenType == ACCESS, 개인정보 없음
+        Claims accessClaims = jwtTokenProvider.parseAccessToken(tokenInfo.getAccessToken());
+        assertEquals("501", accessClaims.getSubject());
+        assertFalse(accessClaims.containsKey("email"));
+        assertFalse(accessClaims.containsKey("phoneNumber"));
+        assertFalse(accessClaims.containsKey("password"));
+        assertFalse(accessClaims.containsKey("pin"));
+
+        // Refresh Token — 쿠키용 값 + Redis 에 SHA-256 hash 저장 (원문 저장 금지)
+        String refreshToken = result.getRefreshToken();
+        assertNotNull(refreshToken);
+        assertEquals(1209600L, result.getRefreshTokenMaxAgeSeconds());
+        assertEquals(sha256(refreshToken), refreshTokenStore.saved.get(501L));
+        assertNotEquals(refreshToken, refreshTokenStore.saved.get(501L));
+        assertEquals(Long.valueOf(1209600L), refreshTokenStore.savedTtls.get(501L));
+
+        // Refresh Token 검증 — sub == userId, tokenType == REFRESH
+        Claims refreshClaims = jwtTokenProvider.parseRefreshToken(refreshToken);
+        assertEquals("501", refreshClaims.getSubject());
+    }
+
+    @Test
+    @DisplayName("PASSWORD 이메일 로그인 - trim + lowercase 정규화 후 email_hash 로만 조회")
+    void login_passwordEmail_normalizesAndUsesEmailHash() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+
+        authService.login(loginRequest("PASSWORD", "  USER@EXAMPLE.COM  ", "password123!", null, null));
+
+        // email_encrypt(원문) 조회가 아니라 email_hash(SHA-256) 로만 조회했는지 확인
+        assertEquals(1, authMapper.emailHashLoginLookups.size());
+        assertEquals(sha256("user@example.com"), authMapper.emailHashLoginLookups.get(0));
+        assertTrue(authMapper.phoneHashLoginLookups.isEmpty());
+    }
+
+    @Test
+    @DisplayName("PASSWORD 휴대폰 로그인 성공 - 하이픈 제거 후 phone_hash 로만 조회")
+    void login_passwordPhone_success() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+
+        LoginResponseDTO result =
+                authService.login(loginRequest("PASSWORD", "010-3456-7890", "password123!", null, null));
+
+        assertNotNull(result);
+        assertEquals(501L, result.getUserId().longValue());
+        assertEquals("홍길동", result.getName());
+
+        // phone_number_encrypt(원문) 조회가 아니라 phone_hash(SHA-256) 로만 조회했는지 확인
+        assertEquals(1, authMapper.phoneHashLoginLookups.size());
+        assertEquals(sha256("01034567890"), authMapper.phoneHashLoginLookups.get(0));
+        assertTrue(authMapper.emailHashLoginLookups.isEmpty());
+    }
+
+    @Test
+    @DisplayName("PASSWORD 실패 - 잘못된 password → INVALID_CREDENTIALS + 토큰/Redis 저장 없음")
+    void login_passwordWrongPassword_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PASSWORD", "user@example.com", "wrong-password!", null, null)));
+
+        assertEquals(AuthErrorCode.INVALID_CREDENTIALS, ex.getErrorCode());
+        assertTrue(refreshTokenStore.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("PASSWORD 실패 - 존재하지 않는 이메일 → INVALID_CREDENTIALS (원인 비노출)")
+    void login_passwordUnknownUser_throws() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PASSWORD", "unknown@example.com", "password123!", null, null)));
+
+        assertEquals(AuthErrorCode.INVALID_CREDENTIALS, ex.getErrorCode());
+        assertTrue(refreshTokenStore.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("PIN 로그인 성공 - deviceId 조회 + pin 검증 + 실패 횟수 초기화 + 토큰 발급")
+    void login_pin_success() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        // 이전 실패 이력이 있던 사용자 — 성공 시 초기화되어야 한다
+        loginFailCounter.counts.put(501L, 2);
+
+        LoginResponseDTO result =
+                authService.login(loginRequest("PIN", null, null, "123456", "device-uuid-1"));
+
+        assertNotNull(result);
+        assertEquals(501L, result.getUserId().longValue());
+        assertEquals(0, loginFailCounter.getCount(501L));
+        assertEquals(sha256(result.getRefreshToken()), refreshTokenStore.saved.get(501L));
+    }
+
+    @Test
+    @DisplayName("PIN 실패 - 잘못된 pin → INVALID_CREDENTIALS + 실패 횟수 1 증가")
+    void login_pinWrongPin_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PIN", null, null, "000000", "device-uuid-1")));
+
+        assertEquals(AuthErrorCode.INVALID_CREDENTIALS, ex.getErrorCode());
+        assertEquals(1, loginFailCounter.getCount(501L));
+        assertTrue(refreshTokenStore.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("PIN 실패 - 미등록 deviceId → INVALID_CREDENTIALS")
+    void login_pinUnknownDevice_throws() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PIN", null, null, "123456", "unknown-device")));
+
+        assertEquals(AuthErrorCode.INVALID_CREDENTIALS, ex.getErrorCode());
+        assertTrue(refreshTokenStore.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("PIN 잠금 - 실패 횟수 5회 이상 → PIN_LOCK_EXCEEDED + 토큰 미발급")
+    void login_pinLockExceeded_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        loginFailCounter.counts.put(501L, 5);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PIN", null, null, "123456", "device-uuid-1")));
+
+        assertEquals(AuthErrorCode.PIN_LOCK_EXCEEDED, ex.getErrorCode());
+        // 잠금 상태에서는 실패 횟수가 더 증가하지 않는다
+        assertEquals(5, loginFailCounter.getCount(501L));
+        assertTrue(refreshTokenStore.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("잘못된 loginType - PASSWORD/PIN 외 값 → INVALID_LOGIN_TYPE")
+    void login_invalidLoginType_throws() {
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("FACE_ID", "user@example.com", "password123!", null, null)));
+
+        assertEquals(AuthErrorCode.INVALID_LOGIN_TYPE, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("필수 값 누락 - loginType/loginId/password/pinNumber/deviceId → INVALID_LOGIN_REQUEST")
+    void login_missingRequired_throws() {
+        // loginType 누락
+        BusinessException typeEx = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest(null, "user@example.com", "password123!", null, null)));
+        assertEquals(AuthErrorCode.INVALID_LOGIN_REQUEST, typeEx.getErrorCode());
+
+        // PASSWORD - loginId 누락
+        assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PASSWORD", "", "password123!", null, null)));
+        // PASSWORD - password 누락
+        assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PASSWORD", "user@example.com", null, null, null)));
+        // PIN - pinNumber 누락
+        assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PIN", null, null, "", "device-uuid-1")));
+        // PIN - deviceId 누락
+        assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PIN", null, null, "123456", "  ")));
+        // null 요청
+        assertThrows(BusinessException.class, () -> authService.login(null));
+    }
+
+    @Test
+    @DisplayName("비활성 회원 - WITHDRAWN 상태는 로그인 불가 (INVALID_CREDENTIALS)")
+    void login_withdrawnUser_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "WITHDRAWN");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(loginRequest("PASSWORD", "user@example.com", "password123!", null, null)));
+
+        assertEquals(AuthErrorCode.INVALID_CREDENTIALS, ex.getErrorCode());
+        assertTrue(refreshTokenStore.saved.isEmpty());
+    }
+
+    @Test
+    @DisplayName("보안 - 요청 DTO toString 에 password/pinNumber 원문 미노출")
+    void login_requestToStringHidesSecrets() {
+        LoginRequestDTO request =
+                loginRequest("PASSWORD", "user@example.com", "password123!", "123456", "device-uuid-1");
+
+        String text = request.toString();
+        assertFalse(text.contains("password123!"));
+        assertFalse(text.contains("123456"));
     }
 }
 
