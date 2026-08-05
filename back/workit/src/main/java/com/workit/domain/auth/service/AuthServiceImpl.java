@@ -1,8 +1,11 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.LoginType;
+import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
+import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
@@ -10,6 +13,7 @@ import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.util.SignupTokenProvider;
+import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.UserAuthVO;
 import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
@@ -35,6 +39,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -48,12 +53,23 @@ public class AuthServiceImpl implements AuthService {
     private final SignupTokenProvider signupTokenProvider;
     private final SignupVerificationStore signupVerificationStore;
     private final WalletService walletService;
+    private final LoginFailCounter loginFailCounter;
 
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
 
     /** user_profile.nickname VARCHAR(50) — 초과 시 DB 오류(500) 대신 400 으로 처리 */
     private static final int NICKNAME_MAX_LENGTH = 50;
+
+    /**
+     * PIN 실패 최대 허용 횟수 (docs: PIN_LOCK_EXCEEDED → "핀번호 입력 횟수가 5회 초과")
+     * - 실패 횟수가 이 값 이상이 되면 PIN 로그인 영구 잠금 (Redis auth:fail:{userId})
+     * - 잠금 해제: PIN 로그인 성공 시 초기화 또는 PASS 본인인증 후 PIN 재설정(별도 API) — 자동 해제 없음
+     */
+    private static final int MAX_PIN_FAIL_COUNT = 5;
+
+    /** OAuth2 관례 토큰 인증 방식 (token_info.grant_type) */
+    private static final String GRANT_TYPE_BEARER = "Bearer";
 
     @Override
     @Transactional(readOnly = true)
@@ -313,6 +329,159 @@ public class AuthServiceImpl implements AuthService {
             });
         } else {
             signupVerificationStore.delete(temporaryUserKey);
+        }
+    }
+
+    @Override
+    // DB 는 SELECT 만 수행하고 Redis 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
+    // 별도 @Transactional 을 사용하지 않는다 (Redis 는 DB 트랜잭션에 참여하지 않음)
+    public LoginResponseDTO login(LoginRequestDTO request) {
+
+        // 1. 요청 값 검증 — 필수 값 누락은 INVALID_LOGIN_REQUEST(400), 잘못된 방식은 INVALID_LOGIN_TYPE(400)
+        LoginType loginType = validateLoginRequest(request);
+
+        // 2. 방식별 인증 — 성공하면 인증 완료된 회원 정보 반환
+        //    - PASSWORD: email/phone SHA-256 hash 조회 + password BCrypt 검증
+        //    - PIN     : deviceId 조회 + 잠금 확인 + pin BCrypt 검증
+        LoginUserVO loginUser = (loginType == LoginType.PASSWORD)
+                ? loginByPassword(request)
+                : loginByPin(request);
+
+        // 3. 회원 상태 확인 — ACTIVE 만 로그인 허용
+        //    - WITHDRAWN/BLOCKED 등은 실패 원인을 노출하지 않고 INVALID_CREDENTIALS(401) 처리
+        //      (계정 상태가 외부에 노출되지 않도록 통일)
+        if (!USER_STATUS_ACTIVE.equals(loginUser.getStatus())) {
+            throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+
+        // 4. JWT 발급 (기존 JwtTokenProvider 재사용)
+        //    - Payload: sub(userId), role, tokenType, iat, exp — 개인정보 없음
+        String accessToken = jwtTokenProvider.createAccessToken(loginUser.getId());
+        String refreshToken = jwtTokenProvider.createRefreshToken(loginUser.getId());
+
+        // 5. Refresh Token Redis 저장 (knowledge.md Refresh Token Security)
+        //    - 원문이 아닌 SHA-256 hash 저장 — key: refresh:token:{userId}, TTL: refresh 만료와 동일
+        long refreshTtlSeconds = jwtTokenProvider.getRefreshTokenExpirationSeconds();
+        refreshTokenStore.save(loginUser.getId(), sha256Hex(refreshToken), refreshTtlSeconds);
+
+        // 6. 응답 생성 — name 은 Service Layer 에서만 복호화 (Controller/Mapper 금지)
+        //    - refreshToken 은 JSON 본문에 포함하지 않고 Controller 가 HttpOnly Cookie 로만 내려준다
+        return LoginResponseDTO.builder()
+                .userId(loginUser.getId())
+                .name(PersonalDataCipher.decrypt(loginUser.getNameEncrypt()))
+                .tokenInfo(LoginResponseDTO.TokenInfo.of(
+                        GRANT_TYPE_BEARER,
+                        accessToken,
+                        jwtTokenProvider.getAccessTokenExpirationSeconds()))
+                .refreshToken(refreshToken)
+                .refreshTokenMaxAgeSeconds(refreshTtlSeconds)
+                .build();
+    }
+
+    /**
+     * PASSWORD 로그인 — email/phone SHA-256 hash 조회 + password BCrypt 검증
+     *
+     * loginId 판별:
+     * - '@' 포함 → 이메일: trim → lowercase → SHA-256 hash → email_hash 조회
+     * - 그 외    → 휴대폰: trim → 하이픈 제거 → SHA-256 hash → phone_number_hash 조회
+     *
+     * 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md)
+     *
+     * @throws BusinessException INVALID_CREDENTIALS — 회원 없음 또는 password 불일치 (원인 비노출)
+     */
+    private LoginUserVO loginByPassword(LoginRequestDTO request) {
+        String loginId = request.getLoginId().trim();
+
+        LoginUserVO loginUser;
+        if (loginId.contains("@")) {
+            String emailHash = sha256Hex(loginId.toLowerCase(Locale.ROOT));
+            loginUser = authMapper.findUserByEmailHash(emailHash);
+        } else {
+            String phoneNumber = loginId.replace("-", "");
+            String phoneHash = sha256Hex(phoneNumber);
+            loginUser = authMapper.findUserByPhoneHash(phoneHash);
+        }
+
+        if (loginUser == null) {
+            throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+        if (!PasswordEncryptor.matches(request.getPassword(), loginUser.getPasswordHash())) {
+            throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+        return loginUser;
+    }
+
+    /**
+     * PIN 로그인 — deviceId 조회 + 잠금 확인 + pin BCrypt 검증
+     *
+     * 흐름 (knowledge.md PIN Login Policy):
+     *   1. deviceId 조회 → 등록된 기기 없음 → INVALID_CREDENTIALS(401)
+     *   2. 잠금 확인 (Redis auth:fail:{userId} 실패 횟수 >= MAX) → PIN_LOCK_EXCEEDED(403)
+     *   3. pin BCrypt 검증 → 불일치 시 실패 횟수 증가 후 INVALID_CREDENTIALS(401)
+     *   4. 성공 시 실패 횟수 초기화
+     *
+     * 잠금 해제: PIN 로그인 성공 시 초기화 또는 PASS 본인인증 후 PIN 재설정(별도 API) — 자동 해제 없음
+     *
+     * @throws BusinessException INVALID_CREDENTIALS / PIN_LOCK_EXCEEDED
+     */
+    private LoginUserVO loginByPin(LoginRequestDTO request) {
+        LoginUserVO loginUser = authMapper.findUserByDeviceId(request.getDeviceId());
+        if (loginUser == null) {
+            throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+
+        // 잠금 확인 — 잠금 상태에서는 PIN 검증 없이 즉시 거부 (추가 시도 방지)
+        if (loginFailCounter.getCount(loginUser.getId()) >= MAX_PIN_FAIL_COUNT) {
+            throw new BusinessException(AuthErrorCode.PIN_LOCK_EXCEEDED);
+        }
+
+        // PIN 검증 — 실패 시 영구 카운터 증가 (잠금은 자동 해제되지 않는다)
+        if (!PasswordEncryptor.matches(request.getPinNumber(), loginUser.getPinHash())) {
+            loginFailCounter.increment(loginUser.getId());
+            throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+
+        // 성공 — 실패 횟수 초기화
+        loginFailCounter.reset(loginUser.getId());
+        return loginUser;
+    }
+
+    /**
+     * 로그인 요청 값 검증
+     * - loginType 누락 / PASSWORD 필수 값(loginId, password) 누락 / PIN 필수 값(pinNumber, deviceId) 누락
+     *   → INVALID_LOGIN_REQUEST(400)
+     * - 잘못된 loginType → INVALID_LOGIN_TYPE(400)
+     * - password/pinNumber 원문은 로그에 출력하지 않는다 (DTO @ToString.Exclude)
+     *
+     * @return 검증을 통과한 LoginType (호출부에서 재변환 없이 사용)
+     */
+    private LoginType validateLoginRequest(LoginRequestDTO request) {
+        if (request == null || isBlank(request.getLoginType())) {
+            throw new BusinessException(AuthErrorCode.INVALID_LOGIN_REQUEST);
+        }
+        LoginType loginType = parseLoginType(request.getLoginType());
+        if (loginType == LoginType.PASSWORD) {
+            if (isBlank(request.getLoginId()) || isBlank(request.getPassword())) {
+                throw new BusinessException(AuthErrorCode.INVALID_LOGIN_REQUEST);
+            }
+        } else {
+            if (isBlank(request.getPinNumber()) || isBlank(request.getDeviceId())) {
+                throw new BusinessException(AuthErrorCode.INVALID_LOGIN_REQUEST);
+            }
+        }
+        return loginType;
+    }
+
+    /**
+     * loginType 문자열 → LoginType enum 변환
+     * - 대소문자 무관 처리 ("password"/"Password" 허용)
+     * - PASSWORD/PIN 외 값 → INVALID_LOGIN_TYPE(400)
+     */
+    private LoginType parseLoginType(String value) {
+        try {
+            return LoginType.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(AuthErrorCode.INVALID_LOGIN_TYPE);
         }
     }
 

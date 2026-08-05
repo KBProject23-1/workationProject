@@ -1,8 +1,10 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
+import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 
 public interface AuthService {
@@ -38,4 +40,21 @@ public interface AuthService {
      * @param request 회원가입 요청 (identityToken, email, password, nickname)
      */
     void signup(SignupRequestDTO request);
+
+    /**
+     * 통합 로그인 (PASSWORD / PIN)
+     *
+     * 흐름:
+     *   1. 요청 값 검증 (INVALID_LOGIN_REQUEST / INVALID_LOGIN_TYPE)
+     *   2. PASSWORD: email/phone SHA-256 hash 조회 → password BCrypt 검증
+     *      PIN: deviceId 조회 → PIN 실패 횟수 잠금 확인 → pin BCrypt 검증
+     *   3. 회원 상태(ACTIVE) 확인
+     *   4. Access Token / Refresh Token 발급
+     *   5. Refresh Token SHA-256 hash 를 Redis(refresh:token:{userId})에 TTL 저장
+     *   6. LoginResponseDTO 반환 (refreshToken 은 HttpOnly Cookie 전용 — JSON 제외)
+     *
+     * @param request 로그인 요청 (loginType, loginId, password, pinNumber, deviceId)
+     * @return 로그인 성공 응답 (userId, name, token_info) + 쿠키용 refreshToken
+     */
+    LoginResponseDTO login(LoginRequestDTO request);
 }
