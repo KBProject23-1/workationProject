@@ -40,6 +40,14 @@ public class CardServiceImpl implements CardService {
     }
 
     @Override
+    public List<CardResponse> getAllCardsForFilter(Long userId) {
+        List<CardVO> cards = cardMapper.findAllCardsForFilter(userId);
+        return cards.stream()
+                .map(CardResponse::from)
+                .collect(Collectors.toList());
+    }
+
+    @Override
     @Transactional
     public List<CardResponse> linkCards(Long userId, List<Long> linkableCardIds) {
         boolean hasExistingCard = cardMapper.countActiveCards(userId) > 0;
@@ -112,10 +120,10 @@ public class CardServiceImpl implements CardService {
     @Transactional
     public NicknameUpdateResponse updateNickname(Long userId, Long cardId, String cardNickname) {
         if (cardNickname == null || cardNickname.trim().isEmpty()) {
-            throw new BusinessException(CardErrorCode.NICKNAME_REQUIRED);
+            throw new BusinessException(CardErrorCode.CARD_NICKNAME_REQUIRED);
         }
         if (cardNickname.length() > 100) {
-            throw new BusinessException(CardErrorCode.NICKNAME_TOO_LONG);
+            throw new BusinessException(CardErrorCode.CARD_NICKNAME_TOO_LONG);
         }
 
         CardVO card = cardMapper.findCardById(cardId, userId);

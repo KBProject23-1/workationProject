@@ -10,6 +10,9 @@ public interface TransactionService {
                                                       String paymentSourceType, String transactionType, Long cardId,
                                                       int page, int size);
 
+    TransactionSummaryResponse getTransactionSummary(Long userId, String startDate, String endDate,
+                                                      String paymentSourceType, Long cardId);
+
     TransactionDetailResponse getTransactionDetail(Long userId, Long transactionId);
 
     ReceiptResponse getReceipt(Long userId, Long transactionId);

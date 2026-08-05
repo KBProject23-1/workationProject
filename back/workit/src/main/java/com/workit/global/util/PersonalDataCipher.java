@@ -98,9 +98,10 @@ public final class PersonalDataCipher {
         }
     }
 
-    // ---------- 키 로딩 (패키지 내 테스트에서 호출 가능) ----------
+    // ---------- 키 로딩 ----------
+    // public: 시스템 프로퍼티로 키를 주입하는 외부 패키지 테스트(AuthServiceImplTest 등)에서도 호출할 수 있도록 공개
 
-    static void reloadKey() {
+    public static void reloadKey() {
         String keyValue = System.getProperty("personal.data.aes.key");
         if (isBlank(keyValue)) {
             keyValue = System.getenv("PERSONAL_DATA_AES_KEY");

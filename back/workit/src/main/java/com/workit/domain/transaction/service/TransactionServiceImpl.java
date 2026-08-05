@@ -10,6 +10,7 @@ import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.util.TransactionNumberGenerator;
 import com.workit.domain.transaction.vo.TransactionVO;
+import com.workit.domain.transaction.vo.TransactionReviewAction;
 import com.workit.domain.wallet.mapper.WalletMapper;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
@@ -22,6 +23,7 @@ import static com.workit.global.constant.PaymentPolicy.MIN_CHARGE_AMOUNT;
 import static com.workit.global.constant.PaymentPolicy.MAX_TRANSACTION_AMOUNT;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -66,12 +68,56 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
+    public TransactionSummaryResponse getTransactionSummary(Long userId, String startDate, String endDate,
+                                                             String paymentSourceType, Long cardId) {
+        return TransactionSummaryResponse.from(
+                transactionMapper.findTransactionSummary(userId, startDate, endDate, paymentSourceType, cardId)
+        );
+    }
+
+    @Override
     public TransactionDetailResponse getTransactionDetail(Long userId, Long transactionId) {
         TransactionVO transaction = transactionMapper.findTransactionDetailById(transactionId, userId);
         if (transaction == null) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
         }
-        return TransactionDetailResponse.from(transaction);
+
+        boolean reviewSupported = "RESTAURANT".equals(transaction.getMerchantCategory())
+                || "ACTIVITY".equals(transaction.getMerchantCategory());
+        LocalDateTime reviewDeadline = reviewSupported
+                ? transaction.getApprovedAt().plusDays(30)
+                : null;
+        TransactionReviewAction reviewAction = findReviewAction(
+                transaction,
+                reviewSupported,
+                reviewDeadline
+        );
+
+        return TransactionDetailResponse.from(transaction, reviewAction, reviewDeadline);
+    }
+
+    private TransactionReviewAction findReviewAction(
+            TransactionVO transaction,
+            boolean reviewSupported,
+            LocalDateTime reviewDeadline) {
+        if (!reviewSupported
+                || !"PAYMENT".equals(transaction.getTransactionType())
+                || !"PAID".equals(transaction.getStatus())) {
+            return TransactionReviewAction.NONE;
+        }
+
+        boolean deadlinePassed = LocalDateTime.now().isAfter(reviewDeadline);
+        if (transaction.getReviewId() == null) {
+            return deadlinePassed
+                    ? TransactionReviewAction.NONE
+                    : TransactionReviewAction.WRITE;
+        }
+        if (!"ACTIVE".equals(transaction.getReviewStatus())) {
+            return TransactionReviewAction.NONE;
+        }
+        return deadlinePassed
+                ? TransactionReviewAction.DELETE
+                : TransactionReviewAction.EDIT;
     }
 
     @Override
@@ -81,7 +127,7 @@ public class TransactionServiceImpl implements TransactionService {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
         }
         if (!"PAYMENT".equals(transaction.getTransactionType())) {
-            throw new BusinessException(TransactionErrorCode.RECEIPT_NOT_AVAILABLE);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_RECEIPT_NOT_AVAILABLE);
         }
 
         return ReceiptResponse.from(transaction);
@@ -106,7 +152,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         WalletVO wallet = walletMapper.findByUserId(userId);
         if (wallet == null) {
-            throw new BusinessException(TransactionErrorCode.WALLET_NOT_FOUND);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_WALLET_NOT_FOUND);
         }
 
         BigDecimal shortage = amount.subtract(wallet.getBalance());
@@ -121,12 +167,12 @@ public class TransactionServiceImpl implements TransactionService {
 
             BankAccountVO primaryAccount = accountMapper.findPrimaryAccount(userId);
             if (primaryAccount == null) {
-                throw new BusinessException(TransactionErrorCode.PRIMARY_ACCOUNT_NOT_FOUND_FOR_AUTO_CHARGE);
+                throw new BusinessException(TransactionErrorCode.TRANSACTION_PRIMARY_ACCOUNT_NOT_FOUND_FOR_AUTO_CHARGE);
             }
 
             int accountUpdatedRows = accountMapper.decreaseBalance(primaryAccount.getId(), actualChargeAmount);
             if (accountUpdatedRows == 0) {
-                throw new BusinessException(TransactionErrorCode.INSUFFICIENT_ACCOUNT_BALANCE);
+                throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_ACCOUNT_BALANCE);
             }
 
             walletMapper.increaseBalance(userId, actualChargeAmount);
@@ -138,7 +184,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         int walletUpdatedRows = walletMapper.decreaseBalance(userId, amount);
         if (walletUpdatedRows == 0) {
-            throw new BusinessException(TransactionErrorCode.INSUFFICIENT_WALLET_BALANCE);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_WALLET_BALANCE);
         }
 
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
@@ -151,12 +197,12 @@ public class TransactionServiceImpl implements TransactionService {
 
     private PaymentResponse payWithCard(Long userId, PaymentRequest request) {
         if (request.getCardId() == null) {
-            throw new BusinessException(TransactionErrorCode.CARD_ID_REQUIRED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_CARD_ID_REQUIRED);
         }
 
         CardVO card = cardMapper.findCardById(request.getCardId(), userId);
         if (card == null) {
-            throw new BusinessException(TransactionErrorCode.CARD_NOT_FOUND);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_CARD_NOT_FOUND);
         }
 
         boolean isBusinessExpense = "WORK".equals(card.getCardType());
@@ -170,29 +216,29 @@ public class TransactionServiceImpl implements TransactionService {
 
     private void validatePaymentRequest(PaymentRequest request) {
         if (request.getMerchantName() == null || request.getMerchantName().trim().isEmpty()) {
-            throw new BusinessException(TransactionErrorCode.MERCHANT_NAME_REQUIRED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_MERCHANT_NAME_REQUIRED);
         }
         if (request.getAmount() == null) {
-            throw new BusinessException(TransactionErrorCode.AMOUNT_REQUIRED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_AMOUNT_REQUIRED);
         }
         if (request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessException(TransactionErrorCode.INVALID_AMOUNT);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_INVALID_AMOUNT);
         }
         if (request.getAmount().compareTo(MAX_TRANSACTION_AMOUNT) > 0) {
-            throw new BusinessException(TransactionErrorCode.MAX_AMOUNT_EXCEEDED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_MAX_AMOUNT_EXCEEDED);
         }
         if (request.getPaymentSourceType() == null) {
-            throw new BusinessException(TransactionErrorCode.PAYMENT_SOURCE_TYPE_REQUIRED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PAYMENT_SOURCE_TYPE_REQUIRED);
         }
         if (request.getPinNumber() == null) {
-            throw new BusinessException(TransactionErrorCode.PIN_REQUIRED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_REQUIRED);
         }
     }
 
     private void validatePin(Long userId, String pinNumber) {
         // TODO: user_device.pin_number 검증 로직 — 담당자 확인 후 구현
         if (pinNumber == null || pinNumber.length() != 6) {
-            throw new BusinessException(TransactionErrorCode.PIN_INVALID);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_INVALID);
         }
     }
 
@@ -205,10 +251,10 @@ public class TransactionServiceImpl implements TransactionService {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
         }
         if ("CANCELED".equals(transaction.getStatus())) {
-            throw new BusinessException(TransactionErrorCode.ALREADY_CANCELED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_ALREADY_CANCELED);
         }
         if (!"PAYMENT".equals(transaction.getTransactionType())) {
-            throw new BusinessException(TransactionErrorCode.CANCEL_NOT_ALLOWED);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_CANCEL_NOT_ALLOWED);
         }
 
         BigDecimal refundedAmount = BigDecimal.ZERO;

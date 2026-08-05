@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.review.mapper.ReviewMapper">
+
+    <resultMap id="merchantReviewMap" type="com.workit.domain.review.vo.MerchantReviewVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="nickname" column="nickname"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="atmosphere" column="atmosphere"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="imageUrl" column="image_url"/>
+    </resultMap>
+
+    <resultMap id="merchantReviewStatisticsMap"
+               type="com.workit.domain.review.vo.MerchantReviewStatisticsVO">
+        <result property="averageRating" column="average_rating"/>
+        <result property="reviewCount" column="review_count"/>
+        <result property="oneStarCount" column="one_star_count"/>
+        <result property="twoStarCount" column="two_star_count"/>
+        <result property="threeStarCount" column="three_star_count"/>
+        <result property="fourStarCount" column="four_star_count"/>
+        <result property="fiveStarCount" column="five_star_count"/>
+    </resultMap>
+
+    <resultMap id="reviewDetailMap" type="com.workit.domain.review.vo.ReviewDetailVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="nickname" column="nickname"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="atmosphere" column="atmosphere"/>
+        <result property="imageUrl" column="image_url"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="reservationId" column="reservation_id"/>
+        <result property="reservationCode" column="reservation_code"/>
+        <result property="reservationStartDate" column="reservation_start_date"/>
+        <result property="reservationEndDate" column="reservation_end_date"/>
+        <result property="transactionId" column="transaction_id"/>
+        <result property="transactionNumber" column="transaction_number"/>
+        <result property="transactionAmount" column="transaction_amount"/>
+        <result property="transactionApprovedAt" column="transaction_approved_at"/>
+    </resultMap>
+
+    <resultMap id="myReviewListItemMap"
+               type="com.workit.domain.review.vo.MyReviewListItemVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="merchantThumbnailUrl" column="merchant_thumbnail_url"/>
+        <result property="rating" column="rating"/>
+        <result property="content" column="content"/>
+        <result property="atmosphere" column="atmosphere"/>
+        <result property="imageUrl" column="image_url"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="reservationId" column="reservation_id"/>
+        <result property="transactionId" column="transaction_id"/>
+    </resultMap>
+
+    <resultMap id="reservationReviewSourceMap"
+               type="com.workit.domain.review.vo.ReservationReviewSourceVO">
+        <id property="reservationId" column="reservation_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="reservationStatus" column="reservation_status"/>
+        <result property="endDate" column="end_date"/>
+        <result property="reviewId" column="review_id"/>
+    </resultMap>
+
+    <resultMap id="transactionReviewSourceMap"
+               type="com.workit.domain.review.vo.TransactionReviewSourceVO">
+        <id property="transactionId" column="transaction_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="transactionType" column="transaction_type"/>
+        <result property="transactionStatus" column="transaction_status"/>
+        <result property="approvedAt" column="approved_at"/>
+        <result property="reviewId" column="review_id"/>
+    </resultMap>
+
+    <resultMap id="ownedReviewMap" type="com.workit.domain.review.vo.OwnedReviewVO">
+        <id property="reviewId" column="review_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="reservationId" column="reservation_id"/>
+        <result property="transactionId" column="transaction_id"/>
+        <result property="status" column="status"/>
+        <result property="merchantCategory" column="merchant_category"/>
+        <result property="reservationEndDate" column="reservation_end_date"/>
+        <result property="transactionApprovedAt" column="transaction_approved_at"/>
+    </resultMap>
+
+    <select id="selectMerchantExists" resultType="boolean">
+        SELECT EXISTS(
+            SELECT 1
+            FROM merchants
+            WHERE id = #{merchantId}
+        )
+    </select>
+
+    <select id="selectMerchantReviewList" resultMap="merchantReviewMap">
+        SELECT
+            r.review_id,
+            up.nickname,
+            r.rating,
+            r.content,
+            r.atmosphere,
+            r.created_at,
+            r.image_url
+        FROM reviews r
+        JOIN user_profile up ON up.user_id = r.user_id
+        WHERE r.merchant_id = #{merchantId}
+          AND r.status = 'ACTIVE'
+        ORDER BY r.created_at DESC, r.review_id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectMerchantReviewStatistics" resultMap="merchantReviewStatisticsMap">
+        SELECT
+            COALESCE(ROUND(AVG(rating), 1), 0.0) AS average_rating,
+            COUNT(*) AS review_count,
+            COALESCE(SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END), 0) AS one_star_count,
+            COALESCE(SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END), 0) AS two_star_count,
+            COALESCE(SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END), 0) AS three_star_count,
+            COALESCE(SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END), 0) AS four_star_count,
+            COALESCE(SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END), 0) AS five_star_count
+        FROM reviews
+        WHERE merchant_id = #{merchantId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="selectReviewDetails" resultMap="reviewDetailMap">
+        SELECT
+            rv.review_id,
+            up.nickname,
+            rv.rating,
+            rv.content,
+            rv.atmosphere,
+            rv.image_url,
+            rv.created_at,
+            rv.updated_at,
+            m.id AS merchant_id,
+            m.name AS merchant_name,
+            m.category AS merchant_category,
+            rs.id AS reservation_id,
+            rs.reservation_code,
+            rs.start_date AS reservation_start_date,
+            rs.end_date AS reservation_end_date,
+            tr.id AS transaction_id,
+            tr.transaction_number,
+            tr.amount AS transaction_amount,
+            tr.approved_at AS transaction_approved_at
+        FROM reviews rv
+        JOIN user_profile up ON up.user_id = rv.user_id
+        JOIN merchants m ON m.id = rv.merchant_id
+        LEFT JOIN reservations rs ON rs.id = rv.reservation_id
+        LEFT JOIN transactions tr ON tr.id = rv.transaction_id
+        WHERE rv.review_id = #{reviewId}
+          AND rv.status = 'ACTIVE'
+    </select>
+
+    <select id="selectMyReviewList" resultMap="myReviewListItemMap">
+        SELECT
+            rv.review_id,
+            m.id AS merchant_id,
+            m.name AS merchant_name,
+            m.category AS merchant_category,
+            m.thumbnail_url AS merchant_thumbnail_url,
+            rv.rating,
+            rv.content,
+            rv.atmosphere,
+            rv.image_url,
+            rv.created_at,
+            rv.updated_at,
+            rv.reservation_id,
+            rv.transaction_id
+        FROM reviews rv
+        JOIN merchants m ON m.id = rv.merchant_id
+        WHERE rv.user_id = #{userId}
+          AND rv.status = 'ACTIVE'
+        ORDER BY
+            FIELD(m.category, 'ACCOMMODATION', 'OFFICE', 'RESTAURANT', 'ACTIVITY'),
+            rv.created_at DESC,
+            rv.review_id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countMyReviewList" resultType="long">
+        SELECT COUNT(*)
+        FROM reviews
+        WHERE user_id = #{userId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="selectReservationReviewSource" resultMap="reservationReviewSourceMap">
+        SELECT
+            rs.id AS reservation_id,
+            rs.user_id,
+            m.id AS merchant_id,
+            m.category AS merchant_category,
+            rs.status AS reservation_status,
+            rs.end_date,
+            rv.review_id
+        FROM reservations rs
+        JOIN reservation_products rp ON rp.id = rs.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+        LEFT JOIN reviews rv ON rv.reservation_id = rs.id
+        WHERE rs.id = #{reservationId}
+          AND rs.user_id = #{userId}
+    </select>
+
+    <select id="selectTransactionReviewSource" resultMap="transactionReviewSourceMap">
+        SELECT
+            tr.id AS transaction_id,
+            tr.user_id,
+            m.id AS merchant_id,
+            m.category AS merchant_category,
+            tr.transaction_type,
+            tr.status AS transaction_status,
+            tr.approved_at,
+            rv.review_id
+        FROM transactions tr
+        JOIN merchants m ON m.id = tr.merchant_id
+        LEFT JOIN reviews rv ON rv.transaction_id = tr.id
+        WHERE tr.id = #{transactionId}
+          AND tr.user_id = #{userId}
+    </select>
+
+    <insert id="insertReview" useGeneratedKeys="true" keyProperty="reviewId">
+        INSERT INTO reviews (
+            user_id,
+            reservation_id,
+            merchant_id,
+            transaction_id,
+            rating,
+            content,
+            status,
+            atmosphere,
+            image_url
+        ) VALUES (
+            #{userId},
+            #{reservationId},
+            #{merchantId},
+            #{transactionId},
+            #{rating},
+            #{content},
+            'ACTIVE',
+            #{atmosphere},
+            #{imageUrl}
+        )
+    </insert>
+
+    <select id="selectOwnedReview" resultMap="ownedReviewMap">
+        SELECT
+            rv.review_id,
+            rv.user_id,
+            rv.reservation_id,
+            rv.transaction_id,
+            rv.status,
+            m.category AS merchant_category,
+            rs.end_date AS reservation_end_date,
+            tr.approved_at AS transaction_approved_at
+        FROM reviews rv
+        JOIN merchants m ON m.id = rv.merchant_id
+        LEFT JOIN reservations rs ON rs.id = rv.reservation_id
+        LEFT JOIN transactions tr ON tr.id = rv.transaction_id
+        WHERE rv.review_id = #{reviewId}
+          AND rv.user_id = #{userId}
+    </select>
+
+    <update id="updateReview">
+        UPDATE reviews
+        <set>
+            <if test="request.ratingProvided">
+                rating = #{request.rating},
+            </if>
+            <if test="request.contentProvided">
+                content = #{request.content},
+            </if>
+            <if test="request.atmosphereProvided">
+                atmosphere = #{request.atmosphere},
+            </if>
+            <if test="request.imageUrlProvided">
+                image_url = #{request.imageUrl},
+            </if>
+            updated_at = NOW()
+        </set>
+        WHERE review_id = #{reviewId}
+          AND status = 'ACTIVE'
+    </update>
+
+    <update id="updateReviewStatusDeleted">
+        UPDATE reviews
+        SET status = 'DELETED',
+            updated_at = NOW()
+        WHERE review_id = #{reviewId}
+          AND user_id = #{userId}
+          AND status = 'ACTIVE'
+    </update>
+
+</mapper>

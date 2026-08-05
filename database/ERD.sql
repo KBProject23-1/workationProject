@@ -553,7 +553,7 @@ CREATE TABLE `recommendation_requests`
     `secondary_reference_merchant_id` BIGINT                                                                     NULL COMMENT '두 번째 기준 장소(주로 저녁 추천 시 공유오피스)',
     `recommendation_type`             ENUM ('ACCOMMODATION', 'OFFICE', 'RESTAURANT', 'ACTIVITY' )                NOT NULL,
     `reference_type`                  ENUM ( 'AUTO_MERCHANT', 'AUTO_MIDPOINT' , 'USER_SELECTED', 'REGION_ONLY' ) NOT NULL,
-    `meal_type`                       ENUM ('BREAKFAST', 'LUNCH', 'DINNER')                                      NOT NULL,
+    `meal_type`                       ENUM ('BREAKFAST', 'LUNCH', 'DINNER')                                      NULL,
     `created_at`                      TIMESTAMP                                                                  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `reference_latitude`              DECIMAL(10, 8)                                                             NULL COMMENT '추천 계산 당시 사용한 기준 좌표의 위도(중간 좌표 저장용)',
     `reference_longitude`             DECIMAL(11, 8)                                                             NULL COMMENT '추천 계산 당시 사용한 기준 좌표의 경도(중간 좌표 저장용)',
@@ -578,6 +578,8 @@ CREATE TABLE `recommendation_results`
     `rating_score`              DECIMAL(5, 2) NULL,
     `total_score`               DECIMAL(5, 2) NOT NULL,
     `ranking`                   INT           NOT NULL,
+    `distance`                  DECIMAL(10, 3) NULL
+        COMMENT '직선거리(km), REGION_ONLY는 NULL',
     `calculated_at`             TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT FOREIGN KEY (recommendation_request_id) REFERENCES recommendation_requests (id) ON DELETE CASCADE,
     CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id)
