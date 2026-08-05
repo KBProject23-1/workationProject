@@ -27,7 +27,7 @@ import javax.sql.DataSource;
 @ComponentScan(basePackages = {"com.workit.domain", "com.workit.exception"})
 
 @EnableTransactionManagement
-@Import(RedisConfig.class)
+@Import({RedisConfig.class, SecurityConfig.class})
 public class RootConfig {
     @Value("${jdbc.driver}")
     String driver;

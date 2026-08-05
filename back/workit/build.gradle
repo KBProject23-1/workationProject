@@ -68,6 +68,13 @@ dependencies {
     // Spring Security Crypto (BCrypt - 비밀번호/PIN 단방향 해시)
     implementation("org.springframework.security:spring-security-crypto:${springSecurityVersion}")
 
+    // Spring Security (인증 계층 - JWT 필터 체인, SecurityContext 관리)
+    // - web: 필터 체인/인증 진입점, config: @EnableWebSecurity/SecurityFilterChain
+    implementation("org.springframework.security:spring-security-web:${springSecurityVersion}")
+    implementation("org.springframework.security:spring-security-config:${springSecurityVersion}")
+    // 테스트에서 MockMvc 보안 필터 적용(springSecurity()) 및 인증 객체 사용 시 필요
+    testImplementation("org.springframework.security:spring-security-test:${springSecurityVersion}")
+
     // JWT (jjwt)
     implementation("io.jsonwebtoken:jjwt-api:${jjwtVersion}")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:${jjwtVersion}")
