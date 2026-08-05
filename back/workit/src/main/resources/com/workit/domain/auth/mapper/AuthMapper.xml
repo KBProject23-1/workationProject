@@ -136,4 +136,56 @@
         </foreach>
     </insert>
 
+    <!--
+        PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
+        - users.email_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash 함께 조회
+        - email_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
+    -->
+    <select id="findUserByEmailHash"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               u.name_encrypt,
+               a.password_hash
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE u.email_hash = #{emailHash}
+    </select>
+
+    <!--
+        PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
+        - users.phone_number_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash 함께 조회
+        - phone_number_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
+    -->
+    <select id="findUserByPhoneHash"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               u.name_encrypt,
+               a.password_hash
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE u.phone_number_hash = #{phoneHash}
+    </select>
+
+    <!--
+        PIN 로그인 - 등록 기기(device_id) 기준 회원 + PIN hash 조회.
+        - user_device(device_id) + users JOIN 으로 pin_hash/status/name 함께 조회
+        - UNIQUE(user_id, device_id) 이므로 device_id 당 1건이 원칙이지만 LIMIT 1 로 안전 처리
+        - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
+    -->
+    <select id="findUserByDeviceId"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               u.name_encrypt,
+               d.pin_hash
+        FROM users u
+                 JOIN user_device d ON d.user_id = u.id
+        WHERE d.device_id = #{deviceId}
+        LIMIT 1
+    </select>
+
 </mapper>

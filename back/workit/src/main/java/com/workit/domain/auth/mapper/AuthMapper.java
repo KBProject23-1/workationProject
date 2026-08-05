@@ -1,5 +1,6 @@
 package com.workit.domain.auth.mapper;
 
+import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.TermsVO;
 import com.workit.domain.auth.vo.UserAuthVO;
 import com.workit.domain.auth.vo.UserProfileVO;
@@ -81,4 +82,31 @@ public interface AuthMapper {
      * - Mapper 는 저장만 담당 (필수 약관 검증은 Service)
      */
     int insertUserTerms(@Param("userId") Long userId, @Param("termIds") List<Long> termIds);
+
+    /**
+     * PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회
+     * - users.email_hash(UNIQUE) + user_auth JOIN (password_hash 포함)
+     * - email_encrypt(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
+     *
+     * @return 매칭되는 회원이 없으면 null
+     */
+    LoginUserVO findUserByEmailHash(String emailHash);
+
+    /**
+     * PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회
+     * - users.phone_number_hash(UNIQUE) + user_auth JOIN (password_hash 포함)
+     * - phone_number_encrypt(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
+     *
+     * @return 매칭되는 회원이 없으면 null
+     */
+    LoginUserVO findUserByPhoneHash(String phoneHash);
+
+    /**
+     * PIN 로그인 - 등록 기기(device_id) 기준 회원 + PIN hash 조회
+     * - user_device(device_id) + users JOIN (pin_hash 포함)
+     * - 같은 device_id 가 여러 회원에 존재할 수 없도록 UNIQUE(user_id, device_id) — LIMIT 1 로 안전 처리
+     *
+     * @return 등록된 기기가 없으면 null
+     */
+    LoginUserVO findUserByDeviceId(String deviceId);
 }

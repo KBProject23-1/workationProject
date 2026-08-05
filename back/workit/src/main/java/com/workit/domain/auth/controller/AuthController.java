@@ -1,15 +1,19 @@
 package com.workit.domain.auth.controller;
 
+import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
+import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,15 +22,33 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.servlet.http.HttpServletResponse;
+
 // 인증 도메인 컨트롤러
-// 약관 조회는 비로그인 접근 가능한 공개 API (회원가입 화면에서 호출)
+// 약관 조회/로그인/회원가입은 비로그인 접근 가능한 공개 API
 @RestController
 @RequestMapping("/api/v1/auth")
-@RequiredArgsConstructor
 @Slf4j
 public class AuthController {
 
+    /** Refresh Token Cookie 명 (docs: refreshToken) — 재발급/로그아웃 API 와 이름 통일 */
+    private static final String REFRESH_TOKEN_COOKIE_NAME = "refreshToken";
+
     private final AuthService authService;
+
+    /** Refresh Token Cookie Secure 속성 (docs: 운영에서는 Secure) */
+    private final boolean refreshCookieSecure;
+
+    /** Refresh Token Cookie SameSite 속성 (과제 스펙: SameSite=Lax) */
+    private final String refreshCookieSameSite;
+
+    public AuthController(AuthService authService,
+                          @Value("${jwt.refresh-cookie-secure:true}") boolean refreshCookieSecure,
+                          @Value("${jwt.refresh-cookie-samesite:Lax}") String refreshCookieSameSite) {
+        this.authService = authService;
+        this.refreshCookieSecure = refreshCookieSecure;
+        this.refreshCookieSameSite = refreshCookieSameSite;
+    }
 
     // 1.1 필수/선택 약관 목록 조회
     @GetMapping("/terms")
@@ -74,5 +96,32 @@ public class AuthController {
         authService.signup(request);
 
         return GlobalResponseFactory.success(null, "회원가입이 완료되었습니다.");
+    }
+
+    // 1.5 통합 로그인 (PASSWORD / PIN)
+    // - docs: 로그인 (POST /api/v1/auth/login)
+    // - 비로그인 공개 API: 이메일/휴대폰 + 비밀번호(PASSWORD) 또는 PIN + deviceId(PIN) 로 로그인
+    // - 인증/토큰 발급/Redis 저장은 Service 에서 수행하고, Controller 는
+    //   Refresh Token 을 HttpOnly Cookie 로 내려주는 HTTP 처리만 담당한다
+    @PostMapping("/login")
+    public ResponseEntity<CommonResponse<LoginResponseDTO>> loginPost(
+            @RequestBody LoginRequestDTO request,
+            HttpServletResponse servletResponse) {
+
+        LoginResponseDTO result = authService.login(request);
+
+        // Refresh Token Cookie (docs: refreshToken=...; Max-Age=...; HttpOnly; Path=/; SameSite=None; Secure)
+        // - refreshToken 은 JSON 본문에 포함하지 않고 HttpOnly Cookie 로만 전달 (XSS 탈취 방지)
+        // - Max-Age 는 Refresh Token 만료와 동일(초) — jwt.refresh-token-expiration 기준
+        ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, result.getRefreshToken())
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite(refreshCookieSameSite)
+                .path("/")
+                .maxAge(result.getRefreshTokenMaxAgeSeconds())
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+
+        return GlobalResponseFactory.success(result, "로그인에 성공했습니다.");
     }
 }

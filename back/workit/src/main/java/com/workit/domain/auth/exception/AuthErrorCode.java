@@ -43,6 +43,19 @@ public enum AuthErrorCode implements ErrorCode {
     // (terms 마스터에 없는 ID 는 user_terms_agreements FK 위반으로 500 이 되므로 사전 차단)
     INVALID_TERM_ID(HttpStatus.BAD_REQUEST, "존재하지 않는 약관이 포함되어 있습니다. 다시 확인해 주세요."),
 
+    // 통합 로그인 - 요청 값 검증 실패 (loginType 누락, PASSWORD/PIN 필수 값 누락) → 400
+    INVALID_LOGIN_REQUEST(HttpStatus.BAD_REQUEST, "로그인 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),
+
+    // 통합 로그인 - 지원하지 않는 loginType (PASSWORD/PIN 외 값) → 400
+    INVALID_LOGIN_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 로그인 방식입니다. PASSWORD 또는 PIN 을 사용해 주세요."),
+
+    // 통합 로그인 - 인증 실패 (회원 없음, password/pin 불일치, 비활성 계정) → 401
+    // 인증 실패 원인을 구분해 노출하지 않아 계정 존재 여부를 숨긴다 (계정 열거 방지)
+    INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "인증 정보가 올바르지 않습니다. 다시 확인 후 시도해 주세요."),
+
+    // 통합 로그인 - PIN 실패 횟수 초과로 계정 잠금 → 403 (docs: PIN_LOCK_EXCEEDED)
+    PIN_LOCK_EXCEEDED(HttpStatus.FORBIDDEN, "핀번호 입력 횟수가 5회 초과하여 계정이 잠겼습니다. PASS 본인인증을 통해 핀번호를 재설정해 주세요."),
+
     // JWT 토큰 검증 실패 - 서명/형식 오류, sub(userId) 누락 등 → 400
     // (회원가입 INVALID_SIGNUP_TOKEN 규약과 동일 — 위변조/형식 오류는 400)
     INVALID_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않은 토큰입니다. 다시 로그인해 주세요."),

@@ -119,6 +119,24 @@ public class JwtTokenProvider {
         return createToken(userId, DEFAULT_ROLE, TOKEN_TYPE_REFRESH, expiration);
     }
 
+    /**
+     * Access Token 만료 시간(초) 반환.
+     * - API 응답 token_info.access_token_expires_in 값 (OAuth2 관례: 초 단위)
+     * - 예: jwt.access-token-expiration=15(분) → 900초
+     */
+    public long getAccessTokenExpirationSeconds() {
+        return accessTokenExpirationMinutes * 60L;
+    }
+
+    /**
+     * Refresh Token 만료 시간(초) 반환.
+     * - Refresh Token Cookie Max-Age 및 Redis TTL(refresh:token:{userId})에 사용
+     * - 예: jwt.refresh-token-expiration=20160(분) → 1,209,600초
+     */
+    public long getRefreshTokenExpirationSeconds() {
+        return refreshTokenExpirationMinutes * 60L;
+    }
+
     private String createToken(Long userId, String role, String tokenType, Date expiration) {
         if (userId == null || userId <= 0) {
             throw new IllegalArgumentException("userId는 양수여야 합니다.");
