@@ -32,4 +32,7 @@ public class SignupVerificationData {
 
     /** 이름 AES-256 암호화본 (Redis 에 개인정보 원문 저장 금지) */
     private String encryptedName;
+
+    /** 휴대폰 번호 AES-256 암호화본 (Redis 에 개인정보 원문 저장 금지) */
+    private String encryptedPhone;
 }

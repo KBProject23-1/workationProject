@@ -2,6 +2,7 @@ package com.workit.domain.auth.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
@@ -9,6 +10,7 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.exception.BusinessException;
 import com.workit.exception.CommonExceptionAdvice;
+import com.workit.global.util.EmailValidator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,8 +20,9 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.regex.Pattern;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,9 +42,8 @@ class AuthControllerTest {
     // AuthService 수동 Stub - 실제 Service 의 계약(검증/중복 판단)을 그대로 흉내낸다
     private static class StubAuthService implements AuthService {
 
-        // Controller 테스트용 형식 검증 (실제 검증 로직은 Service 테스트에서 검증)
-        private static final Pattern EMAIL_PATTERN = Pattern.compile(
-                "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+        // Controller 테스트용 이메일 검증 — Service 와 동일한 EmailValidator 공통 정책 사용
+        // (실제 검증 로직은 Service 테스트에서 검증)
 
         @Override
         public TermsListResponseDTO getTermsList() {
@@ -62,15 +64,73 @@ class AuthControllerTest {
 
         @Override
         public EmailAvailabilityResponseDTO checkEmailAvailability(String email) {
-            if (email == null || email.trim().isEmpty()
-                    || !EMAIL_PATTERN.matcher(email.trim()).matches()) {
+            try {
+                String normalized = EmailValidator.normalize(email);
+                // "used@example.com" 은 이미 가입된 이메일로 간주
+                if ("used@example.com".equals(normalized)) {
+                    return EmailAvailabilityResponseDTO.of(false);
+                }
+                return EmailAvailabilityResponseDTO.of(true);
+            } catch (IllegalArgumentException e) {
                 throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
             }
-            // "used@example.com" 은 이미 가입된 이메일로 간주
-            if ("used@example.com".equals(email.trim())) {
-                return EmailAvailabilityResponseDTO.of(false);
+        }
+
+        @Override
+        public void signup(SignupRequestDTO request) {
+            if (request == null
+                    || request.getIdentityToken() == null || request.getIdentityToken().trim().isEmpty()
+                    || request.getEmail() == null || request.getEmail().trim().isEmpty()
+                    || request.getPassword() == null || request.getPassword().trim().isEmpty()
+                    || request.getNickname() == null || request.getNickname().trim().isEmpty()) {
+                throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_REQUEST);
             }
-            return EmailAvailabilityResponseDTO.of(true);
+
+            // 약관 동의 검증 (Stub — 실제 검증은 Service 테스트에서 검증)
+            // 검증 순서는 Service 와 동일: 빈 배열 → 존재 여부 → 필수 누락
+            List<Long> agreedTermsIds = request.getAgreedTermsIds();
+            if (agreedTermsIds == null || agreedTermsIds.isEmpty()) {
+                throw new BusinessException(AuthErrorCode.MISSING_REQUIRED_TERMS);
+            }
+
+            // 존재하지 않는 약관 ID 검증 (Stub — terms 에는 1, 2, 3 만 존재한다고 가정)
+            for (Long termId : agreedTermsIds) {
+                if (termId == null || (termId != 1L && termId != 2L && termId != 3L)) {
+                    throw new BusinessException(AuthErrorCode.INVALID_TERM_ID);
+                }
+            }
+
+            // 필수 약관은 1, 2 로 가정 — 누락 시 MISSING_REQUIRED_TERMS
+            if (!agreedTermsIds.containsAll(Arrays.asList(1L, 2L))) {
+                throw new BusinessException(AuthErrorCode.MISSING_REQUIRED_TERMS);
+            }
+
+            String token = request.getIdentityToken();
+            if ("expired-token".equals(token)) {
+                throw new BusinessException(AuthErrorCode.EXPIRED_SIGNUP_TOKEN);
+            }
+            if ("tampered-token".equals(token)) {
+                throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN);
+            }
+            if ("no-redis-token".equals(token)) {
+                throw new BusinessException(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND);
+            }
+            if ("dup-ci-token".equals(token)) {
+                throw new BusinessException(AuthErrorCode.DUPLICATE_USER);
+            }
+            // 이메일 형식/길이 검증 (Stub — 실제 검증은 Service 테스트에서 검증)
+            String normalizedEmail;
+            try {
+                normalizedEmail = EmailValidator.normalize(request.getEmail());
+            } catch (IllegalArgumentException e) {
+                throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
+            }
+            if ("used@example.com".equals(normalizedEmail)) {
+                throw new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
+            }
+            if ("taken".equals(request.getNickname().trim())) {
+                throw new BusinessException(AuthErrorCode.DUPLICATE_NICKNAME);
+            }
         }
     }
 
@@ -243,5 +303,278 @@ class AuthControllerTest {
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
         assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 최대 길이(254자) 정상 (200 + SUCCESS + available=true)")
+    void checkEmail_maxLength() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", buildLongEmail(254)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("사용 가능한 이메일입니다.", json.get("message").asText());
+        assertTrue(json.get("data").get("available").asBoolean());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
+    void checkEmail_tooLong() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", buildLongEmail(255)))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    /**
+     * 지정한 전체 길이의 이메일 생성 — 로컬파트 64자 + @ + 도메인 + .com (RFC 5321 형식 유지)
+     * - Java 8 호환을 위해 String.repeat 대신 반복문 사용
+     */
+    private String buildLongEmail(int totalLength) {
+        int domainLength = totalLength - 65; // 로컬파트 64자 + @ 1자 제외
+        StringBuilder sb = new StringBuilder(totalLength);
+        for (int i = 0; i < 64; i++) {
+            sb.append('a');
+        }
+        sb.append('@');
+        for (int i = 0; i < domainLength - 4; i++) {
+            sb.append('b');
+        }
+        sb.append(".com");
+        return sb.toString();
+    }
+
+    // ---------- 최종 회원가입 완료 ----------
+
+    /** 필수 약관(1, 2) 전체 동의 기본 본문 생성 */
+    private String signupBody(String identityToken, String email, String nickname) {
+        return signupBody(identityToken, email, nickname, ",\"agreedTermsIds\":[1,2]");
+    }
+
+    /** agreedTermsIds JSON 조각(빈 문자열이면 누락)을 지정하는 본문 생성 */
+    private String signupBody(String identityToken, String email, String nickname,
+                              String agreedTermsIdsJson) {
+        return "{\"identityToken\":\"" + identityToken
+                + "\",\"email\":\"" + email
+                + "\",\"password\":\"password123!\""
+                + ",\"nickname\":\"" + nickname + "\""
+                + agreedTermsIdsJson + "}";
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 성공 - 200 + SUCCESS + 회원가입이 완료되었습니다.")
+    void signup_success() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "new@example.com", "tester")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
+
+        // data 는 null (CommonResponse NON_NULL 로 JSON 에서 제외될 수 있음)
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - JWT 만료 (401 + EXPIRED_SIGNUP_TOKEN)")
+    void signup_expiredToken() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("expired-token", "new@example.com", "tester")))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EXPIRED_SIGNUP_TOKEN", json.get("errorCode").asText());
+        assertEquals("본인인증 유효 시간이 만료되었습니다. 인증을 다시 진행해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - JWT 위변조 (400 + INVALID_SIGNUP_TOKEN)")
+    void signup_tamperedToken() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("tampered-token", "new@example.com", "tester")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_SIGNUP_TOKEN", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - Redis 임시 데이터 없음 (400 + SIGNUP_VERIFICATION_NOT_FOUND)")
+    void signup_verificationNotFound() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("no-redis-token", "new@example.com", "tester")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("SIGNUP_VERIFICATION_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - CI 중복 (409 + DUPLICATE_USER)")
+    void signup_duplicateCi() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("dup-ci-token", "new@example.com", "tester")))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_USER", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 이메일 중복 (409 + DUPLICATE_EMAIL)")
+    void signup_duplicateEmail() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "used@example.com", "tester")))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_EMAIL", json.get("errorCode").asText());
+        assertEquals("이미 사용 중인 이메일입니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 닉네임 중복 (409 + DUPLICATE_NICKNAME)")
+    void signup_duplicateNickname() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "new@example.com", "taken")))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_NICKNAME", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
+    void signup_emailTooLong() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", buildLongEmail(255), "tester")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 필수 값 누락 (400 + INVALID_SIGNUP_REQUEST)")
+    void signup_missingRequired() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_SIGNUP_REQUEST", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - agreedTermsIds 포함 정상 요청 (200 + SUCCESS)")
+    void signup_withAgreedTerms_success() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "new@example.com", "tester",
+                                ",\"agreedTermsIds\":[1,2,3]")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - agreedTermsIds 누락 (400 + MISSING_REQUIRED_TERMS)")
+    void signup_missingAgreedTerms() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "new@example.com", "tester", "")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("MISSING_REQUIRED_TERMS", json.get("errorCode").asText());
+        assertEquals("필수 약관에 모두 동의해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 존재하지 않는 약관 ID (400 + INVALID_TERM_ID)")
+    void signup_invalidTermId() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "new@example.com", "tester",
+                                ",\"agreedTermsIds\":[1,2,99]")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_TERM_ID", json.get("errorCode").asText());
+        assertEquals("존재하지 않는 약관이 포함되어 있습니다. 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 필수 약관 누락 (400 + MISSING_REQUIRED_TERMS)")
+    void signup_missingRequiredTerms() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-token", "new@example.com", "tester",
+                                ",\"agreedTermsIds\":[1]")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("MISSING_REQUIRED_TERMS", json.get("errorCode").asText());
+        assertEquals("필수 약관에 모두 동의해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 잘못된 JSON 본문 (400 공통 형식 오류)")
+    void signup_malformedBody() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("not-json"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertFalse(json.get("errorCode").isNull());
     }
 }
