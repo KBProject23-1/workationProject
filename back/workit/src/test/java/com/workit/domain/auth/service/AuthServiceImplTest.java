@@ -5,6 +5,7 @@ import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
@@ -136,6 +137,9 @@ class AuthServiceImplTest {
         /** 로그인 조회용 — device_id 로 등록된 회원 (테스트에서 직접 등록) */
         final Map<String, LoginUserVO> usersByDeviceId = new HashMap<>();
 
+        /** 재발급 조회용 — userId 로 등록된 회원 (테스트에서 직접 등록) */
+        final Map<Long, LoginUserVO> usersById = new HashMap<>();
+
         /** findUserByEmailHash 호출 시 사용된 hash 기록 — email_hash 조회 확인용 */
         final List<String> emailHashLoginLookups = new ArrayList<>();
 
@@ -261,6 +265,11 @@ class AuthServiceImplTest {
         public LoginUserVO findUserByDeviceId(String deviceId) {
             return usersByDeviceId.get(deviceId);
         }
+
+        @Override
+        public LoginUserVO findUserById(Long userId) {
+            return usersById.get(userId);
+        }
     }
 
     // 수동 Fake WalletService - createWallet 이 호출되었는지(생성된 userId)를 기록한다
@@ -305,6 +314,11 @@ class AuthServiceImplTest {
         public void save(Long userId, String refreshTokenHash, long ttlSeconds) {
             saved.put(userId, refreshTokenHash);
             savedTtls.put(userId, ttlSeconds);
+        }
+
+        @Override
+        public String find(Long userId) {
+            return saved.get(userId);
         }
 
         @Override
@@ -1105,6 +1119,7 @@ class AuthServiceImplTest {
         authMapper.usersByEmailHash.put(sha256(email), user);
         authMapper.usersByPhoneHash.put(sha256(phoneNumber), user);
         authMapper.usersByDeviceId.put(deviceId, user);
+        authMapper.usersById.put(userId, user);
     }
 
     /** 로그인 요청 DTO 생성 헬퍼 */
@@ -1344,6 +1359,205 @@ class AuthServiceImplTest {
         String text = request.toString();
         assertFalse(text.contains("password123!"));
         assertFalse(text.contains("123456"));
+    }
+
+    // ---------- 로그인 토큰 재발급 (Refresh Token → Access Token) ----------
+
+    /**
+     * 로그인까지 거쳐 유효한 Refresh Token 세션(Redis hash 저장 포함)을 만든다.
+     * - Service 가 발급한 refreshToken 과 Redis(refresh:token:{userId}) hash 가 일치하는 상태
+     */
+    private String issueRefreshTokenSession(Long userId) {
+        registerLoginUser(userId, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        LoginResponseDTO loginResult =
+                authService.login(loginRequest("PASSWORD", "user@example.com", "password123!", null, null));
+        return loginResult.getRefreshToken();
+    }
+
+    @Test
+    @DisplayName("정상 재발급 - 신규 Access Token 발급 + Refresh Token Rotation + Redis hash 교체")
+    void refresh_success() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        // 명시적 만료(120초) 토큰으로 세션 구성 — Service 가 발급하는 기본 만료(14일) 토큰과 exp 가
+        // 항상 달라 JWT 문자열이 동일해지는 타이밍 문제 없이 Rotation 을 결정적으로 검증한다
+        String refreshToken = jwtTokenProvider.createRefreshToken(501L,
+                new Date(System.currentTimeMillis() + 120_000L));
+        refreshTokenStore.save(501L, sha256(refreshToken), 1209600L);
+        String oldHash = refreshTokenStore.saved.get(501L);
+
+        RefreshTokenResponseDTO result = authService.refreshAccessToken(refreshToken);
+
+        // token_info — 신규 Access Token (sub == userId, tokenType == ACCESS, 개인정보 없음)
+        assertNotNull(result);
+        LoginResponseDTO.TokenInfo tokenInfo = result.getTokenInfo();
+        assertNotNull(tokenInfo);
+        assertEquals("Bearer", tokenInfo.getGrantType());
+        assertNotNull(tokenInfo.getAccessToken());
+        assertEquals(900L, tokenInfo.getAccessTokenExpiresIn());
+
+        Claims accessClaims = jwtTokenProvider.parseAccessToken(tokenInfo.getAccessToken());
+        assertEquals("501", accessClaims.getSubject());
+        assertFalse(accessClaims.containsKey("email"));
+        assertFalse(accessClaims.containsKey("password"));
+        assertFalse(accessClaims.containsKey("pin"));
+
+        // Rotation — 신규 Refresh Token 발급, exp 가 달라 이전 토큰과 다르고 tokenType == REFRESH
+        String newRefreshToken = result.getRefreshToken();
+        assertNotNull(newRefreshToken);
+        assertNotEquals(refreshToken, newRefreshToken);
+        Claims newRefreshClaims = jwtTokenProvider.parseRefreshToken(newRefreshToken);
+        assertEquals("501", newRefreshClaims.getSubject());
+
+        // Redis — 신규 hash 로 교체, TTL 은 refresh 만료와 동일
+        assertEquals(sha256(newRefreshToken), refreshTokenStore.saved.get(501L));
+        assertNotEquals(oldHash, refreshTokenStore.saved.get(501L));
+        assertEquals(Long.valueOf(1209600L), refreshTokenStore.savedTtls.get(501L));
+    }
+
+    @Test
+    @DisplayName("Rotation 후 이전 Refresh Token 재사용 - 세션 revoke + INVALID_REFRESH_TOKEN")
+    void refresh_reuseAfterRotation_revokesSession() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        // 명시적 만료(120초) 토큰으로 1차 세션 구성 — Service 가 발급하는 기본 만료(14일) 토큰과
+        // exp 가 항상 달라, 회전 후 이전 토큰 재사용 감지가 결정적으로 검증된다
+        String refreshToken = jwtTokenProvider.createRefreshToken(501L,
+                new Date(System.currentTimeMillis() + 120_000L));
+        refreshTokenStore.save(501L, sha256(refreshToken), 1209600L);
+
+        // 1차 재발급(Rotation) — 이전 refreshToken 은 더 이상 유효하지 않다
+        RefreshTokenResponseDTO rotated = authService.refreshAccessToken(refreshToken);
+        assertNotEquals(refreshToken, rotated.getRefreshToken());
+
+        // 2차 요청에 회전 전 Refresh Token 사용 → 재사용 감지 → 세션 전체 revoke
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+        // 세션 revoke — Redis 저장 hash 삭제
+        assertFalse(refreshTokenStore.saved.containsKey(501L));
+        assertTrue(refreshTokenStore.deletedUserIds.contains(501L));
+    }
+
+    @Test
+    @DisplayName("Redis hash 불일치 - 세션 revoke + INVALID_REFRESH_TOKEN")
+    void refresh_hashMismatch_revokesSession() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        // 저장된 hash 를 다른 값으로 덮어쓴다 (클라이언트 토큰 != 저장소 토큰 = 탈취/재사용 의심)
+        refreshTokenStore.saved.put(501L, "forged-hash-value");
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+        // 세션 revoke — 저장 hash 삭제
+        assertFalse(refreshTokenStore.saved.containsKey(501L));
+        assertTrue(refreshTokenStore.deletedUserIds.contains(501L));
+    }
+
+    @Test
+    @DisplayName("Redis 저장 hash 없음(로그아웃/TTL 만료) - INVALID_REFRESH_TOKEN")
+    void refresh_noStoredHash_throws() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        // 로그아웃 등으로 Redis 세션이 삭제된 상태
+        refreshTokenStore.delete(501L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token - INVALID_REFRESH_TOKEN")
+    void refresh_expiredToken_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        String expired = jwtTokenProvider.createRefreshToken(501L,
+                new Date(System.currentTimeMillis() - 60_000L));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(expired));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("위변조된 Refresh Token - INVALID_REFRESH_TOKEN")
+    void refresh_tamperedToken_throws() {
+        String refreshToken = issueRefreshTokenSession(501L);
+        // 끝에서 두 번째 base64 글자를 바꾼다 (signup 위변조 테스트와 동일한 방식)
+        String tampered = refreshToken.substring(0, refreshToken.length() - 2)
+                + (refreshToken.charAt(refreshToken.length() - 2) == 'a' ? "b" : "a")
+                + refreshToken.charAt(refreshToken.length() - 1);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(tampered));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("Access Token 으로 재발급 요청 - 용도 오류 → INVALID_REFRESH_TOKEN")
+    void refresh_accessTokenMisuse_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        String accessToken = jwtTokenProvider.createAccessToken(501L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(accessToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("탈퇴 회원 - ACTIVE 가 아니면 INVALID_REFRESH_TOKEN")
+    void refresh_withdrawnUser_throws() {
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "WITHDRAWN");
+        // 탈퇴 회원의 세션이 Redis 에 남아있더라도 재발급은 거부되어야 한다
+        String refreshToken = jwtTokenProvider.createRefreshToken(501L);
+        refreshTokenStore.save(501L, sha256(refreshToken), 1209600L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 회원 - INVALID_REFRESH_TOKEN")
+    void refresh_unknownUser_throws() {
+        String refreshToken = jwtTokenProvider.createRefreshToken(999L);
+        refreshTokenStore.save(999L, sha256(refreshToken), 1209600L);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(refreshToken));
+
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("쿠키 누락 - null/blank Refresh Token → INVALID_REFRESH_TOKEN")
+    void refresh_blankToken_throws() {
+        assertThrows(BusinessException.class, () -> authService.refreshAccessToken(null));
+        assertThrows(BusinessException.class, () -> authService.refreshAccessToken(""));
+        assertThrows(BusinessException.class, () -> authService.refreshAccessToken("   "));
+    }
+
+    @Test
+    @DisplayName("보안 - 응답 DTO toString 에 refreshToken 원문 미노출 (JWT 로그 유출 방지)")
+    void refresh_responseToStringHidesToken() {
+        RefreshTokenResponseDTO dto = RefreshTokenResponseDTO.builder()
+                .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
+                .refreshToken("secret-refresh-token-value")
+                .refreshTokenMaxAgeSeconds(1209600)
+                .build();
+
+        String text = dto.toString();
+        assertFalse(text.contains("secret-refresh-token-value"));
     }
 }
 

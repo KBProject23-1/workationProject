@@ -23,6 +23,15 @@ public interface RefreshTokenStore {
      */
     void save(Long userId, String refreshTokenHash, long ttlSeconds);
 
+    /**
+     * 저장된 Refresh Token hash 조회
+     * - 재발급 시 클라이언트가 보낸 토큰의 hash 와 비교해 재사용(reuse) 여부를 판단한다
+     * - 저장된 값이 없으면(로그아웃/TTL 만료) null 반환
+     *
+     * @return 저장된 SHA-256 hash, 없으면 null
+     */
+    String find(Long userId);
+
     /** Refresh Token 삭제 — 로그아웃/탈퇴/재사용 감지 시 세션 무효화 */
     void delete(Long userId);
 }

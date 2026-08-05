@@ -7,6 +7,7 @@ import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
@@ -21,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import javax.servlet.http.Cookie;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
@@ -173,6 +175,20 @@ class AuthControllerTest {
                     .name("홍길동")
                     .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
                     .refreshToken("refresh-token-jwt")
+                    .refreshTokenMaxAgeSeconds(1209600)
+                    .build();
+        }
+
+        @Override
+        public RefreshTokenResponseDTO refreshAccessToken(String refreshToken) {
+            // Controller 테스트용 재발급 판정 Stub — 실제 검증 로직은 Service 테스트에서 검증
+            if (refreshToken == null || refreshToken.trim().isEmpty()
+                    || "invalid-refresh".equals(refreshToken)) {
+                throw new BusinessException(AuthErrorCode.INVALID_REFRESH_TOKEN);
+            }
+            return RefreshTokenResponseDTO.builder()
+                    .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "new-access-token-jwt", 900))
+                    .refreshToken("new-refresh-token-jwt")
                     .refreshTokenMaxAgeSeconds(1209600)
                     .build();
         }
@@ -794,5 +810,68 @@ class AuthControllerTest {
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertFalse(json.get("errorCode").isNull());
+    }
+
+    // ---------- 로그인 토큰 재발급 ----------
+
+    @Test
+    @DisplayName("재발급 성공 - 200 + SUCCESS + token_info + 신규 Refresh Token Set-Cookie")
+    void refresh_success() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refreshToken", "valid-refresh-token-jwt")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("액세스 토큰이 성공적으로 재발급되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // docs 스펙: data.token_info.{grant_type, access_token, access_token_expires_in}
+        JsonNode tokenInfo = json.get("data").get("token_info");
+        assertNotNull(tokenInfo);
+        assertEquals("Bearer", tokenInfo.get("grant_type").asText());
+        assertEquals("new-access-token-jwt", tokenInfo.get("access_token").asText());
+        assertEquals(900, tokenInfo.get("access_token_expires_in").asInt());
+
+        // 신규 Refresh Token 은 JSON 본문에 포함되지 않는다 (HttpOnly Cookie 로만 전달 — Rotation)
+        assertTrue(json.get("data").get("refreshToken") == null);
+
+        // Rotation 으로 갱신된 Refresh Token Cookie (login 과 동일 속성)
+        String setCookie = result.getResponse().getHeader("Set-Cookie");
+        assertNotNull(setCookie);
+        assertTrue(setCookie.contains("refreshToken=new-refresh-token-jwt"), "쿠키명/값: " + setCookie);
+        assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
+        assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
+        assertTrue(setCookie.contains("Max-Age=1209600"), "Max-Age 속성: " + setCookie);
+        assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
+        assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+    }
+
+    @Test
+    @DisplayName("Refresh Token 쿠키 누락 - 401 + INVALID_REFRESH_TOKEN")
+    void refresh_missingCookie() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
+        assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("유효하지 않은 Refresh Token - 401 + INVALID_REFRESH_TOKEN")
+    void refresh_invalidToken() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refreshToken", "invalid-refresh")))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
+        assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
     }
 }

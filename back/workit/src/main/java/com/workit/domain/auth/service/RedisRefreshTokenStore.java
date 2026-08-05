@@ -28,6 +28,11 @@ public class RedisRefreshTokenStore implements RefreshTokenStore {
     }
 
     @Override
+    public String find(Long userId) {
+        return redisTemplate.opsForValue().get(KEY_PREFIX + userId);
+    }
+
+    @Override
     public void delete(Long userId) {
         redisTemplate.delete(KEY_PREFIX + userId);
     }

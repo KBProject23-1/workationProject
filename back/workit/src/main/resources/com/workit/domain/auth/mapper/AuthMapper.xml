@@ -188,4 +188,18 @@
         LIMIT 1
     </select>
 
+    <!--
+        Refresh Token 재발급 - userId(PK) 기준 회원 상태 조회.
+        - 재발급 시 회원 존재 여부 + ACTIVE 상태 검증용 (users.status 만 필요)
+        - name_encrypt 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+        - 결과 없음 → Mapper 는 null 반환, 재발급 실패(INVALID_REFRESH_TOKEN) 판단은 Service
+    -->
+    <select id="findUserById"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT id,
+               status
+        FROM users
+        WHERE id = #{userId}
+    </select>
+
 </mapper>

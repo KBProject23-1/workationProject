@@ -109,4 +109,13 @@ public interface AuthMapper {
      * @return 등록된 기기가 없으면 null
      */
     LoginUserVO findUserByDeviceId(String deviceId);
+
+    /**
+     * Refresh Token 재발급 - userId(PK) 기준 회원 상태 조회
+     * - 재발급 시 회원 존재 여부와 ACTIVE 상태를 검증하기 위한 조회
+     * - name_encrypt 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+     *
+     * @return 해당 회원이 없으면 null
+     */
+    LoginUserVO findUserById(Long userId);
 }
