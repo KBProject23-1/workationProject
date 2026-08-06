@@ -7,6 +7,7 @@ import com.workit.domain.category.service.CategoryService;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -25,10 +26,8 @@ public class CategoryController {
     // CommonExceptionAdvice 가 400 으로 응답한다
     @GetMapping
     public ResponseEntity<CommonResponse<CategoryListResponseDTO>> categoryListGet(
+            @CurrentUser Long userId,
             @RequestParam("budgetType") BudgetType budgetType) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(categoryService.getCategoryList(userId, budgetType));
     }
@@ -36,11 +35,9 @@ public class CategoryController {
     // 2.2 카테고리 이름 변경
     @PatchMapping("/{categoryId}/label")
     public ResponseEntity<CommonResponse<CategoryLabelResponseDTO>> categoryLabelModify(
+            @CurrentUser Long userId,
             @PathVariable("categoryId") Long categoryId,
             @RequestBody CategoryLabelRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(categoryService.modifyCategoryLabel(userId, categoryId, dto));
     }

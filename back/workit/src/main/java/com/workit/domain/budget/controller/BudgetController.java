@@ -9,6 +9,7 @@ import com.workit.domain.budget.service.BudgetService;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -27,11 +28,9 @@ public class BudgetController {
     // enum 으로 직접 받으므로 잘못된 값은 Spring 이 예외를 던지고 공통 Advice 가 400 으로 응답한다
     @GetMapping
     public ResponseEntity<CommonResponse<BudgetStatusResponseDTO>> budgetStatusGet(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestParam(value = "budgetType", required = false) BudgetType budgetType) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(budgetService.getBudgetStatus(userId, workationId, budgetType));
     }
@@ -40,11 +39,9 @@ public class BudgetController {
     // 새로 배분하는 것이므로 POST + 201. 이미 설정돼 있으면 409 로 수정 API 를 안내한다
     @PostMapping
     public ResponseEntity<CommonResponse<BudgetSummaryResponseDTO>> budgetSetupAdd(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestBody BudgetSetupRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.created(budgetService.setupBudget(userId, workationId, dto));
     }
@@ -53,11 +50,9 @@ public class BudgetController {
     // 해당 예산 유형의 배분 전체를 덮어쓰므로 PUT
     @PutMapping
     public ResponseEntity<CommonResponse<BudgetSummaryResponseDTO>> budgetModify(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestBody BudgetSetupRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(budgetService.modifyBudget(userId, workationId, dto));
     }
@@ -66,11 +61,9 @@ public class BudgetController {
     // 예산 배분 행 하나를 새로 만드는 것이므로 하위 경로 /items 에 POST + 201
     @PostMapping("/items")
     public ResponseEntity<CommonResponse<BudgetItemResponseDTO>> budgetItemAdd(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestBody BudgetItemAddRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.created(budgetService.addBudgetItem(userId, workationId, dto));
     }
@@ -79,12 +72,10 @@ public class BudgetController {
     // force=true 면 지출이 있어도 예산 배정만 삭제한다. 지출 내역은 유지된다
     @DeleteMapping("/items/{budgetId}")
     public ResponseEntity<Void> budgetItemRemove(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @PathVariable("budgetId") Long budgetId,
             @RequestParam(value = "force", defaultValue = "false") boolean force) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         budgetService.removeBudgetItem(userId, workationId, budgetId, force);
         return GlobalResponseFactory.noContent();

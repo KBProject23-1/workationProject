@@ -7,6 +7,7 @@ import com.workit.domain.workation.vo.BudgetType;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
@@ -35,11 +36,9 @@ public class SettlementController {
     // budgetType 미지정 시 법인·개인 모두 반환
     @GetMapping
     public ResponseEntity<CommonResponse<SettlementResponseDTO>> settlementGet(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestParam(value = "budgetType", required = false) BudgetType budgetType) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(
                 settlementService.getSettlement(userId, workationId, budgetType));
@@ -48,12 +47,10 @@ public class SettlementController {
     // 6.2 정산 내역 Excel 다운로드
     @GetMapping("/excel")
     public void settlementExcelGet(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestParam(value = "budgetType", required = false) BudgetType budgetType,
             HttpServletResponse response) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         byte[] file = settlementService.exportExcel(userId, workationId, budgetType);
         String fileName = settlementService.buildFileName(userId, workationId, "정산내역", "xlsx");
@@ -64,12 +61,10 @@ public class SettlementController {
     // 6.3 지출 상세내역 PDF 다운로드
     @GetMapping("/pdf")
     public void settlementPdfGet(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestParam(value = "budgetType", required = false) BudgetType budgetType,
             HttpServletResponse response) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         byte[] file = settlementService.exportPdf(userId, workationId, budgetType);
         String fileName = settlementService.buildFileName(userId, workationId, "증빙자료", "pdf");
