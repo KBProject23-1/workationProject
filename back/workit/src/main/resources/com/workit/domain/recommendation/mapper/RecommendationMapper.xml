@@ -222,7 +222,7 @@
             accessibility_score, rating_score, total_score, ranking, distance, calculated_at
         ) VALUES
         <foreach collection="results" item="result" separator=",">
-            (#{requestId}, #{result.merchantId}, #{result.priceScore}, NULL,
+            (#{requestId}, #{result.merchantId}, #{result.priceScore}, #{result.preferenceScore},
              #{result.accessibilityScore}, #{result.ratingScore}, #{result.totalScore},
              #{result.ranking}, #{result.distance}, NOW())
         </foreach>
@@ -266,7 +266,7 @@
          WHERE rr.user_id = #{userId}
            AND rr.recommendation_type = 'RESTAURANT'
            AND rr.meal_type = #{mealType}
-        <if test="referenceMerchantId != null">
+         <if test="referenceMerchantId != null">
            AND rr.reference_merchant_id = #{referenceMerchantId}
         </if>
          ORDER BY rr.created_at DESC, rr.id DESC LIMIT 1
@@ -281,6 +281,7 @@
                result.accessibility_score,
                result.rating_score,
                result.total_score,
+               result.calculated_at,
                result.ranking,
                result.distance,
                m.name AS merchant_name,

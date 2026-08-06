@@ -11,6 +11,7 @@ public class RecommendationResultVO extends RecommendationMerchantVO {
     private Long recommendationResultId;
     private Long recommendationRequestId;
     private BigDecimal priceScore;
+    private BigDecimal preferenceScore;
     private BigDecimal accessibilityScore;
     private BigDecimal ratingScore;
     private BigDecimal totalScore;
