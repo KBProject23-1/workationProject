@@ -9,6 +9,7 @@ import com.workit.domain.expense.dto.response.ExpenseDetailResponseDTO;
 import com.workit.domain.expense.service.WorkationExpenseService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -27,10 +28,8 @@ public class ExpenseController {
     // 5.3 지출 단건 상세조회
     @GetMapping
     public ResponseEntity<CommonResponse<ExpenseDetailResponseDTO>> expenseDetailGet(
+            @CurrentUser Long userId,
             @PathVariable("expenseId") Long expenseId) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(expenseService.getExpenseDetail(userId, expenseId));
     }
@@ -39,11 +38,9 @@ public class ExpenseController {
     // 등록 폼을 재사용하므로 전체 필드를 받는다
     @PutMapping
     public ResponseEntity<CommonResponse<ExpenseDetailResponseDTO>> expenseModify(
+            @CurrentUser Long userId,
             @PathVariable("expenseId") Long expenseId,
             @RequestBody ExpenseUpdateRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(expenseService.modifyExpense(userId, expenseId, dto));
     }
@@ -51,10 +48,8 @@ public class ExpenseController {
     // 5.5 지출 삭제
     @DeleteMapping
     public ResponseEntity<Void> expenseRemove(
+            @CurrentUser Long userId,
             @PathVariable("expenseId") Long expenseId) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         expenseService.removeExpense(userId, expenseId);
         return GlobalResponseFactory.noContent();
@@ -64,11 +59,9 @@ public class ExpenseController {
     // 일부 필드만 바꾸므로 PATCH
     @PatchMapping("/category")
     public ResponseEntity<CommonResponse<ExpenseCategoryChangeResponseDTO>> expenseCategoryModify(
+            @CurrentUser Long userId,
             @PathVariable("expenseId") Long expenseId,
             @RequestBody ExpenseCategoryChangeRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(expenseService.modifyExpenseCategory(userId, expenseId, dto));
     }
@@ -76,11 +69,9 @@ public class ExpenseController {
     // 5.7 경비/개인소비 구분 변경
     @PatchMapping("/budget-type")
     public ResponseEntity<CommonResponse<ExpenseBudgetTypeChangeResponseDTO>> expenseBudgetTypeModify(
+            @CurrentUser Long userId,
             @PathVariable("expenseId") Long expenseId,
             @RequestBody ExpenseBudgetTypeChangeRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(expenseService.modifyExpenseBudgetType(userId, expenseId, dto));
     }

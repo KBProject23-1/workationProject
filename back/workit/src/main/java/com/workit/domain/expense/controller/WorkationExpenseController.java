@@ -7,6 +7,7 @@ import com.workit.domain.expense.service.WorkationExpenseService;
 import com.workit.domain.workation.vo.BudgetType;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -26,15 +27,13 @@ public class WorkationExpenseController {
     // budgetType, expenseCategoryId, uncheckedOnly 는 선택 필터
     @GetMapping
     public ResponseEntity<CommonResponse<ExpenseListResponseDTO>> expenseListGet(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestParam(value = "budgetType", required = false) BudgetType budgetType,
             @RequestParam(value = "expenseCategoryId", required = false) Long expenseCategoryId,
             @RequestParam(value = "uncheckedOnly", required = false) Boolean uncheckedOnly,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(expenseService.getExpenseList(
                 userId, workationId, budgetType, expenseCategoryId, uncheckedOnly, page, size));
@@ -43,11 +42,9 @@ public class WorkationExpenseController {
     // 5.2 외부 결제내역 추가
     @PostMapping
     public ResponseEntity<CommonResponse<ExpenseItemResponseDTO>> expenseAdd(
+            @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
             @RequestBody ExpenseCreateRequestDTO dto) {
-
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
 
         return GlobalResponseFactory.created(expenseService.addExpense(userId, workationId, dto));
     }

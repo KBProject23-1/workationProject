@@ -14,6 +14,7 @@ import com.workit.domain.workation.vo.BudgetType;
 import com.workit.domain.workation.vo.Region;
 import com.workit.domain.workation.vo.WorkationVO;
 import com.workit.exception.BusinessException;
+import com.workit.global.util.PersonalDataCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -115,7 +116,7 @@ public class SettlementServiceImpl implements SettlementService {
 
         return SettlementDocumentVO.builder()
                 .workation(workation)
-                .userName(settlementMapper.selectUserName(userId))
+                .userName(PersonalDataCipher.decrypt(settlementMapper.selectUserName(userId)))
                 .cardLabels(settlementMapper.selectUsedCardLabels(workationId, BudgetType.WORK))
                 .summary(summaries.isEmpty()
                         ? SettlementSummaryDTO.of(BudgetType.WORK, Collections.emptyList())

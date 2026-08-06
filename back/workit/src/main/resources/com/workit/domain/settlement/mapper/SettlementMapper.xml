@@ -140,7 +140,7 @@
     </select>
 
     <select id="selectUserName" resultType="string">
-        SELECT name FROM users WHERE id = #{userId}
+        SELECT name_encrypt FROM users WHERE id = #{userId}
     </select>
 
     <!--
