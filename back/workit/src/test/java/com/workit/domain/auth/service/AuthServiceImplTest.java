@@ -237,19 +237,18 @@ class AuthServiceImplTest {
         }).when(loginFailCounter).reset(anyLong());
 
         // PasswordResetTokenStore 상태형 Mock — 비밀번호 재설정 토큰→userId 매핑을 인메모리 맵으로 흉내낸다
-        // (Redis password:reset:{token} 구현을 Mockito Answer 로 대체)
+        // (Redis password:reset:{token} 구현을 Mockito Answer 로 대체 — TTL 은 저장소 내부 관리이므로
+        //  save() 는 token/userId 만 받고, TTL 검증은 저장소 구현 책임으로 서비스 테스트에서 제외)
         lenient().doAnswer(invocation -> {
             savedPasswordResetTokens.put(invocation.getArgument(0), invocation.getArgument(1));
             return null;
-        }).when(passwordResetTokenStore).save(anyString(), anyLong(), anyLong());
+        }).when(passwordResetTokenStore).save(anyString(), anyLong());
         lenient().when(passwordResetTokenStore.find(anyString()))
                 .thenAnswer(invocation -> savedPasswordResetTokens.get(invocation.getArgument(0)));
         lenient().doAnswer(invocation -> {
             savedPasswordResetTokens.remove(invocation.getArgument(0));
             return null;
         }).when(passwordResetTokenStore).delete(anyString());
-        // TTL 설정값 노출 (docs: 5분 = 300초) — getTtlSeconds 는 테스트에서 설정
-        lenient().when(passwordResetTokenStore.getTtlSeconds()).thenReturn(300L);
 
         // users PK 자동 증가 흉내 — insertUser 호출 시 id 를 채운다 (기존 Fake Mapper 대체)
         lenient().when(authMapper.insertUser(any(UserVO.class)))
@@ -1818,7 +1817,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("재설정 토큰 발급 성공 - email hash 조회 + CI 대조 + 5분 TTL Redis 저장 + UUID 반환")
+    @DisplayName("재설정 토큰 발급 성공 - email hash 조회 + CI 대조 + Redis 저장 + UUID 반환")
     void passwordVerify_success() {
         // Given — PASS 인증 성공 + loginId 이메일과 CI 가 일치하는 ACTIVE 회원
         when(identityVerificationProvider.verify("imp_ver_9876543210"))
@@ -1830,16 +1829,15 @@ class AuthServiceImplTest {
         PasswordVerifyResponseDTO result = authService.verifyPasswordReset(
                 passwordVerifyRequest("user@example.com", "imp_ver_9876543210"));
 
-        // Then — UUID 토큰 발급 + Redis(password:reset:{token})에 userId 매핑 저장 (TTL 300초)
+        // Then — UUID 토큰 발급 + Redis(password:reset:{token})에 userId 매핑 저장
+        // (TTL 5분은 저장소가 설정값으로 내부 적용 — Service 는 TTL 을 알지 못한다)
         assertNotNull(result);
         assertNotNull(result.getPasswordResetToken());
         assertFalse(result.getPasswordResetToken().trim().isEmpty());
 
         ArgumentCaptor<String> tokenCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Long> ttlCaptor = ArgumentCaptor.forClass(Long.class);
-        verify(passwordResetTokenStore).save(tokenCaptor.capture(), eq(501L), ttlCaptor.capture());
+        verify(passwordResetTokenStore).save(tokenCaptor.capture(), eq(501L));
         assertEquals(result.getPasswordResetToken(), tokenCaptor.getValue());
-        assertEquals(Long.valueOf(300L), ttlCaptor.getValue());
 
         // 저장된 토큰으로 userId 복원 가능 (2단계 reset 에서 사용)
         assertEquals(Long.valueOf(501L), savedPasswordResetTokens.get(result.getPasswordResetToken()));
@@ -2049,7 +2047,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("비밀번호 변경 - 갱신 행 수 0 (회원 인증 정보 없음) → RESET_TIMEOUT_OR_INVALID_TOKEN + 토큰 유지")
+    @DisplayName("비밀번호 변경 - 갱신 행 수 0 (회원 인증 정보 없음) → RESET_TIMEOUT_OR_INVALID_TOKEN + 토큰 1회성 폐기")
     void passwordReset_updateAffectedZero_throws() {
         // Given — 유효한 토큰이지만 갱신 대상 행이 없다 (회원 탈퇴 등)
         savedPasswordResetTokens.put("reset-token-1", 501L);
@@ -2061,9 +2059,9 @@ class AuthServiceImplTest {
 
         // Then
         assertEquals(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN, ex.getErrorCode());
-        // 실패 시 토큰은 삭제되지 않아야 한다 (재시도 가능)
-        assertTrue(savedPasswordResetTokens.containsKey("reset-token-1"));
-        verify(passwordResetTokenStore, never()).delete(anyString());
+        // 일회성 토큰 정책 — 갱신 대상이 없으면(회원 탈퇴 등) 재시도를 막기 위해 토큰도 즉시 폐기한다
+        assertFalse(savedPasswordResetTokens.containsKey("reset-token-1"));
+        verify(passwordResetTokenStore).delete("reset-token-1");
     }
 
     @Test

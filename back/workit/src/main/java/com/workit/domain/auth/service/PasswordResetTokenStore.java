@@ -20,12 +20,13 @@ public interface PasswordResetTokenStore {
 
     /**
      * passwordResetToken → userId 매핑 저장 (기존 값은 덮어쓴다)
+     * - TTL 은 구현체(RedisSignupVerificationStore 패턴)가 설정값(기본 5분)을 내부 적용한다
+     *   — 호출부가 TTL 을 알 필요가 없어 Service 와 TTL 정책이 분산되지 않는다
      *
      * @param passwordResetToken 발급한 1회성 UUID (key: password:reset:{token})
      * @param userId             토큰 소유자 회원 번호
-     * @param ttlSeconds         만료 TTL(초) — docs 기준 5분 (300초)
      */
-    void save(String passwordResetToken, Long userId, long ttlSeconds);
+    void save(String passwordResetToken, Long userId);
 
     /**
      * 토큰으로 소유자 userId 조회
@@ -35,13 +36,6 @@ public interface PasswordResetTokenStore {
      */
     Long find(String passwordResetToken);
 
-    /** 토큰 삭제 — 비밀번호 변경 완료 후 1회성 폐기 */
+    /** 토큰 삭제 — 비밀번호 변경 완료 또는 흐름 무효 시 1회성 폐기 */
     void delete(String passwordResetToken);
-
-    /**
-     * 재설정 토큰 TTL(초) — 구현체 설정값 노출
-     * - Service 가 Redis 저장 시 이 값을 그대로 사용해 JWT 와 Redis 의 TTL 이
-     *   분산되지 않도록 한다 (JwtTokenProvider.getRefreshTokenExpirationSeconds 와 동일 패턴)
-     */
-    long getTtlSeconds();
 }

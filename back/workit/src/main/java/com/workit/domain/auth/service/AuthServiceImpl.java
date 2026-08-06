@@ -607,11 +607,10 @@ public class AuthServiceImpl implements AuthService {
 
         // 6. passwordResetToken 발급 + Redis 5분 TTL 저장
         //    - UUID 는 예측 불가능한 1회성 토큰 — key: password:reset:{token}, value: userId
-        //    - TTL 은 저장소 설정(기본 5분)을 사용해 하드코딩하지 않는다
-        //      (JwtTokenProvider.getRefreshTokenExpirationSeconds 패턴과 동일)
+        //    - TTL 은 저장소가 설정값(기본 5분)을 내부 적용한다 — Service 에서 하드코딩/전달하지 않는다
+        //      (RedisSignupVerificationStore 패턴과 동일)
         String passwordResetToken = UUID.randomUUID().toString();
-        passwordResetTokenStore.save(passwordResetToken, user.getId(),
-                passwordResetTokenStore.getTtlSeconds());
+        passwordResetTokenStore.save(passwordResetToken, user.getId());
 
         // 7. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지)
         log.info("비밀번호 재설정 토큰 발급 - userId={}", user.getId());
@@ -650,6 +649,9 @@ public class AuthServiceImpl implements AuthService {
         //    - 갱신 행 수가 0 이면 해당 userId 의 인증 정보가 없다(회원 탈퇴 등) → 재설정 흐름 무효 처리
         int updated = authMapper.updatePasswordHash(userId, newPasswordHash);
         if (updated == 0) {
+            // 일회성 토큰 정책 — 갱신 대상이 없으면(회원 탈퇴 등) 재시도를 막기 위해 토큰도 즉시 폐기한다.
+            // DB 갱신이 발생하지 않은 상태이므로 afterCommit 없이 바로 삭제한다.
+            passwordResetTokenStore.delete(request.getPasswordResetToken());
             throw new BusinessException(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN);
         }
 

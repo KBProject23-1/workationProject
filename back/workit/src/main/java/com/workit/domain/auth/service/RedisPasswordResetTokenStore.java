@@ -38,10 +38,11 @@ public class RedisPasswordResetTokenStore implements PasswordResetTokenStore {
     }
 
     @Override
-    public void save(String passwordResetToken, Long userId, long ttlSeconds) {
+    public void save(String passwordResetToken, Long userId) {
+        // TTL 은 생성자 설정값(기본 5분)을 내부 적용 — 호출부가 TTL 을 알 필요가 없다
+        // (RedisSignupVerificationStore 와 동일 패턴)
         redisTemplate.opsForValue()
-                .set(KEY_PREFIX + passwordResetToken, String.valueOf(userId),
-                        Duration.ofSeconds(ttlSeconds));
+                .set(KEY_PREFIX + passwordResetToken, String.valueOf(userId), ttl);
     }
 
     @Override
@@ -61,10 +62,5 @@ public class RedisPasswordResetTokenStore implements PasswordResetTokenStore {
     @Override
     public void delete(String passwordResetToken) {
         redisTemplate.delete(KEY_PREFIX + passwordResetToken);
-    }
-
-    @Override
-    public long getTtlSeconds() {
-        return ttl.getSeconds();
     }
 }
