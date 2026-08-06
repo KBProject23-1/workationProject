@@ -3,6 +3,7 @@ package com.workit.domain.auth.service;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
@@ -22,6 +23,7 @@ import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.TermsVO;
 import com.workit.domain.auth.vo.UserAuthVO;
+import com.workit.domain.auth.vo.UserDeviceVO;
 import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
 import com.workit.domain.wallet.service.WalletService;
@@ -2075,5 +2077,198 @@ class AuthServiceImplTest {
 
         // Then
         assertFalse(text.contains("NewPassword123!"));
+    }
+
+    // ---------- PIN 번호 최초 설정 ----------
+
+    /** PIN 설정 요청 DTO 생성 헬퍼 */
+    private PinSetupRequestDTO pinSetupRequest(String pinNumber, String deviceId, String deviceName) {
+        PinSetupRequestDTO request = new PinSetupRequestDTO();
+        request.setPinNumber(pinNumber);
+        request.setDeviceId(deviceId);
+        request.setDeviceName(deviceName);
+        return request;
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 성공 - BCrypt 암호화 + 원문 미저장 + user_device 저장")
+    void pinSetup_success() {
+        // Given — ACTIVE 회원 + 해당 기기 미등록
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(0);
+
+        // When
+        authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", "Chrome / Windows"));
+
+        // Then — 기기 등록 여부 확인 후 user_device insert (BCrypt 해시 저장, 원문 미저장)
+        verify(authMapper).countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"));
+        ArgumentCaptor<UserDeviceVO> deviceCaptor = ArgumentCaptor.forClass(UserDeviceVO.class);
+        verify(authMapper).insertUserDevice(deviceCaptor.capture());
+        UserDeviceVO saved = deviceCaptor.getValue();
+        assertEquals(501L, saved.getUserId());
+        assertEquals("device-uuid-1", saved.getDeviceId());
+        assertEquals("Chrome / Windows", saved.getDeviceName());
+        assertNotEquals("123456", saved.getPinHash(), "PIN 원문 저장 금지");
+        assertTrue(PasswordEncryptor.matches("123456", saved.getPinHash()), "BCrypt 해시로 검증 가능해야 한다");
+    }
+
+    @Test
+    @DisplayName("PIN 형식 오류 - 5자리 → INVALID_PIN_FORMAT + 저장 미수행")
+    void pinSetup_pinTooShort_throws() {
+        // Given — ACTIVE 회원 + 기기 미등록
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(0);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("12345", "device-uuid-1", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_FORMAT, ex.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 형식 오류 - 7자리 → INVALID_PIN_FORMAT + 저장 미수행")
+    void pinSetup_pinTooLong_throws() {
+        // Given — ACTIVE 회원 + 기기 미등록
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(0);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("1234567", "device-uuid-1", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_FORMAT, ex.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 형식 오류 - 문자 포함 → INVALID_PIN_FORMAT + 저장 미수행")
+    void pinSetup_pinContainsLetter_throws() {
+        // Given — ACTIVE 회원 + 기기 미등록
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(0);
+
+        // When & Then — 숫자+문자 혼합 / 전부 문자 모두 형식 오류
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("12ab56", "device-uuid-1", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_FORMAT, ex.getErrorCode());
+
+        assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("abcdef", "device-uuid-1", "Chrome / Windows")));
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("이미 PIN 등록된 기기 - PIN_ALREADY_EXISTS(409) + 저장 미수행")
+    void pinSetup_alreadyRegistered_throws() {
+        // Given — ACTIVE 회원 + 이미 등록된 기기 (count > 0)
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(1);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.PIN_ALREADY_EXISTS, ex.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 - 회원 없음(탈퇴 등) → USER_NOT_FOUND(404)")
+    void pinSetup_userNotFound_throws() {
+        // Given — Mock Mapper 에 회원이 등록되지 않음 (findUserById → null)
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.setupPin(999L, pinSetupRequest("123456", "device-uuid-1", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 - 필수 값 누락/빈 값 → INVALID_PIN_SETUP_REQUEST(400)")
+    void pinSetup_missingRequiredField_throws() {
+        // When & Then — deviceName 누락
+        BusinessException missingName = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", null)));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, missingName.getErrorCode());
+
+        // deviceId 빈 값
+        BusinessException missingDeviceId = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", "  ", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, missingDeviceId.getErrorCode());
+
+        // pinNumber 누락
+        BusinessException missingPin = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest(null, "device-uuid-1", "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, missingPin.getErrorCode());
+
+        // 요청 자체가 null
+        BusinessException nullRequest = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, null));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, nullRequest.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("보안 - PinSetupRequestDTO toString 에 pinNumber 원문 미노출")
+    void pinSetup_requestToStringHidesPin() {
+        // Given
+        PinSetupRequestDTO request = pinSetupRequest("123456", "device-uuid-1", "Chrome / Windows");
+
+        // When
+        String text = request.toString();
+
+        // Then — PIN 원문이 로그에 노출되지 않도록 @ToString.Exclude 처리 확인
+        assertFalse(text.contains("123456"));
+    }
+
+    /** 길이 검증 테스트용 반복 문자열 생성 헬퍼 (Java 8 — String.repeat 미사용) */
+    private static String repeatChar(char c, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, c);
+        return new String(chars);
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 - deviceId/deviceName 100자 초과 → INVALID_PIN_SETUP_REQUEST(400)")
+    void pinSetup_deviceInfoTooLong_throws() {
+        // When & Then — deviceId 101자
+        BusinessException longDeviceId = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", repeatChar('i', 101), "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, longDeviceId.getErrorCode());
+
+        // deviceName 101자
+        BusinessException longDeviceName = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", repeatChar('d', 101))));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, longDeviceName.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 - deviceName 100자(경계값) 정상 허용")
+    void pinSetup_deviceInfoMaxLengthBoundary_success() {
+        // Given — ACTIVE 회원 + 기기 미등록 + deviceName 이 정확히 100자
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(0);
+
+        // When
+        authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", repeatChar('d', 100)));
+
+        // Then — 100자까지는 저장 허용 (500 오류 없이 정상 흐름)
+        ArgumentCaptor<UserDeviceVO> deviceCaptor = ArgumentCaptor.forClass(UserDeviceVO.class);
+        verify(authMapper).insertUserDevice(deviceCaptor.capture());
+        assertEquals(100, deviceCaptor.getValue().getDeviceName().length());
     }
 }

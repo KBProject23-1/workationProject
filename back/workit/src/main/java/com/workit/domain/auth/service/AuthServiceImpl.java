@@ -4,6 +4,7 @@ import com.workit.domain.auth.LoginType;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
@@ -22,6 +23,7 @@ import com.workit.domain.auth.util.JwtTokenProvider;
 import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.UserAuthVO;
+import com.workit.domain.auth.vo.UserDeviceVO;
 import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
 import com.workit.domain.wallet.service.WalletService;
@@ -89,6 +91,18 @@ public class AuthServiceImpl implements AuthService {
      * - 잠금 해제: PIN 로그인 성공 시 초기화 또는 PASS 본인인증 후 PIN 재설정(별도 API) — 자동 해제 없음
      */
     private static final int MAX_PIN_FAIL_COUNT = 5;
+
+    /**
+     * PIN 형식 정책 (docs: INVALID_PIN_FORMAT → "핀번호는 6자리 숫자") — 정확히 6자리 숫자만 허용
+     * - 5자리/7자리/문자 포함 → 형식 오류 (400)
+     */
+    private static final Pattern PIN_FORMAT_PATTERN = Pattern.compile("^\\d{6}$");
+
+    /**
+     * device_id / device_name 최대 길이 (ERD: VARCHAR(100))
+     * - DB 컬럼 길이 초과로 인한 500 오류 방지 — Service Layer 에서 사전 검증 (docs)
+     */
+    private static final int DEVICE_MAX_LENGTH = 100;
 
     /** OAuth2 관례 토큰 인증 방식 (token_info.grant_type) */
     private static final String GRANT_TYPE_BEARER = "Bearer";
@@ -661,6 +675,84 @@ public class AuthServiceImpl implements AuthService {
         // 7. Audit 로그 (knowledge.md Audit Log Policy: 비밀번호 변경 기록 대상)
         //    - userId 는 민감정보가 아니며, 비밀번호/토큰 원문은 로그에 포함하지 않는다
         log.info("비밀번호 재설정 성공 - userId={}", userId);
+    }
+
+    @Override
+    @Transactional
+    // user_device INSERT(DB 쓰기) 하나의 작업이므로 단순 트랜잭션 경계를 Service 에 둔다
+    // (signup 과 동일 — 검증/암호화는 전부 Service Layer 에서 수행)
+    public void setupPin(Long userId, PinSetupRequestDTO request) {
+
+        // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
+        //    - pinNumber/deviceId/deviceName 누락·빈 값 → INVALID_PIN_SETUP_REQUEST(400)
+        validatePinSetupRequest(request);
+
+        // 2. 회원 존재 + 상태 확인 (JWT 인증된 userId 기준)
+        //    - 탈퇴/차단/미존재 회원은 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404) 로 처리
+        //      (refreshAccessToken 과 동일 정책 — docs: 404 USER_NOT_FOUND)
+        LoginUserVO user = authMapper.findUserById(userId);
+        if (user == null || !USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 기존 PIN 등록 여부 확인 (user_device: user_id + device_id, UNIQUE)
+        //    - 이미 등록된 기기면 재등록 불가 → PIN_ALREADY_EXISTS(409)
+        //      (knowledge.md: 409 CONFLICT - 중복 데이터)
+        if (authMapper.countByUserIdAndDeviceId(userId, request.getDeviceId()) > 0) {
+            throw new BusinessException(AuthErrorCode.PIN_ALREADY_EXISTS);
+        }
+
+        // 4. PIN 형식 검증 — 6자리 숫자 (docs: INVALID_PIN_FORMAT 400)
+        validatePinFormat(request.getPinNumber());
+
+        // 5. BCrypt 암호화 — PIN 원문 저장/복호화 금지
+        //    (knowledge.md: PIN 번호는 BCrypt 단방향 암호화)
+        String pinHash = PasswordEncryptor.encode(request.getPinNumber());
+
+        // 6. user_device insert (ERD 컬럼: user_id, device_id, device_name, pin_hash)
+        //    - last_login_at 은 최초 설정 시점에는 null (PIN 로그인 성공 시 갱신 예정)
+        //    - created_at 은 DB 기본값(CURRENT_TIMESTAMP) 사용
+        UserDeviceVO userDevice = new UserDeviceVO();
+        userDevice.setUserId(userId);
+        userDevice.setDeviceId(request.getDeviceId());
+        userDevice.setDeviceName(request.getDeviceName());
+        userDevice.setPinHash(pinHash);
+        authMapper.insertUserDevice(userDevice);
+
+        // 7. Audit 로그 — userId 만 기록 (PIN 원문/해시 로그 출력 금지 — knowledge.md)
+        log.info("PIN 최초 설정 성공 - userId={}", userId);
+    }
+
+    /**
+     * PIN 설정 요청 값 검증 — 필수 값 누락/빈 값/길이 초과 → INVALID_PIN_SETUP_REQUEST(400)
+     * - javax.validation 미사용 환경 → Service Layer 에서 수행 (signup/login 과 동일)
+     * - pinNumber 가 비어 있으면 형식 검증(6자리) 이전에 차단된다
+     * - deviceId/deviceName 은 ERD VARCHAR(100) 초과 시 DB 오류(500) 대신 400 으로 사전 차단
+     *   (signup 의 nickname 최대 길이 검증과 동일 패턴)
+     */
+    private void validatePinSetupRequest(PinSetupRequestDTO request) {
+        if (request == null
+                || isBlank(request.getPinNumber())
+                || isBlank(request.getDeviceId())
+                || isBlank(request.getDeviceName())) {
+            throw new BusinessException(AuthErrorCode.INVALID_PIN_SETUP_REQUEST);
+        }
+        // DB 컬럼 길이 초과(VARCHAR(100))로 인한 500 오류 방지 — 저장될 원문(trim 전) 길이 기준
+        if (request.getDeviceId().length() > DEVICE_MAX_LENGTH
+                || request.getDeviceName().length() > DEVICE_MAX_LENGTH) {
+            throw new BusinessException(AuthErrorCode.INVALID_PIN_SETUP_REQUEST);
+        }
+    }
+
+    /**
+     * PIN 형식 검증 — 정확히 6자리 숫자 (docs: INVALID_PIN_FORMAT 400)
+     * - 5자리/7자리/문자 포함 → 실패
+     * - null/빈 값은 요청 검증(validatePinSetupRequest)에서 이미 차단된다
+     */
+    private void validatePinFormat(String pinNumber) {
+        if (!PIN_FORMAT_PATTERN.matcher(pinNumber).matches()) {
+            throw new BusinessException(AuthErrorCode.INVALID_PIN_FORMAT);
+        }
     }
 
     /**

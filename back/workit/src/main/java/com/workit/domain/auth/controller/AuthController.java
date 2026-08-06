@@ -4,6 +4,7 @@ import com.workit.domain.auth.dto.request.FindIdRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
@@ -16,6 +17,7 @@ import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -232,5 +234,22 @@ public class AuthController {
 
         return GlobalResponseFactory.success(
                 null, "비밀번호가 성공적으로 변경되었습니다. 새로운 비밀번호로 로그인해 주세요.");
+    }
+
+    // 1.11 PIN 번호 최초 설정 (로그인 사용자 전용)
+    // - docs: PIN 번호 설정 (POST /api/v1/users/me/pin-number → 본 프로젝트 경로: /api/v1/auth/me/pin)
+    // - 로그인 사용자 전용 API: JWT 인증 필터 + @CurrentUser 로 userId 를 주입받는다
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - Service 에서 회원 확인/기존 PIN 등록 여부/PIN 형식 검증/BCrypt 암호화/DB 저장을 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (암호화/DB 접근 금지)
+    // - PIN 등록됨: PIN_ALREADY_EXISTS(409), 형식 오류: INVALID_PIN_FORMAT(400)
+    @PostMapping("/me/pin")
+    public ResponseEntity<CommonResponse<Void>> pinSetupPost(
+            @CurrentUser Long userId,
+            @RequestBody PinSetupRequestDTO request) {
+
+        authService.setupPin(userId, request);
+
+        return GlobalResponseFactory.success(null, "핀번호가 성공적으로 설정되었습니다.");
     }
 }

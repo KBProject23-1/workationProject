@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
@@ -16,6 +17,9 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.exception.BusinessException;
 import com.workit.exception.CommonExceptionAdvice;
+import com.workit.security.CurrentUserArgumentResolver;
+import com.workit.security.WorkitPrincipal;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -35,7 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -61,7 +69,15 @@ class AuthControllerTest {
         // refreshCookieSecure=true / sameSite=Lax — 운영(HTTPS) 쿠키 스펙 그대로 검증
         mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, true, "Lax"))
                 .setControllerAdvice(new CommonExceptionAdvice())
+                // @CurrentUser Long userId 파라미터 해석용 — 운영에서는 ServletConfig 가 등록한다
+                .setCustomArgumentResolvers(new CurrentUserArgumentResolver())
                 .build();
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        // @CurrentUser 테스트에서 설정한 인증 객체가 다른 테스트에 영향 주지 않도록 초기화
+        SecurityContextHolder.clearContext();
     }
 
     private JsonNode parse(MvcResult result) throws Exception {
@@ -1321,5 +1337,73 @@ class AuthControllerTest {
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("WEAK_PASSWORD", json.get("errorCode").asText());
         assertEquals("비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다.", json.get("message").asText());
+    }
+
+    // ---------- PIN 번호 최초 설정 (로그인 사용자 전용) ----------
+
+    /** PIN 설정 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPinSetupError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(authService).setupPin(anyLong(), any(PinSetupRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 성공 - 200 + SUCCESS + Service 호출 검증")
+    void pinSetup_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 (SecurityContext 에 WorkitPrincipal 설정)
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/me/pin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinNumber\":\"123456\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\"deviceName\":\"Chrome / Windows\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — Controller 는 userId 와 요청을 Service 로 위임만 한다 (암호화/DB 접근 금지)
+        verify(authService).setupPin(eq(501L), any(PinSetupRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("핀번호가 성공적으로 설정되었습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("잘못된 PIN 요청 - 400 + INVALID_PIN_FORMAT")
+    void pinSetup_invalidPin() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 PIN 형식 오류를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinSetupError(AuthErrorCode.INVALID_PIN_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/me/pin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinNumber\":\"12345\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\"deviceName\":\"Chrome / Windows\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PIN_FORMAT", json.get("errorCode").asText());
+        assertEquals("핀번호는 6자리 숫자여야 합니다. 다시 입력해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("인증 없는 요청 - 401 + AUTH_TOKEN_NOT_FOUND")
+    void pinSetup_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/me/pin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinNumber\":\"123456\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\"deviceName\":\"Chrome / Windows\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(authService, never()).setupPin(anyLong(), any(PinSetupRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
     }
 }

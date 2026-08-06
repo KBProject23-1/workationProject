@@ -14,4 +14,13 @@ public final class SecurityPath {
 
     /** 공개 인증 API 패턴 — SecurityConfig 의 permitAll 에 사용 */
     public static final String PUBLIC_AUTH_PATTERN = PUBLIC_AUTH_PREFIX + "**";
+
+    /**
+     * 로그인 사용자 전용 인증 API 접두어 — /api/v1/auth/me/ 로 시작하는 경로는
+     * 공개 예외(/api/v1/auth/**)에서 제외하고 JWT 토큰 검증을 수행한다 (예: PIN 최초 설정)
+     */
+    public static final String AUTHENTICATED_AUTH_PREFIX = "/api/v1/auth/me/";
+
+    /** 로그인 사용자 전용 인증 API 패턴 — SecurityConfig 의 authenticated 에 사용 */
+    public static final String AUTHENTICATED_AUTH_PATTERN = AUTHENTICATED_AUTH_PREFIX + "**";
 }
