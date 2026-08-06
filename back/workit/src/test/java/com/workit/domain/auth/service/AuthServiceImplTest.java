@@ -3,6 +3,7 @@ package com.workit.domain.auth.service;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinResetRequestDTO;
 import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
@@ -2270,5 +2271,230 @@ class AuthServiceImplTest {
         ArgumentCaptor<UserDeviceVO> deviceCaptor = ArgumentCaptor.forClass(UserDeviceVO.class);
         verify(authMapper).insertUserDevice(deviceCaptor.capture());
         assertEquals(100, deviceCaptor.getValue().getDeviceName().length());
+    }
+
+    // ---------- 보안 PIN 번호 재설정 (로그인 사용자 + PASS 재인증) ----------
+
+    /**
+     * PIN 재설정 조회용 회원 등록 — JWT userId 조회 경로(selectUserAuthById)에 회원을 Stub 한다.
+     * - identityCiHash 는 PASS 인증 결과(CI = "MOCK-CI-{identityVerificationId}") 의 SHA-256 해시와 일치해야 한다
+     */
+    private void registerPinResetUser(Long userId, String identityCiHash, String status) {
+        LoginUserVO user = new LoginUserVO();
+        user.setId(userId);
+        user.setStatus(status);
+        user.setIdentityCiHash(identityCiHash);
+        lenient().when(authMapper.selectUserAuthById(userId)).thenReturn(user);
+    }
+
+    /** PIN 재설정 요청 DTO 생성 헬퍼 */
+    private PinResetRequestDTO pinResetRequest(String identityVerificationId, String pinNumber) {
+        PinResetRequestDTO request = new PinResetRequestDTO();
+        request.setIdentityVerificationId(identityVerificationId);
+        request.setPinNumber(pinNumber);
+        return request;
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 성공 - PASS 재인증 + CI 대조 후 BCrypt 해시로 pin_hash 갱신 (원문 미저장) + 잠금 해제")
+    void pinReset_success() {
+        // Given — JWT 로그인 사용자 + PASS 인증 CI 일치 + 기존 PIN(123456)과 다른 신규 PIN + 갱신 성공 + 잠금 상태
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPinResetUser(501L, sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+        // 기존 등록 기기의 pin_hash 는 123456 의 BCrypt 해시 (신규 PIN 654321 과 다름 — SAME_AS_CURRENT_PIN 통과)
+        when(authMapper.selectPinHashesByUserId(501L))
+                .thenReturn(Collections.singletonList(PasswordEncryptor.encode("123456")));
+        when(authMapper.updateUserDevicePinHash(eq(501L), anyString())).thenReturn(1);
+        failCounts.put(501L, 5);
+
+        // When
+        authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "654321"));
+
+        // Then — BCrypt 해시로 갱신 (신규/기존 PIN 원문 미저장 + matches 검증 통과)
+        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+        verify(authMapper).updateUserDevicePinHash(eq(501L), hashCaptor.capture());
+        assertNotEquals("654321", hashCaptor.getValue(), "신규 PIN 원문 저장 금지");
+        assertNotEquals("123456", hashCaptor.getValue(), "기존 PIN 원문 저장 금지");
+        assertTrue(PasswordEncryptor.matches("654321", hashCaptor.getValue()),
+                "신규 PIN 의 BCrypt 해시로 검증 가능해야 한다");
+        assertFalse(PasswordEncryptor.matches("123456", hashCaptor.getValue()),
+                "기존 PIN 으로는 검증 실패해야 한다 (변경 확인)");
+
+        // JWT userId 기준으로 조회해 CI hash 로 대조했는지 검증 (원문 CI 로 비교 금지)
+        verify(authMapper).selectUserAuthById(501L);
+        // 기존 PIN 대조가 해시 조회 후 BCrypt matches 로만 수행됐는지 검증 (원문 비교 금지)
+        verify(authMapper).selectPinHashesByUserId(501L);
+
+        // PASS 재인증 기반 재설정은 잠금 해제 수단 — 실패 횟수 5회(잠금) 상태도 초기화되어야 한다
+        verify(loginFailCounter).reset(501L);
+        assertEquals(0, loginFailCounter.getCount(501L));
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 신규 PIN 이 기존 PIN 과 동일 → SAME_AS_CURRENT_PIN + update 미호출")
+    void pinReset_sameAsCurrentPin_throws() {
+        // Given — PASS 인증 CI 일치 + 기존 등록 기기의 pin_hash 가 신규 PIN(654321) 과 동일한 해시
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPinResetUser(501L, sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+        when(authMapper.selectPinHashesByUserId(501L))
+                .thenReturn(Collections.singletonList(PasswordEncryptor.encode("654321")));
+
+        // When — 기존 PIN 과 동일한 번호로 재설정 시도
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "654321")));
+
+        // Then
+        assertEquals(AuthErrorCode.SAME_AS_CURRENT_PIN, ex.getErrorCode());
+        // 동일 PIN 차단 시 DB 갱신/잠금 해제가 발생하지 않아야 한다
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+        verify(loginFailCounter, never()).reset(anyLong());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 여러 기기 중 하나라도 기존 PIN 과 동일 → SAME_AS_CURRENT_PIN")
+    void pinReset_sameAsCurrentPin_anyDevice_throws() {
+        // Given — PASS 인증 CI 일치 + 기기 2대 중 1대의 pin_hash 가 신규 PIN(654321) 과 동일
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPinResetUser(501L, sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+        when(authMapper.selectPinHashesByUserId(501L))
+                .thenReturn(Arrays.asList(
+                        PasswordEncryptor.encode("111111"),
+                        PasswordEncryptor.encode("654321")));
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "654321")));
+
+        // Then — 어느 기기든 동일 PIN 이 있으면 재설정 불가
+        assertEquals(AuthErrorCode.SAME_AS_CURRENT_PIN, ex.getErrorCode());
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - PASS 인증 실패(잘못된 identityVerificationId) → INVALID_VERIFICATION_ID + update 미호출")
+    void pinReset_invalidVerification_throws() {
+        // Given — 로그인 사용자 존재 + Provider 가 인증 실패를 던진다
+        registerPinResetUser(501L, sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+        when(identityVerificationProvider.verify("invalid"))
+                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("invalid", "654321")));
+
+        // Then
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - PASS 인증 CI 와 로그인 사용자 CI 불일치 → VERIFICATION_FAILED + update 미호출")
+    void pinReset_ciMismatch_throws() {
+        // Given — PASS 인증은 성공하지만 로그인 사용자의 identity_ci_hash 와 다르다 (타인 인증 사용)
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPinResetUser(501L, sha256("MOCK-CI-OTHER-USER"), "ACTIVE");
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "654321")));
+
+        // Then
+        assertEquals(AuthErrorCode.VERIFICATION_FAILED, ex.getErrorCode());
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 잘못된 PIN 형식 → INVALID_PIN_FORMAT + update 미호출")
+    void pinReset_invalidPinFormat_throws() {
+        // Given — PASS 인증 CI 일치
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPinResetUser(501L, sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+
+        // When & Then — 5자리 / 7자리 / 문자 포함 모두 형식 오류
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "12345")));
+        assertEquals(AuthErrorCode.INVALID_PIN_FORMAT, ex.getErrorCode());
+
+        assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "1234567")));
+        assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "12ab56")));
+        assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "")));
+
+        // 형식 검증 실패 시 DB 갱신이 발생하지 않아야 한다 (PIN 변경 실패 시 update 미호출)
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 로그인 사용자 없음(탈퇴 등) → USER_NOT_FOUND(404) + Provider/update 미호출")
+    void pinReset_userNotFound_throws() {
+        // Given — Mock Mapper 에 회원이 등록되지 않음 (selectUserAuthById → null)
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(999L, pinResetRequest("imp_ver_9876543210", "654321")));
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        // 회원 조회 실패 시 Provider 호출 없이 차단된다 (계정 존재 여부 노출 최소화)
+        verify(identityVerificationProvider, never()).verify(any());
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 등록된 PIN(기기)이 없는 회원 → PIN_NOT_REGISTERED(400)")
+    void pinReset_noRegisteredPin_throws() {
+        // Given — PASS 인증 CI 일치 + 기존 pin_hash 조회 결과 없음(등록 기기 없음) + 갱신 대상 행 없음
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPinResetUser(501L, sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+        when(authMapper.selectPinHashesByUserId(501L)).thenReturn(Collections.emptyList());
+        when(authMapper.updateUserDevicePinHash(eq(501L), anyString())).thenReturn(0);
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("imp_ver_9876543210", "654321")));
+
+        // Then
+        assertEquals(AuthErrorCode.PIN_NOT_REGISTERED, ex.getErrorCode());
+        // PIN 변경이 실패하면 잠금 해제(실패 횟수 초기화)도 수행되지 않는다
+        verify(loginFailCounter, never()).reset(anyLong());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - identityVerificationId 누락/빈 값 → INVALID_VERIFICATION_ID + Provider/update 미호출")
+    void pinReset_blankVerificationId_throws() {
+        // When & Then — null 요청
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, null));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, nullEx.getErrorCode());
+
+        // identityVerificationId 빈 값
+        BusinessException blankEx = assertThrows(BusinessException.class,
+                () -> authService.resetPin(501L, pinResetRequest("  ", "654321")));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, blankEx.getErrorCode());
+
+        // 요청 값 검증 실패 시 Provider 호출/DB 갱신 없이 차단된다
+        verify(identityVerificationProvider, never()).verify(any());
+        verify(authMapper, never()).updateUserDevicePinHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("보안 - PinResetRequestDTO toString 에 PIN/identityVerificationId 원문 미노출")
+    void pinReset_requestToStringHidesSecret() {
+        // Given — identityVerificationId 에 pinNumber 문자열이 우연히 포함되지 않도록 구분되는 값 사용
+        PinResetRequestDTO request = pinResetRequest("imp_ver_1111111111", "654321");
+
+        // When
+        String text = request.toString();
+
+        // Then — PIN 원문과 identityVerificationId 모두 로그에 노출되지 않도록 @ToString.Exclude 처리 확인
+        assertFalse(text.contains("654321"));
+        assertFalse(text.contains("imp_ver_1111111111"));
     }
 }
