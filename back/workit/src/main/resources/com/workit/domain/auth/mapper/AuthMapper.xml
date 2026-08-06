@@ -237,4 +237,29 @@
         WHERE user_id = #{userId}
     </update>
 
+    <!--
+        PIN 최초 설정 - 기존 PIN 등록 여부 확인.
+        - UNIQUE(user_id, device_id) 기준 조회 — 같은 기기에 이미 PIN 이 등록되어 있으면 재등록 불가
+        - Mapper 는 조회만 담당 (중복 판단은 Service — PIN_ALREADY_EXISTS)
+    -->
+    <select id="countByUserIdAndDeviceId" resultType="int">
+        SELECT COUNT(*)
+        FROM user_device
+        WHERE user_id = #{userId}
+          AND device_id = #{deviceId}
+    </select>
+
+    <!--
+        PIN 최초 설정 - user_device insert (PIN 정보 저장).
+        - pin_hash(BCrypt) 는 Service Layer 에서 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - last_login_at 은 최초 설정 시점 null, created_at 은 DB 기본값(CURRENT_TIMESTAMP) 사용
+    -->
+    <insert id="insertUserDevice"
+            parameterType="com.workit.domain.auth.vo.UserDeviceVO"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO user_device (user_id, device_id, device_name, pin_hash)
+        VALUES (#{userId}, #{deviceId}, #{deviceName}, #{pinHash})
+    </insert>
+
 </mapper>

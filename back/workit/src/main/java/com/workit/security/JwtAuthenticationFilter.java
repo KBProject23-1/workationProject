@@ -103,7 +103,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private boolean isPublicPath(HttpServletRequest request) {
         String uri = request.getRequestURI();
-        return uri != null && uri.startsWith(SecurityPath.PUBLIC_AUTH_PREFIX);
+        if (uri == null) {
+            return false;
+        }
+        // 로그인 사용자 전용 경로(/api/v1/auth/me/**)는 공개 예외에서 제외 — JWT 검증 필수
+        // (SecurityConfig 의 authenticated 규칙과 동일한 SecurityPath 정의를 공유한다)
+        if (uri.startsWith(SecurityPath.AUTHENTICATED_AUTH_PREFIX)) {
+            return false;
+        }
+        return uri.startsWith(SecurityPath.PUBLIC_AUTH_PREFIX);
     }
 
     /** 필터 단계 응답 — CommonResponse 형상 유지 (status/errorCode/message) */

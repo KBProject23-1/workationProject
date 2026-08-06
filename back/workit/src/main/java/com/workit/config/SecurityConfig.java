@@ -64,6 +64,9 @@ public class SecurityConfig {
                         .antMatchers("/", "/index.html", "/index.jsp").permitAll()
                         .antMatchers("/api/v1/recommendations/offices/**", "/api/v1/recommendations/activities/**").authenticated()
                         .antMatchers("/api/v1/bookmarks/**", "/api/v1/surveys/**").authenticated()
+                        // 로그인 사용자 전용 인증 API(/api/v1/auth/me/**) — 공개 예외보다 먼저 평가되어 인증 필수
+                        // (예: PIN 최초 설정 — JWT 없이 접근 시 401, SecurityPath 와 동일 경로 정의 공유)
+                        .antMatchers(SecurityPath.AUTHENTICATED_AUTH_PATTERN).authenticated()
                         // 공개 인증 API — 필터(SecurityPath)와 동일 경로 정의 공유
                         .antMatchers(SecurityPath.PUBLIC_AUTH_PATTERN).permitAll()
                         // 알 수 없는 경로(핸들러 없음)는 인증 없이 통과 → MVC에서 404 처리

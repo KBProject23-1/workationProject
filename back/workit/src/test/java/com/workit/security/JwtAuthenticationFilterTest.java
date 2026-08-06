@@ -165,4 +165,36 @@ class JwtAuthenticationFilterTest {
         assertEquals(200, response.getStatus());
         assertNull(SecurityContextHolder.getContext().getAuthentication());
     }
+
+    @Test
+    @DisplayName("로그인 사용자 전용 경로(/api/v1/auth/me/pin) - 정상 토큰 → 인증 처리")
+    void authenticatedAuthPath_withValidToken_authenticates() throws Exception {
+        String token = provider.createAccessToken(77L);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/me/pin");
+        request.addHeader("Authorization", "Bearer " + token);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertNotNull(chain.getRequest(), "필터 체인은 계속 진행되어야 한다");
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        assertInstanceOf(WorkitPrincipal.class, authentication);
+        assertEquals(77L, ((WorkitPrincipal) authentication).getUserId());
+    }
+
+    @Test
+    @DisplayName("로그인 사용자 전용 경로(/api/v1/auth/me/pin) - 잘못된 토큰 → 400 거부")
+    void authenticatedAuthPath_invalidToken_rejected() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/me/pin");
+        request.addHeader("Authorization", "Bearer invalid.token.value");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(response.getContentAsString().contains("\"errorCode\":\"INVALID_TOKEN\""));
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+    }
 }

@@ -3,6 +3,7 @@ package com.workit.domain.auth.service;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
@@ -143,4 +144,20 @@ public interface AuthService {
      * @param request 비밀번호 재설정 2단계 요청 (passwordResetToken, newPassword)
      */
     void resetPassword(PasswordResetRequestDTO request);
+
+    /**
+     * PIN 번호 최초 설정 — 로그인 사용자의 기기(PIN) 등록
+     *
+     * 흐름:
+     *   1. 요청 값 검증 (pinNumber/deviceId/deviceName 누락 → INVALID_PIN_SETUP_REQUEST 400)
+     *   2. 회원 존재 + ACTIVE 상태 확인 (JWT 인증 userId 기준 → USER_NOT_FOUND 404)
+     *   3. 기존 PIN 등록 여부 확인 (user_id + device_id) — 등록됨 → PIN_ALREADY_EXISTS 409
+     *   4. PIN 형식 검증 (6자리 숫자 → INVALID_PIN_FORMAT 400)
+     *   5. PIN BCrypt 단방향 암호화 (knowledge.md: PIN 원문 저장 금지)
+     *   6. user_device insert
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request PIN 설정 요청 (pinNumber, deviceId, deviceName)
+     */
+    void setupPin(Long userId, PinSetupRequestDTO request);
 }

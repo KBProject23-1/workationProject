@@ -3,6 +3,7 @@ package com.workit.domain.auth.mapper;
 import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.TermsVO;
 import com.workit.domain.auth.vo.UserAuthVO;
+import com.workit.domain.auth.vo.UserDeviceVO;
 import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
 import org.apache.ibatis.annotations.Options;
@@ -141,4 +142,19 @@ public interface AuthMapper {
      * @return 갱신된 행 수
      */
     int updatePasswordHash(@Param("userId") Long userId, @Param("passwordHash") String passwordHash);
+
+    /**
+     * PIN 최초 설정 - 기존 PIN 등록 여부 확인 (user_device)
+     * - user_id + device_id (UNIQUE(user_id, device_id)) 기준 조회
+     * - 반환값이 0 초과면 해당 기기에 이미 PIN 이 등록된 것 (PIN_ALREADY_EXISTS 판단은 Service)
+     */
+    int countByUserIdAndDeviceId(@Param("userId") Long userId, @Param("deviceId") String deviceId);
+
+    /**
+     * PIN 최초 설정 - user_device insert (PIN 정보 저장)
+     * - pin_hash(BCrypt) 는 Service Layer 에서 암호화 후 전달 (Mapper 에서 암호화 금지)
+     * - last_login_at 은 최초 설정 시점 null, created_at 은 DB 기본값(CURRENT_TIMESTAMP) 사용
+     */
+    @Options(useGeneratedKeys = true, keyProperty = "id")
+    int insertUserDevice(UserDeviceVO userDevice);
 }

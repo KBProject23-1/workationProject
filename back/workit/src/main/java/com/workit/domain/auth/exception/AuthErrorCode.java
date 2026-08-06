@@ -94,6 +94,18 @@ public enum AuthErrorCode implements ErrorCode {
     // (docs: WEAK_PASSWORD — 프론트 1차 검증을 통과하지 못한 약한 비밀번호)
     WEAK_PASSWORD(HttpStatus.UNPROCESSABLE_ENTITY, "비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다."),
 
+    // PIN 번호 최초 설정 - 요청 값 검증 실패 (pinNumber/deviceId/deviceName 누락·빈 값) → 400
+    // (signup/login 의 INVALID_*_REQUEST 규약과 동일 — 필수 값 누락은 Service Layer 에서 차단)
+    INVALID_PIN_SETUP_REQUEST(HttpStatus.BAD_REQUEST, "PIN 설정 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),
+
+    // PIN 번호 최초 설정 - PIN 형식 오류 (6자리 숫자가 아닌 경우) → 400
+    // (docs: INVALID_PIN_FORMAT — 5자리/7자리/문자 포함 등 형식 미준수)
+    INVALID_PIN_FORMAT(HttpStatus.BAD_REQUEST, "핀번호는 6자리 숫자여야 합니다. 다시 입력해 주세요."),
+
+    // PIN 번호 최초 설정 - 동일 기기(device_id)에 이미 PIN 등록됨 → 409
+    // (knowledge.md: 409 CONFLICT - 중복 데이터 — UNIQUE(user_id, device_id) 위반 사전 차단)
+    PIN_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 핀번호가 설정된 기기입니다. 등록된 핀번호로 로그인해 주세요."),
+
     // 로그인 토큰 재발급 - Refresh Token 검증 실패 (쿠키 누락/만료/위변조/용도 오류/Redis 부재·불일치/비활성 회원) → 401
     // (docs: INVALID_REFRESH_TOKEN — 실패 원인을 구분해 노출하지 않아 세션 정보 유출을 방지)
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.");
