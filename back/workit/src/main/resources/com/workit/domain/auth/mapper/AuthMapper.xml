@@ -293,4 +293,16 @@
         WHERE user_id = #{userId}
     </update>
 
+    <!--
+        보안 PIN 재설정 - 로그인 사용자의 등록 기기별 기존 pin_hash 목록 조회.
+        - SAME_AS_CURRENT_PIN 대조용 — BCrypt matches() 검증을 위해 pin_hash 해시만 조회한다
+        - PIN 원문을 저장하지 않으므로 복호화 없이 해시 그대로 사용 (Mapper 는 조회만 담당)
+        - 등록된 기기가 없으면 빈 목록 반환 (동일 PIN 판단은 Service)
+    -->
+    <select id="selectPinHashesByUserId" resultType="java.lang.String">
+        SELECT pin_hash
+        FROM user_device
+        WHERE user_id = #{userId}
+    </select>
+
 </mapper>

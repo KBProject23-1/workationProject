@@ -171,9 +171,10 @@ public interface AuthService {
      *   3. PASS 본인인증 결과 검증 → CI 추출 (실패 시 INVALID_VERIFICATION_ID)
      *   4. CI SHA-256 hash 대조 — 로그인 사용자의 identity_ci_hash 와 불일치 → VERIFICATION_FAILED 400
      *   5. 신규 PIN 형식 검증 (6자리 숫자 → INVALID_PIN_FORMAT 400)
-     *   6. PIN BCrypt 단방향 암호화 (knowledge.md: PIN 원문 저장 금지)
-     *   7. user_device.pin_hash 갱신 (user_id 기준 등록 기기 전체) — 갱신 대상 없음 → PIN_NOT_REGISTERED 400
-     *   8. PIN 실패 횟수 초기화 — 잠금 해제 (knowledge.md: "PASS 본인인증 후 PIN 재설정" = 잠금 해제 수단)
+     *   6. 신규 PIN 이 기존 PIN 과 동일한지 BCrypt 대조 (등록 기기 pin_hash 전체) — 동일 → SAME_AS_CURRENT_PIN 400
+     *   7. PIN BCrypt 단방향 암호화 (knowledge.md: PIN 원문 저장 금지)
+     *   8. user_device.pin_hash 갱신 (user_id 기준 등록 기기 전체) — 갱신 대상 없음 → PIN_NOT_REGISTERED 400
+     *   9. PIN 실패 횟수 초기화 — 잠금 해제 (knowledge.md: "PASS 본인인증 후 PIN 재설정" = 잠금 해제 수단)
      *
      * Redis 임시 토큰/비밀번호 재설정 토큰은 사용하지 않는다 (PASS 인증 성공 시 즉시 변경)
      *

@@ -1481,6 +1481,27 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("PIN 재설정 - 기존 PIN 과 동일한 번호 → 400 + SAME_AS_CURRENT_PIN")
+    void pinReset_sameAsCurrentPin() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 기존 PIN 과 동일함을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinResetError(AuthErrorCode.SAME_AS_CURRENT_PIN);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("SAME_AS_CURRENT_PIN", json.get("errorCode").asText());
+        assertEquals("기존 핀번호와 동일한 번호는 사용할 수 없습니다.", json.get("message").asText());
+    }
+
+    @Test
     @DisplayName("PIN 재설정 - 인증 없는 요청 → 401 + AUTH_TOKEN_NOT_FOUND + Service 미호출")
     void pinReset_unauthenticated() throws Exception {
         // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)

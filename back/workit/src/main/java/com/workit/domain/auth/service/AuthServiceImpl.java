@@ -763,25 +763,36 @@ public class AuthServiceImpl implements AuthService {
         // 5. 신규 PIN 형식 검증 — 6자리 숫자 (docs: INVALID_PIN_FORMAT 400)
         validatePinFormat(request.getPinNumber());
 
-        // 6. BCrypt 암호화 — PIN 원문 저장/복호화 금지 (knowledge.md)
+        // 6. 신규 PIN 이 기존 PIN 과 동일한지 확인 (docs: SAME_AS_CURRENT_PIN 400)
+        //    - PIN 은 기기별(user_device) 저장되므로 등록된 전체 기기의 pin_hash 와 대조한다
+        //    - BCrypt matches() 검증이므로 PIN 원문을 조회/복호화하지 않는다 (원문 저장 금지)
+        List<String> existingPinHashes = authMapper.selectPinHashesByUserId(userId);
+        if (existingPinHashes != null) {
+            for (String existingPinHash : existingPinHashes) {
+                if (PasswordEncryptor.matches(request.getPinNumber(), existingPinHash)) {
+                    throw new BusinessException(AuthErrorCode.SAME_AS_CURRENT_PIN);
+                }
+            }
+        }
+
+        // 7. BCrypt 암호화 — PIN 원문 저장/복호화 금지 (knowledge.md)
         String pinHash = PasswordEncryptor.encode(request.getPinNumber());
 
-    // 7. user_device.pin_hash 갱신 (user_id 기준 — 등록된 전체 기기에 동일 적용)
-    //    - 갱신 행 수가 0 이면 등록된 PIN(기기)이 없는 회원 → 재설정 불가
-    int updated = authMapper.updateUserDevicePinHash(userId, pinHash);
-
+        // 8. user_device.pin_hash 갱신 (user_id 기준 — 등록된 전체 기기에 동일 적용)
+        //    - 갱신 행 수가 0 이면 등록된 PIN(기기)이 없는 회원 → 재설정 불가
+        int updated = authMapper.updateUserDevicePinHash(userId, pinHash);
         if (updated == 0) {
             throw new BusinessException(AuthErrorCode.PIN_NOT_REGISTERED);
         }
 
-        // 8. PIN 실패 횟수 초기화 — 잠금 해제 (knowledge.md PIN Policy)
+        // 9. PIN 실패 횟수 초기화 — 잠금 해제 (knowledge.md PIN Policy)
         //    - "잠금 해제: PIN 로그인 성공 시 초기화 또는 PASS 본인인증 후 PIN 재설정"
         //    - PASS 재인증으로 본인 확인이 완료된 시점이므로, 실패 횟수 5회로 잠긴 유저도
         //      신규 PIN 으로 다시 로그인할 수 있어야 한다 (resetPin 이 잠금 해제 수단)
         loginFailCounter.reset(userId);
 
-        // 9. Audit 로그 (knowledge.md Audit Log Policy: PIN 변경 기록 대상)
-        //    - userId 는 민감정보가 아니며, PIN 원문/해시는 로그에 포함하지 않는다
+        // 10. Audit 로그 (knowledge.md Audit Log Policy: PIN 변경 기록 대상)
+        //     - userId 는 민감정보가 아니며, PIN 원문/해시는 로그에 포함하지 않는다
         log.info("PIN 재설정 성공 - userId={}", userId);
     }
 

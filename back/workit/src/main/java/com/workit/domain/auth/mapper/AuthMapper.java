@@ -178,4 +178,14 @@ public interface AuthMapper {
      * @return 갱신된 행 수
      */
     int updateUserDevicePinHash(@Param("userId") Long userId, @Param("pinHash") String pinHash);
+
+    /**
+     * 보안 PIN 재설정 - 로그인 사용자의 등록 기기별 기존 pin_hash 목록 조회
+     * - SAME_AS_CURRENT_PIN 대조용 — 신규 PIN 이 기존 PIN 과 동일한지 BCrypt matches() 로 확인한다
+     *   (BCrypt 는 단방향 해시이므로 조회 결과를 그대로 matches() 에 사용하며 원문을 복호화하지 않는다)
+     * - 등록된 기기가 없으면 빈 목록 반환 (SAME_AS_CURRENT_PIN 판단은 Service)
+     *
+     * @return 등록된 기기의 pin_hash(BCrypt) 목록, 없으면 빈 목록
+     */
+    List<String> selectPinHashesByUserId(Long userId);
 }
