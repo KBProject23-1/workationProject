@@ -157,4 +157,25 @@ public interface AuthMapper {
      */
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertUserDevice(UserDeviceVO userDevice);
+
+    /**
+     * 보안 PIN 재설정 - JWT 로그인 사용자 조회 (users + user_auth JOIN)
+     * - userId(PK) 기준으로 회원 상태(status)와 identity_ci_hash 를 함께 조회한다
+     *   (PASS 재인증 결과 CI 와 대조하기 위함 — findUserById 는 status 만 조회하므로 본 플로우 전용 정의)
+     * - 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+     *
+     * @return 해당 회원이 없으면 null
+     */
+    LoginUserVO selectUserAuthById(Long userId);
+
+    /**
+     * 보안 PIN 재설정 - 로그인 사용자의 모든 등록 기기(device) pin_hash 갱신
+     * - BCrypt 해시는 Service Layer 에서 생성 후 전달한다 (Mapper 에서 암호화 금지)
+     * - PASS 재인증 기반 개인 단위 재설정이므로 기기(device_id) 구분 없이 user_id 기준 전체 갱신
+     *   (PIN 은 기기별(user_device) 저장 — 재설정 시 등록된 모든 기기에 동일 적용)
+     * - 갱신 행 수가 0 이면 등록된 PIN(기기)이 없는 것 (PIN_NOT_REGISTERED 판단은 Service)
+     *
+     * @return 갱신된 행 수
+     */
+    int updateUserDevicePinHash(@Param("userId") Long userId, @Param("pinHash") String pinHash);
 }

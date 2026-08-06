@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinResetRequestDTO;
 import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
@@ -1402,6 +1403,97 @@ class AuthControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(authService, never()).setupPin(anyLong(), any(PinSetupRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 보안 PIN 번호 재설정 (로그인 사용자 + PASS 재인증) ----------
+
+    /** PIN 재설정 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPinResetError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(authService).resetPin(anyLong(), any(PinResetRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 성공 - 200 + SUCCESS + Service 호출 검증 (data null)")
+    void pinReset_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 (SecurityContext 에 WorkitPrincipal 설정)
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"654321\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — Controller 는 userId 와 요청을 Service 로 위임만 한다 (PASS 인증/암호화/DB 접근 금지)
+        verify(authService).resetPin(eq(501L), any(PinResetRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("보안 PIN 번호가 성공적으로 변경되었습니다.", json.get("message").asText());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 본인확인(CI) 불일치 → 400 + VERIFICATION_FAILED")
+    void pinReset_verificationFailed() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 CI 불일치를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinResetError(AuthErrorCode.VERIFICATION_FAILED);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_0000000000\",\"pinNumber\":\"654321\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("VERIFICATION_FAILED", json.get("errorCode").asText());
+        assertEquals("입력하신 계정 정보와 본인인증(PASS) 정보가 일치하지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 잘못된 PIN 형식 → 400 + INVALID_PIN_FORMAT")
+    void pinReset_invalidPinFormat() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 PIN 형식 오류를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinResetError(AuthErrorCode.INVALID_PIN_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"12345\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PIN_FORMAT", json.get("errorCode").asText());
+        assertEquals("핀번호는 6자리 숫자여야 합니다. 다시 입력해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 인증 없는 요청 → 401 + AUTH_TOKEN_NOT_FOUND + Service 미호출")
+    void pinReset_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"654321\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(authService, never()).resetPin(anyLong(), any(PinResetRequestDTO.class));
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());

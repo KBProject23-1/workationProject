@@ -4,6 +4,7 @@ import com.workit.domain.auth.dto.request.FindIdRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinResetRequestDTO;
 import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
@@ -251,5 +252,22 @@ public class AuthController {
         authService.setupPin(userId, request);
 
         return GlobalResponseFactory.success(null, "핀번호가 성공적으로 설정되었습니다.");
+    }
+
+    // 1.12 보안 PIN 번호 재설정 (로그인 사용자 전용)
+    // - docs: PIN 번호 변경 (PATCH /api/v1/auth/me/pin/reset)
+    // - 로그인 사용자 전용 API: JWT 인증 필터 + @CurrentUser 로 userId 를 주입받는다
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - Service 에서 회원 확인/PASS 재인증 검증/CI 대조/PIN 형식 검증/BCrypt 암호화/DB 갱신을 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증/암호화/DB 접근 금지)
+    // - 본인확인 실패: VERIFICATION_FAILED(400), 형식 오류: INVALID_PIN_FORMAT(400)
+    @PatchMapping("/me/pin/reset")
+    public ResponseEntity<CommonResponse<Void>> pinResetPatch(
+            @CurrentUser Long userId,
+            @RequestBody PinResetRequestDTO request) {
+
+        authService.resetPin(userId, request);
+
+        return GlobalResponseFactory.success(null, "보안 PIN 번호가 성공적으로 변경되었습니다.");
     }
 }

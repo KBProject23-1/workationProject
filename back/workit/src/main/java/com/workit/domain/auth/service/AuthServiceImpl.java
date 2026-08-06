@@ -4,6 +4,7 @@ import com.workit.domain.auth.LoginType;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinResetRequestDTO;
 import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
@@ -721,6 +722,67 @@ public class AuthServiceImpl implements AuthService {
 
         // 7. Audit 로그 — userId 만 기록 (PIN 원문/해시 로그 출력 금지 — knowledge.md)
         log.info("PIN 최초 설정 성공 - userId={}", userId);
+    }
+
+    @Override
+    @Transactional
+    // user_device UPDATE(DB 쓰기) 하나의 작업이므로 트랜잭션 경계를 Service 에 둔다
+    // (setupPin 과 동일 — 검증/암호화는 전부 Service Layer 에서 수행)
+    public void resetPin(Long userId, PinResetRequestDTO request) {
+
+        // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
+        //    - identityVerificationId 누락·빈 값 → INVALID_VERIFICATION_ID(400)
+        //      (findId/verifyIdentity 와 동일 정책)
+        //    - pinNumber 누락·빈 값은 형식 검증(validatePinFormat)에서 INVALID_PIN_FORMAT 으로 차단된다
+        if (request == null || isBlank(request.getIdentityVerificationId())) {
+            throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
+        }
+
+        // 2. JWT 로그인 사용자 조회 + 상태 확인 (users JOIN user_auth — identity_ci_hash 포함)
+        //    - 탈퇴/차단/미존재 회원은 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404) 로 처리
+        //      (setupPin/refreshAccessToken 과 동일 정책 — docs: 404 USER_NOT_FOUND)
+        LoginUserVO user = authMapper.selectUserAuthById(userId);
+        if (user == null || !USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. PASS 본인인증 결과 검증 → CI 추출
+        //    - 인증 실패 시 Provider 가 BusinessException(INVALID_VERIFICATION_ID) 을 던진다
+        //    - identityVerificationId/CI 는 개인식별값 — 원문 로그 출력 금지 (knowledge.md)
+        IdentityVerificationResult result =
+                identityVerificationProvider.verify(request.getIdentityVerificationId());
+
+        // 4. CI SHA-256 hash 대조 — 로그인 사용자와 PASS 인증 사용자가 동일 인물이어야 한다
+        //    - CI 원문이 아닌 hash 로만 비교 (knowledge.md: 검색용 hash 저장)
+        //    - 불일치 → VERIFICATION_FAILED(400) (docs — 원인 비노출)
+        String ciHash = sha256Hex(result.getCi());
+        if (!ciHash.equals(user.getIdentityCiHash())) {
+            throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
+        }
+
+        // 5. 신규 PIN 형식 검증 — 6자리 숫자 (docs: INVALID_PIN_FORMAT 400)
+        validatePinFormat(request.getPinNumber());
+
+        // 6. BCrypt 암호화 — PIN 원문 저장/복호화 금지 (knowledge.md)
+        String pinHash = PasswordEncryptor.encode(request.getPinNumber());
+
+    // 7. user_device.pin_hash 갱신 (user_id 기준 — 등록된 전체 기기에 동일 적용)
+    //    - 갱신 행 수가 0 이면 등록된 PIN(기기)이 없는 회원 → 재설정 불가
+    int updated = authMapper.updateUserDevicePinHash(userId, pinHash);
+
+        if (updated == 0) {
+            throw new BusinessException(AuthErrorCode.PIN_NOT_REGISTERED);
+        }
+
+        // 8. PIN 실패 횟수 초기화 — 잠금 해제 (knowledge.md PIN Policy)
+        //    - "잠금 해제: PIN 로그인 성공 시 초기화 또는 PASS 본인인증 후 PIN 재설정"
+        //    - PASS 재인증으로 본인 확인이 완료된 시점이므로, 실패 횟수 5회로 잠긴 유저도
+        //      신규 PIN 으로 다시 로그인할 수 있어야 한다 (resetPin 이 잠금 해제 수단)
+        loginFailCounter.reset(userId);
+
+        // 9. Audit 로그 (knowledge.md Audit Log Policy: PIN 변경 기록 대상)
+        //    - userId 는 민감정보가 아니며, PIN 원문/해시는 로그에 포함하지 않는다
+        log.info("PIN 재설정 성공 - userId={}", userId);
     }
 
     /**

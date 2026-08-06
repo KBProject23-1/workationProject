@@ -3,6 +3,7 @@ package com.workit.domain.auth.service;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinResetRequestDTO;
 import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
@@ -160,4 +161,24 @@ public interface AuthService {
      * @param request PIN 설정 요청 (pinNumber, deviceId, deviceName)
      */
     void setupPin(Long userId, PinSetupRequestDTO request);
+
+    /**
+     * 보안 PIN 번호 재설정 — 로그인 사용자가 PASS 본인인증을 다시 수행한 뒤 신규 PIN 으로 변경
+     *
+     * 흐름:
+     *   1. 요청 값 검증 (identityVerificationId 누락·빈 값 → INVALID_VERIFICATION_ID 400)
+     *   2. JWT 로그인 사용자 조회 (users + user_auth — identity_ci_hash 포함) — 없음/비활성 → USER_NOT_FOUND 404
+     *   3. PASS 본인인증 결과 검증 → CI 추출 (실패 시 INVALID_VERIFICATION_ID)
+     *   4. CI SHA-256 hash 대조 — 로그인 사용자의 identity_ci_hash 와 불일치 → VERIFICATION_FAILED 400
+     *   5. 신규 PIN 형식 검증 (6자리 숫자 → INVALID_PIN_FORMAT 400)
+     *   6. PIN BCrypt 단방향 암호화 (knowledge.md: PIN 원문 저장 금지)
+     *   7. user_device.pin_hash 갱신 (user_id 기준 등록 기기 전체) — 갱신 대상 없음 → PIN_NOT_REGISTERED 400
+     *   8. PIN 실패 횟수 초기화 — 잠금 해제 (knowledge.md: "PASS 본인인증 후 PIN 재설정" = 잠금 해제 수단)
+     *
+     * Redis 임시 토큰/비밀번호 재설정 토큰은 사용하지 않는다 (PASS 인증 성공 시 즉시 변경)
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request PIN 재설정 요청 (identityVerificationId, pinNumber)
+     */
+    void resetPin(Long userId, PinResetRequestDTO request);
 }

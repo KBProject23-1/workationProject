@@ -106,6 +106,10 @@ public enum AuthErrorCode implements ErrorCode {
     // (knowledge.md: 409 CONFLICT - 중복 데이터 — UNIQUE(user_id, device_id) 위반 사전 차단)
     PIN_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 핀번호가 설정된 기기입니다. 등록된 핀번호로 로그인해 주세요."),
 
+    // 보안 PIN 번호 재설정 - 등록된 PIN(등록 기기)이 없는 회원 → 400
+    // (PASS 재인증은 통과했지만 user_device 에 pin_hash 가 등록된 기기가 없는 경우 — PIN 재설정 불가)
+    PIN_NOT_REGISTERED(HttpStatus.BAD_REQUEST, "등록된 핀번호가 없습니다. 먼저 핀번호를 설정해 주세요."),
+
     // 로그인 토큰 재발급 - Refresh Token 검증 실패 (쿠키 누락/만료/위변조/용도 오류/Redis 부재·불일치/비활성 회원) → 401
     // (docs: INVALID_REFRESH_TOKEN — 실패 원인을 구분해 노출하지 않아 세션 정보 유출을 방지)
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.");
