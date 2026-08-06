@@ -2231,4 +2231,44 @@ class AuthServiceImplTest {
         // Then — PIN 원문이 로그에 노출되지 않도록 @ToString.Exclude 처리 확인
         assertFalse(text.contains("123456"));
     }
+
+    /** 길이 검증 테스트용 반복 문자열 생성 헬퍼 (Java 8 — String.repeat 미사용) */
+    private static String repeatChar(char c, int count) {
+        char[] chars = new char[count];
+        Arrays.fill(chars, c);
+        return new String(chars);
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 - deviceId/deviceName 100자 초과 → INVALID_PIN_SETUP_REQUEST(400)")
+    void pinSetup_deviceInfoTooLong_throws() {
+        // When & Then — deviceId 101자
+        BusinessException longDeviceId = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", repeatChar('i', 101), "Chrome / Windows")));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, longDeviceId.getErrorCode());
+
+        // deviceName 101자
+        BusinessException longDeviceName = assertThrows(BusinessException.class,
+                () -> authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", repeatChar('d', 101))));
+        assertEquals(AuthErrorCode.INVALID_PIN_SETUP_REQUEST, longDeviceName.getErrorCode());
+
+        verify(authMapper, never()).insertUserDevice(any(UserDeviceVO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 - deviceName 100자(경계값) 정상 허용")
+    void pinSetup_deviceInfoMaxLengthBoundary_success() {
+        // Given — ACTIVE 회원 + 기기 미등록 + deviceName 이 정확히 100자
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(eq(501L), eq("device-uuid-1"))).thenReturn(0);
+
+        // When
+        authService.setupPin(501L, pinSetupRequest("123456", "device-uuid-1", repeatChar('d', 100)));
+
+        // Then — 100자까지는 저장 허용 (500 오류 없이 정상 흐름)
+        ArgumentCaptor<UserDeviceVO> deviceCaptor = ArgumentCaptor.forClass(UserDeviceVO.class);
+        verify(authMapper).insertUserDevice(deviceCaptor.capture());
+        assertEquals(100, deviceCaptor.getValue().getDeviceName().length());
+    }
 }

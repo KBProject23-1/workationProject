@@ -98,6 +98,12 @@ public class AuthServiceImpl implements AuthService {
      */
     private static final Pattern PIN_FORMAT_PATTERN = Pattern.compile("^\\d{6}$");
 
+    /**
+     * device_id / device_name 최대 길이 (ERD: VARCHAR(100))
+     * - DB 컬럼 길이 초과로 인한 500 오류 방지 — Service Layer 에서 사전 검증 (docs)
+     */
+    private static final int DEVICE_MAX_LENGTH = 100;
+
     /** OAuth2 관례 토큰 인증 방식 (token_info.grant_type) */
     private static final String GRANT_TYPE_BEARER = "Bearer";
 
@@ -718,15 +724,22 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * PIN 설정 요청 값 검증 — 필수 값 누락/빈 값 → INVALID_PIN_SETUP_REQUEST(400)
+     * PIN 설정 요청 값 검증 — 필수 값 누락/빈 값/길이 초과 → INVALID_PIN_SETUP_REQUEST(400)
      * - javax.validation 미사용 환경 → Service Layer 에서 수행 (signup/login 과 동일)
      * - pinNumber 가 비어 있으면 형식 검증(6자리) 이전에 차단된다
+     * - deviceId/deviceName 은 ERD VARCHAR(100) 초과 시 DB 오류(500) 대신 400 으로 사전 차단
+     *   (signup 의 nickname 최대 길이 검증과 동일 패턴)
      */
     private void validatePinSetupRequest(PinSetupRequestDTO request) {
         if (request == null
                 || isBlank(request.getPinNumber())
                 || isBlank(request.getDeviceId())
                 || isBlank(request.getDeviceName())) {
+            throw new BusinessException(AuthErrorCode.INVALID_PIN_SETUP_REQUEST);
+        }
+        // DB 컬럼 길이 초과(VARCHAR(100))로 인한 500 오류 방지 — 저장될 원문(trim 전) 길이 기준
+        if (request.getDeviceId().length() > DEVICE_MAX_LENGTH
+                || request.getDeviceName().length() > DEVICE_MAX_LENGTH) {
             throw new BusinessException(AuthErrorCode.INVALID_PIN_SETUP_REQUEST);
         }
     }

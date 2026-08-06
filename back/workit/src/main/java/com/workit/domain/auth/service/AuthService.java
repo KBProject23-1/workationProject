@@ -149,7 +149,7 @@ public interface AuthService {
      * PIN 번호 최초 설정 — 로그인 사용자의 기기(PIN) 등록
      *
      * 흐름:
-     *   1. 요청 값 검증 (pinNumber/deviceId/deviceName 누락 → INVALID_PIN_SETUP_REQUEST 400)
+     *   1. 요청 값 검증 (pinNumber/deviceId/deviceName 누락·100자 초과 → INVALID_PIN_SETUP_REQUEST 400)
      *   2. 회원 존재 + ACTIVE 상태 확인 (JWT 인증 userId 기준 → USER_NOT_FOUND 404)
      *   3. 기존 PIN 등록 여부 확인 (user_id + device_id) — 등록됨 → PIN_ALREADY_EXISTS 409
      *   4. PIN 형식 검증 (6자리 숫자 → INVALID_PIN_FORMAT 400)
