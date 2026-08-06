@@ -5,8 +5,7 @@ import java.util.Locale;
 public enum OfficeAtmosphereType {
     QUIET,
     OPEN,
-    COLLAB,
-    COLLABORATION;
+    COLLAB;
 
     public static OfficeAtmosphereType from(String raw) {
         if (raw == null || raw.trim().isEmpty()) {

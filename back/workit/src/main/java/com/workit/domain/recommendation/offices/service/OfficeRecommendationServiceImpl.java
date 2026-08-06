@@ -43,6 +43,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -354,57 +355,57 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
 
         if (OfficeReferenceType.REGION_ONLY == referenceType) {
             switch (priority) {
-                case PRICE -> {
+                case PRICE:
                     price = BigDecimal.valueOf(56);
                     preference = BigDecimal.valueOf(31);
                     rating = BigDecimal.valueOf(13);
                     accessibility = ZERO;
-                }
-                case ACCESSIBILITY -> {
+                    break;
+                case ACCESSIBILITY:
                     price = BigDecimal.valueOf(42);
                     preference = BigDecimal.valueOf(42);
                     rating = BigDecimal.valueOf(16);
                     accessibility = ZERO;
-                }
-                case RATING -> {
+                    break;
+                case RATING:
                     price = BigDecimal.valueOf(29);
                     preference = BigDecimal.valueOf(29);
                     rating = BigDecimal.valueOf(42);
                     accessibility = ZERO;
-                }
-                default -> {
+                    break;
+                default:
                     price = BigDecimal.valueOf(37);
                     preference = BigDecimal.valueOf(44);
                     rating = BigDecimal.valueOf(19);
                     accessibility = ZERO;
-                }
+                    break;
             }
         } else {
             switch (priority) {
-                case PRICE -> {
+                case PRICE:
                     price = BigDecimal.valueOf(45);
                     preference = BigDecimal.valueOf(25);
                     accessibility = BigDecimal.valueOf(20);
                     rating = BigDecimal.valueOf(10);
-                }
-                case ACCESSIBILITY -> {
+                    break;
+                case ACCESSIBILITY:
                     price = BigDecimal.valueOf(25);
                     preference = BigDecimal.valueOf(25);
                     accessibility = BigDecimal.valueOf(40);
                     rating = BigDecimal.valueOf(10);
-                }
-                case RATING -> {
+                    break;
+                case RATING:
                     price = BigDecimal.valueOf(25);
                     preference = BigDecimal.valueOf(25);
                     accessibility = BigDecimal.valueOf(15);
                     rating = BigDecimal.valueOf(35);
-                }
-                default -> {
+                    break;
+                default:
                     price = BigDecimal.valueOf(30);
                     preference = BigDecimal.valueOf(35);
                     accessibility = BigDecimal.valueOf(20);
                     rating = BigDecimal.valueOf(15);
-                }
+                    break;
             }
         }
 
@@ -414,20 +415,20 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         }
 
         if (total.compareTo(ZERO) == 0) {
-            return Map.of(
-                    "PRICE", ZERO,
-                    "PREFERENCE", ZERO,
-                    "ACCESSIBILITY", ZERO,
-                    "RATING", ZERO
-            );
+            Map<String, BigDecimal> weights = new HashMap<>();
+            weights.put("PRICE", ZERO);
+            weights.put("PREFERENCE", ZERO);
+            weights.put("ACCESSIBILITY", ZERO);
+            weights.put("RATING", ZERO);
+            return weights;
         }
 
-        return Map.of(
-                "PRICE", price.divide(total, 4, RoundingMode.HALF_UP),
-                "PREFERENCE", preference.divide(total, 4, RoundingMode.HALF_UP),
-                "ACCESSIBILITY", accessibility.divide(total, 4, RoundingMode.HALF_UP),
-                "RATING", rating.divide(total, 4, RoundingMode.HALF_UP)
-        );
+        Map<String, BigDecimal> weights = new HashMap<>();
+        weights.put("PRICE", price.divide(total, 4, RoundingMode.HALF_UP));
+        weights.put("PREFERENCE", preference.divide(total, 4, RoundingMode.HALF_UP));
+        weights.put("ACCESSIBILITY", accessibility.divide(total, 4, RoundingMode.HALF_UP));
+        weights.put("RATING", rating.divide(total, 4, RoundingMode.HALF_UP));
+        return weights;
     }
 
     private BigDecimal calculatePriceScore(OfficeCandidateVO candidate, BigDecimal budgetPerDay) {

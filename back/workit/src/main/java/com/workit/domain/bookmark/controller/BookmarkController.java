@@ -27,32 +27,29 @@ public class BookmarkController {
 
     @PostMapping
     public ResponseEntity<CommonResponse<BookmarkCreateResponseDTO>> bookmarkAdd(
-            //@CurrentUser Long userId,
+            @CurrentUser Long userId,
             @RequestBody BookmarkCreateRequestDTO request
     ) {
-        Long userId = 9001L;
         return GlobalResponseFactory.created(bookmarkService.addBookmark(userId, request));
     }
 
     @DeleteMapping("/{bookmarkId}")
     public ResponseEntity<Void> bookmarkRemove(
-            //@CurrentUser Long userId,
+            @CurrentUser Long userId,
             @PathVariable Long bookmarkId
     ) {
-        Long userId = 9001L;
         bookmarkService.removeBookmark(userId, bookmarkId);
         return ResponseEntity.ok().build();
     }
 
     @GetMapping
     public ResponseEntity<CommonResponse<BookmarkListResponseDTO>> bookmarkList(
-            //@CurrentUser Long userId,
+            @CurrentUser Long userId,
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "size", required = false) String size,
             @RequestParam(value = "sort", required = false) String sort
     ) {
-        Long userId = 9001L;
         return GlobalResponseFactory.success(
                 bookmarkService.findBookmarks(userId, category, cursor, size, sort)
         );
