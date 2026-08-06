@@ -76,4 +76,20 @@ public interface AuthService {
      * @return 재발급 응답 (token_info) + 쿠키용 신규 refreshToken
      */
     RefreshTokenResponseDTO refreshAccessToken(String refreshToken);
+
+    /**
+     * 로그아웃 — Refresh Token 세션 폐기
+     *
+     * 흐름:
+     *   1. 쿠키에서 받은 Refresh Token 검증 — 서명/만료 + tokenType == REFRESH (JwtTokenProvider.parseRefreshToken)
+     *   2. sub(userId) 추출
+     *   3. SHA-256 변환 → Redis(refresh:token:{userId}) 저장 hash 와 비교
+     *      - 저장 hash 없음(이미 로그아웃/TTL 만료) → INVALID_REFRESH_TOKEN(401)
+     *      - 불일치(위변조/재사용 의심) → 세션 revoke(delete) + INVALID_REFRESH_TOKEN(401)
+     *      - 일치 → Refresh Token 삭제 — 이후 재발급 불가
+     *   4. Cookie 만료(Max-Age=0) 처리는 Controller 가 수행
+     *
+     * @param refreshToken HttpOnly Cookie 에서 받은 Refresh Token (없으면 null)
+     */
+    void logout(String refreshToken);
 }

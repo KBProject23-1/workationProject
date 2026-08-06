@@ -153,4 +153,32 @@ public class AuthController {
 
         return GlobalResponseFactory.success(result, "액세스 토큰이 성공적으로 재발급되었습니다.");
     }
+
+    // 1.7 로그아웃
+    // - docs: 로그아웃 (POST /api/v1/auth/logout)
+    // - 비로그인 공개 API: Refresh Token 이 HttpOnly Cookie(refreshToken)에 있는 상태에서 호출
+    // - Service 에서 Refresh Token 검증/Redis hash 비교/세션 삭제를 수행하고,
+    //   Controller 는 Cookie 를 즉시 만료(Max-Age=0)시키는 HTTP 처리만 담당한다
+    //   (JWT 검증/Redis 접근/Token 삭제 로직은 Controller 금지 — 전부 Service 책임)
+    // - 실패 시(쿠키 누락/위변조/만료/Redis 부재) INVALID_REFRESH_TOKEN(401) — 원인 비노출
+    @PostMapping("/logout")
+    public ResponseEntity<CommonResponse<Void>> logoutPost(
+            @CookieValue(value = REFRESH_TOKEN_COOKIE_NAME, required = false) String refreshToken,
+            HttpServletResponse servletResponse) {
+
+        authService.logout(refreshToken);
+
+        // Refresh Token Cookie 즉시 만료 (docs: refreshToken=; Max-Age=0; HttpOnly; Path=/; SameSite=None; Secure)
+        // - Max-Age=0 으로 브라우저가 즉시 삭제 — 기존 Cookie 이름/HttpOnly/Secure/Path/SameSite 속성 유지
+        ResponseCookie expiredCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite(refreshCookieSameSite)
+                .path("/")
+                .maxAge(0)
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredCookie.toString());
+
+        return GlobalResponseFactory.success(null, "성공적으로 로그아웃되었습니다.");
+    }
 }
