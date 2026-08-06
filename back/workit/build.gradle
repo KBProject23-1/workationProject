@@ -111,6 +111,10 @@ dependencies {
     // JUnit
     testImplementation("org.junit.jupiter:junit-jupiter-api:${junitVersion}")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:${junitVersion}")
+
+    // Mockito - 수동 Stub/Fake 를 대체하는 단위 테스트 목 프레임워크 (JDK 8+ 호환)
+    testImplementation("org.mockito:mockito-core:4.11.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:4.11.0")
 }
 
 test {
