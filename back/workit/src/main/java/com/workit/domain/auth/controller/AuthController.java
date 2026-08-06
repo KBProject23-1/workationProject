@@ -1,9 +1,11 @@
 package com.workit.domain.auth.controller;
 
+import com.workit.domain.auth.dto.request.FindIdRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
+import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
@@ -180,5 +182,20 @@ public class AuthController {
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredCookie.toString());
 
         return GlobalResponseFactory.success(null, "성공적으로 로그아웃되었습니다.");
+    }
+
+    // 1.8 아이디 찾기 (PASS 본인인증 기반)
+    // - docs: 아이디 찾기 (POST /api/v1/auth/find-id)
+    // - 비로그인 공개 API: 아이디를 분실한 유저가 PASS 본인인증을 완료한 뒤 호출
+    // - Service 에서 Provider 검증/CI hash 조회/이메일 복호화·마스킹/가입일 포맷을 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 조회/복호화 금지)
+    // - 인증 실패: INVALID_VERIFICATION_ID(400), 가입 회원 없음: USER_NOT_FOUND(404)
+    @PostMapping("/find-id")
+    public ResponseEntity<CommonResponse<FindIdResponseDTO>> findIdPost(
+            @RequestBody FindIdRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                authService.findId(request.getIdentityVerificationId()),
+                "가입된 이메일을 찾았습니다.");
     }
 }

@@ -40,6 +40,17 @@ public interface AuthMapper {
     int countByCiHash(String ciHash);
 
     /**
+     * 아이디 찾기 - CI(SHA-256 해시) 기준 가입 회원 조회
+     * - user_auth.identity_ci_hash (UNIQUE) + users JOIN
+     * - email_encrypt 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
+     *   (원문 컬럼은 존재하지 않으며, CI 원문으로 조회하지 않는다 — knowledge.md)
+     * - status 도 함께 조회 — 탈퇴/차단 등 비활성 회원 여부는 Service 에서 판단 (Mapper 비즈니스 로직 금지)
+     *
+     * @return 매칭되는 회원이 없으면 null
+     */
+    UserVO selectUserByCiHash(String ciHash);
+
+    /**
      * 이메일(SHA-256 해시) 기준 중복 가입 조회
      * - users.email_hash (UNIQUE) 대상
      * - 반환값이 0 초과면 이미 가입된 회원 → 사용 불가 이메일
