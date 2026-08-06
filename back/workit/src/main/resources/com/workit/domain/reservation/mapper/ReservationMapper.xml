@@ -4,6 +4,7 @@
 
 <mapper namespace="com.workit.domain.reservation.mapper.ReservationMapper">
 
+    <!-- 예약 생성 대상 워케이션 조회 결과 매핑 -->
     <resultMap id="reservationCreateWorkationMap"
                type="com.workit.domain.reservation.vo.ReservationCreateWorkationVO">
         <id property="id" column="id"/>
@@ -13,20 +14,21 @@
         <result property="endDate" column="end_date"/>
     </resultMap>
 
+    <!-- 예약 상품과 가맹점 검증 정보 조회 결과 매핑 -->
     <resultMap id="reservationCreateProductMap"
                type="com.workit.domain.reservation.vo.ReservationCreateProductVO">
         <id property="id" column="id"/>
         <result property="productName" column="product_name"/>
         <result property="productDetailType" column="product_detail_type"/>
         <result property="maxHeadcount" column="max_headcount"/>
-        <result property="pricePerUnit" column="price_per_unit"/>
-        <result property="priceUnit" column="price_unit"/>
+        <result property="unitPrice" column="unit_price"/>
         <result property="merchantId" column="merchant_id"/>
         <result property="merchantName" column="merchant_name"/>
         <result property="merchantCategory" column="merchant_category"/>
         <result property="merchantRegionId" column="merchant_region_id"/>
     </resultMap>
 
+    <!-- 예약 기간의 날짜별 재고 조회 결과 매핑 -->
     <resultMap id="reservationDailyInventoryMap"
                type="com.workit.domain.reservation.vo.ReservationDailyInventoryVO">
         <id property="id" column="id"/>
@@ -35,6 +37,25 @@
         <result property="available" column="is_available"/>
     </resultMap>
 
+    <!-- 예약 취소 검증과 결제 환불 대상 조회 결과 매핑 -->
+    <resultMap id="reservationCancelTargetMap"
+               type="com.workit.domain.reservation.vo.ReservationCancelTargetVO">
+        <id property="reservationId" column="reservation_id"/>
+        <result property="reservationCode" column="reservation_code"/>
+        <result property="startDate" column="start_date"/>
+        <result property="totalAmount" column="total_amount"/>
+        <result property="status" column="status"/>
+        <result property="paymentTransactionId" column="payment_transaction_id"/>
+    </resultMap>
+
+    <!-- 예약 취소 시 복구할 날짜별 재고 조회 결과 매핑 -->
+    <resultMap id="reservationCancelInventoryMap"
+               type="com.workit.domain.reservation.vo.ReservationCancelInventoryVO">
+        <id property="dailyInventoryId" column="daily_inventory_id"/>
+        <result property="reservedCount" column="reserved_count"/>
+    </resultMap>
+
+    <!-- 예약 생성 중 워케이션 상태 변경과 중복 처리를 막기 위한 잠금 조회 -->
     <select id="selectWorkationForUpdate" resultMap="reservationCreateWorkationMap">
         SELECT id, user_id, region_id, start_date, end_date
         FROM workations
@@ -44,14 +65,14 @@
         FOR UPDATE
     </select>
 
+    <!-- 결제 금액 산정 중 상품 정보 변경을 막기 위한 잠금 조회 -->
     <select id="selectReservationProductForUpdate" resultMap="reservationCreateProductMap">
         SELECT
             rp.id,
             rp.product_name,
             rp.product_detail_type,
             rp.max_headcount,
-            rp.price_per_unit,
-            rp.price_unit,
+            rp.unit_price,
             m.id AS merchant_id,
             m.name AS merchant_name,
             m.category AS merchant_category,
@@ -62,6 +83,7 @@
         FOR UPDATE
     </select>
 
+    <!-- 숙소는 종료일 미포함, 오피스는 종료일 포함 기준의 동일 카테고리 예약 중복 검사 -->
     <select id="countOverlappingReservation" resultType="int">
         SELECT COUNT(*)
         FROM reservations r
@@ -83,6 +105,7 @@
         </choose>
     </select>
 
+    <!-- 상품 유형별 종료일 포함 여부를 적용한 날짜별 재고의 날짜순 잠금 조회 -->
     <select id="selectDailyInventoriesForUpdate" resultMap="reservationDailyInventoryMap">
         SELECT id, inventory_date, remaining_capacity, is_available
         FROM product_daily_inventories
@@ -100,6 +123,7 @@
         FOR UPDATE
     </select>
 
+    <!-- 결제와 재고 검증을 통과한 확정 예약 저장 -->
     <insert id="insertReservation"
             parameterType="com.workit.domain.reservation.vo.ReservationCreateVO"
             useGeneratedKeys="true"
@@ -131,12 +155,14 @@
         )
     </insert>
 
+    <!-- 생성된 예약 PK를 조합한 최종 예약번호 반영 -->
     <update id="updateReservationCode">
         UPDATE reservations
         SET reservation_code = #{reservationCode}
         WHERE id = #{reservationId}
     </update>
 
+    <!-- 판매 가능 상태와 잔여 수량을 함께 검증하는 조건부 재고 차감 -->
     <update id="updateDailyInventory">
         UPDATE product_daily_inventories
         SET remaining_capacity = remaining_capacity - #{reservedCount}
@@ -145,6 +171,7 @@
           AND remaining_capacity &gt;= #{reservedCount}
     </update>
 
+    <!-- 예약 취소 시 동일 수량을 복구하기 위한 예약별 재고 차감 이력 저장 -->
     <insert id="insertReservationDailyInventory">
         INSERT INTO reservation_daily_inventories (
             reservation_id,
@@ -157,6 +184,92 @@
         )
     </insert>
 
+    <!-- 숙소는 퇴실일, 오피스는 이용 종료일 다음 날 기준의 완료 상태 일괄 변경 -->
+    <update id="updateCompletedReservationStatuses">
+        UPDATE reservations r
+        JOIN reservation_products rp ON rp.id = r.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+        SET r.status = 'COMPLETED'
+        WHERE r.status = 'CONFIRMED'
+          AND (
+            (m.category = 'ACCOMMODATION' AND r.end_date &lt;= #{today})
+            OR (m.category = 'OFFICE' AND r.end_date &lt; #{today})
+          )
+    </update>
+
+    <!-- 동일 예약의 중복 취소를 직렬화하고 최신 정상 결제 건을 찾기 위한 잠금 조회 -->
+    <select id="selectReservationCancelTargetForUpdate"
+            resultMap="reservationCancelTargetMap">
+        SELECT
+            r.id AS reservation_id,
+            r.reservation_code,
+            r.start_date,
+            r.total_amount,
+            r.status,
+            (
+                SELECT t.id
+                FROM transactions t
+                WHERE t.reservation_id = r.id
+                  AND t.user_id = r.user_id
+                  AND t.transaction_type = 'PAYMENT'
+                  AND t.status = 'PAID'
+                ORDER BY t.approved_at DESC, t.id DESC
+                LIMIT 1
+            ) AS payment_transaction_id
+        FROM reservations r
+        WHERE r.id = #{reservationId}
+          AND r.user_id = #{userId}
+        FOR UPDATE
+    </select>
+
+    <!-- 교착 상태 가능성을 줄이기 위해 재고 ID 순서로 고정한 복구 대상 잠금 조회 -->
+    <select id="selectReservationCancelInventoriesForUpdate"
+            resultMap="reservationCancelInventoryMap">
+        SELECT
+            rdi.daily_inventory_id,
+            rdi.reserved_count
+        FROM reservation_daily_inventories rdi
+        JOIN product_daily_inventories pdi ON pdi.id = rdi.daily_inventory_id
+        WHERE rdi.reservation_id = #{reservationId}
+        ORDER BY rdi.daily_inventory_id ASC
+        FOR UPDATE
+    </select>
+
+    <!-- 총 재고를 초과하지 않는 범위의 조건부 재고 복구 -->
+    <update id="updateDailyInventoryForCancellation">
+        UPDATE product_daily_inventories
+        SET remaining_capacity = remaining_capacity + #{reservedCount}
+        WHERE id = #{dailyInventoryId}
+          AND remaining_capacity + #{reservedCount} &lt;= total_capacity
+    </update>
+
+    <!-- 취소 수수료와 환불 금액 및 처리 시각 이력 저장 -->
+    <insert id="insertReservationCancel"
+            parameterType="com.workit.domain.reservation.vo.ReservationCancelVO">
+        INSERT INTO reservation_cancels (
+            reservation_id,
+            cancel_fee,
+            refund_amount,
+            canceled_at,
+            refunded_at
+        ) VALUES (
+            #{reservationId},
+            #{cancelFee},
+            #{refundAmount},
+            #{canceledAt},
+            #{refundedAt}
+        )
+    </insert>
+
+    <!-- 동시 상태 변경을 방어하기 위한 확정 예약의 조건부 취소 상태 변경 -->
+    <update id="updateReservationStatusToCanceled">
+        UPDATE reservations
+        SET status = 'CANCELED'
+        WHERE id = #{reservationId}
+          AND status = 'CONFIRMED'
+    </update>
+
+    <!-- 예약 목록 항목 조회 결과 매핑 -->
     <resultMap id="reservationListItemMap"
                type="com.workit.domain.reservation.vo.ReservationListItemVO">
         <id property="reservationId" column="reservation_id"/>
@@ -175,6 +288,7 @@
         <result property="refundAmount" column="refund_amount"/>
     </resultMap>
 
+    <!-- 예약 확정과 이용 완료 상세 조회 결과 매핑 -->
     <resultMap id="reservationDetailMap"
                type="com.workit.domain.reservation.vo.ReservationDetailVO">
         <id property="reservationId" column="reservation_id"/>
@@ -202,6 +316,7 @@
         <result property="reviewStatus" column="review_status"/>
     </resultMap>
 
+    <!-- 예약 취소 상세 조회 결과 매핑 -->
     <resultMap id="reservationCancellationDetailMap"
                type="com.workit.domain.reservation.vo.ReservationCancellationDetailVO">
         <id property="reservationId" column="reservation_id"/>
@@ -219,14 +334,14 @@
     </resultMap>
 
     <sql id="reservationListFrom">
-        <!-- 목록 화면에 필요한 예약 상품과 가맹점 정보만 조인한다. -->
+        <!-- 목록 화면에 필요한 예약 상품과 가맹점 정보 조인 -->
         FROM reservations r
         JOIN reservation_products rp ON rp.id = r.product_id
         JOIN merchants m ON m.id = rp.merchant_id
     </sql>
 
     <sql id="reservationListWhere">
-        <!-- 로그인 사용자 소유 예약으로 제한하고 전달받은 모든 상태를 IN 조건으로 조회한다. -->
+        <!-- 로그인 사용자 소유 예약으로 제한하고 전달받은 모든 상태를 IN 조건으로 조회 -->
         WHERE r.user_id = #{userId}
           AND r.status IN
         <foreach collection="statuses" item="status" open="(" separator="," close=")">
@@ -260,7 +375,7 @@
                 ELSE NULL
             END AS refund_amount
         <include refid="reservationListFrom"/>
-        <!-- 취소 이력이 여러 건이면 가장 최근 이력의 취소 일시와 최종 환불 금액을 함께 조회한다. -->
+        <!-- 취소 이력이 여러 건이면 가장 최근 이력의 취소 일시와 최종 환불 금액을 함께 조회 -->
         LEFT JOIN reservation_cancels rc ON rc.id = (
             SELECT rc2.id
             FROM reservation_cancels rc2
@@ -269,7 +384,7 @@
             LIMIT 1
         )
         <include refid="reservationListWhere"/>
-        <!-- 취소 탭과 예약/이용 내역 탭의 정렬 정책을 구분한다. -->
+        <!-- 취소 탭과 예약/이용 내역 탭의 정렬 정책을 구분 -->
         <choose>
             <when test="canceledOnly">
                 ORDER BY canceled_at DESC, reservation_id DESC
@@ -282,7 +397,7 @@
     </select>
 
     <select id="countReservationList" resultType="long">
-        <!-- 페이지 메타데이터 계산을 위해 목록과 동일한 필터 조건의 전체 건수를 조회한다. -->
+        <!-- 페이지 메타데이터 계산을 위해 목록과 동일한 필터 조건의 전체 건수를 조회 -->
         SELECT COUNT(*)
         <include refid="reservationListFrom"/>
         <include refid="reservationListWhere"/>
@@ -333,7 +448,7 @@
 
     <select id="selectReservationCancellationDetails"
             resultMap="reservationCancellationDetailMap">
-        <!-- 로그인 사용자가 소유한 취소 예약만 상세 조회한다. -->
+        <!-- 로그인 사용자가 소유한 취소 예약만 상세 조회 -->
         SELECT
             r.id AS reservation_id,
             r.reservation_code,

@@ -2,6 +2,7 @@ package com.workit.domain.reservation.controller;
 
 import com.workit.domain.reservation.dto.request.ReservationCreateRequestDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
+import com.workit.domain.reservation.dto.response.ReservationCancelResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCreateResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
@@ -43,6 +44,19 @@ public class ReservationController {
 
         ReservationCreateResponseDTO response = reservationService.addReservation(userId, request);
         return GlobalResponseFactory.created(response);
+    }
+
+    // 로그인 사용자의 예약 취소와 결제 환불 처리
+    @PostMapping("/{reservationId}/cancel")
+    public ResponseEntity<CommonResponse<ReservationCancelResponseDTO>> reservationCancelSave(
+            @PathVariable("reservationId") Long reservationId) {
+
+        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
+        Long userId = 1L;
+
+        return GlobalResponseFactory.success(
+                reservationService.saveReservationCancellation(userId, reservationId)
+        );
     }
 
     /**

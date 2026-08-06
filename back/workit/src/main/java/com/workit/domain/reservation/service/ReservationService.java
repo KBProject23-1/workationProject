@@ -2,6 +2,7 @@ package com.workit.domain.reservation.service;
 
 import com.workit.domain.reservation.dto.request.ReservationCreateRequestDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
+import com.workit.domain.reservation.dto.response.ReservationCancelResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCreateResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
@@ -25,6 +26,9 @@ public interface ReservationService {
             Long userId,
             ReservationCreateRequestDTO request
     );
+
+    // 예약 취소와 결제 환불 및 차감 재고 복구
+    ReservationCancelResponseDTO saveReservationCancellation(Long userId, Long reservationId);
 
     /**
      * 사용자 예약 목록을 상태와 카테고리 조건으로 페이징 조회한다.

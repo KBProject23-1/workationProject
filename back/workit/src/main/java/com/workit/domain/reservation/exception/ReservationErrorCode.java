@@ -29,10 +29,17 @@ public enum ReservationErrorCode implements ErrorCode {
     RESERVATION_REGION_MISMATCH(HttpStatus.CONFLICT, "워케이션 지역과 예약 상품 지역이 일치하지 않습니다."),
     RESERVATION_CATEGORY_OVERLAP(HttpStatus.CONFLICT, "같은 카테고리의 예약 기간이 중복됩니다."),
     RESERVATION_INVENTORY_UNAVAILABLE(HttpStatus.CONFLICT, "선택한 기간의 예약 가능 재고가 부족합니다."),
+    RESERVATION_ALREADY_CANCELED(HttpStatus.CONFLICT, "이미 취소된 예약입니다."),
+    RESERVATION_CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "취소할 수 없는 예약입니다."),
+    RESERVATION_CANCEL_PERIOD_EXPIRED(HttpStatus.CONFLICT, "이용 시작일 당일부터는 예약을 취소할 수 없습니다."),
+    RESERVATION_PAYMENT_NOT_FOUND(HttpStatus.CONFLICT, "취소 가능한 예약 결제 내역이 없습니다."),
 
 //    500
     RESERVATION_PRODUCT_CONFIGURATION_INVALID(HttpStatus.INTERNAL_SERVER_ERROR, "예약 상품 설정이 올바르지 않습니다."),
     RESERVATION_CODE_EXHAUSTED(HttpStatus.INTERNAL_SERVER_ERROR, "예약 번호를 생성할 수 없습니다."),
+    RESERVATION_REFUND_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "예약 결제 환불에 실패했습니다."),
+    RESERVATION_INVENTORY_RESTORE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "예약 재고 복구에 실패했습니다."),
+    RESERVATION_CANCEL_PROCESSING_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "예약 취소 처리에 실패했습니다."),
     RESERVATION_PROCESSING_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "예약 처리에 실패했습니다.");
 
     private final HttpStatus status;
