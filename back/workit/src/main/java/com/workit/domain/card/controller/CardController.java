@@ -9,12 +9,12 @@ import com.workit.domain.card.dto.response.PrimaryCardResponse;
 import com.workit.domain.card.service.CardService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 @RestController
@@ -28,30 +28,24 @@ public class CardController {
     /** 연동 가능한 카드 후보 조회 */
     @GetMapping("/available")
     public ResponseEntity<CommonResponse<List<AvailableCardResponse>>> getAvailableCards(
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(cardService.getAvailableCards(userId));
     }
 
     /** 연동된 내 카드 목록 조회 */
     @GetMapping
     public ResponseEntity<CommonResponse<List<CardResponse>>> getMyCards(
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(cardService.getMyCards(userId));
     }
 
     /** 거래 내역 카드별 필터용 전체 카드 목록 (삭제된 카드 포함) */
     @GetMapping("/all")
     public ResponseEntity<CommonResponse<List<CardResponse>>> getAllCardsForFilter(
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(cardService.getAllCardsForFilter(userId));
     }
 
@@ -59,10 +53,8 @@ public class CardController {
     @PostMapping
     public ResponseEntity<CommonResponse<List<CardResponse>>> linkCards(
             @RequestBody CardLinkRequest requestBody,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.created(cardService.linkCards(userId, requestBody.getLinkableCardIds()));
     }
 
@@ -70,10 +62,8 @@ public class CardController {
     @PatchMapping("/{cardsId}/primary")
     public ResponseEntity<CommonResponse<PrimaryCardResponse>> setPrimaryCard(
             @PathVariable Long cardsId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(cardService.setPrimaryCard(userId, cardsId));
     }
 
@@ -82,10 +72,8 @@ public class CardController {
     public ResponseEntity<CommonResponse<NicknameUpdateResponse>> updateNickname(
             @PathVariable Long cardsId,
             @RequestBody CardNicknameRequest requestBody,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(cardService.updateNickname(userId, cardsId, requestBody.getCardNickname()));
     }
 
@@ -93,10 +81,8 @@ public class CardController {
     @DeleteMapping("/{cardsId}")
     public ResponseEntity<Void> deleteCard(
             @PathVariable Long cardsId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         cardService.deleteCard(userId, cardsId);
         return GlobalResponseFactory.noContent();
     }

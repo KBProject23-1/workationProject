@@ -8,12 +8,12 @@ import com.workit.domain.account.dto.response.PrimaryAccountResponse;
 import com.workit.domain.account.service.AccountService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 @RestController
@@ -27,20 +27,16 @@ public class AccountController {
     /** 연동 가능한 계좌 후보 조회 */
     @GetMapping("/available")
     public ResponseEntity<CommonResponse<List<AvailableAccountResponse>>> getAvailableAccounts(
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(accountService.getAvailableAccounts(userId));
     }
 
     /** 연동된 내 계좌 목록 조회 */
     @GetMapping("/me")
     public ResponseEntity<CommonResponse<List<AccountResponse>>> getMyAccounts(
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(accountService.getMyAccounts(userId));
     }
 
@@ -48,10 +44,8 @@ public class AccountController {
     @PostMapping
     public ResponseEntity<CommonResponse<List<AccountResponse>>> linkAccounts(
             @RequestBody AccountLinkRequest requestBody,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.created(accountService.linkAccounts(userId, requestBody.getLinkableAccountIds()));
     }
 
@@ -59,10 +53,8 @@ public class AccountController {
     @PatchMapping("/{accountId}/primary")
     public ResponseEntity<CommonResponse<PrimaryAccountResponse>> setPrimaryAccount(
             @PathVariable Long accountId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(accountService.setPrimaryAccount(userId, accountId));
     }
 
@@ -70,10 +62,8 @@ public class AccountController {
     @DeleteMapping("/{accountId}")
     public ResponseEntity<CommonResponse<DeleteAccountResponse>> deleteAccount(
             @PathVariable Long accountId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(accountService.deleteAccount(userId, accountId));
     }
 }
