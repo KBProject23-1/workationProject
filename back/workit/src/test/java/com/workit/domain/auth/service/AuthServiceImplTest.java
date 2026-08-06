@@ -1,11 +1,14 @@
 package com.workit.domain.auth.service;
 
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
@@ -127,6 +130,9 @@ class AuthServiceImplTest {
     @Mock
     private LoginFailCounter loginFailCounter;
 
+    @Mock
+    private PasswordResetTokenStore passwordResetTokenStore;
+
     // 실제 JWT Provider — 토큰 발급/검증은 Mock 대신 실제 구현으로 검증한다
     private JwtTokenProvider jwtTokenProvider;
     private SignupTokenProvider signupTokenProvider;
@@ -138,6 +144,7 @@ class AuthServiceImplTest {
     private final Map<String, SignupVerificationData> savedSignupData = new HashMap<>();
     private final Map<Long, String> savedRefreshTokens = new HashMap<>();
     private final Map<Long, Integer> failCounts = new HashMap<>();
+    private final Map<String, Long> savedPasswordResetTokens = new HashMap<>();
 
     @BeforeAll
     static void setUpAesKey() {
@@ -185,7 +192,8 @@ class AuthServiceImplTest {
                 walletService,
                 jwtTokenProvider,
                 refreshTokenStore,
-                loginFailCounter
+                loginFailCounter,
+                passwordResetTokenStore
         );
 
         // SignupVerificationStore 상태형 Mock — 저장/조회/삭제를 인메모리 맵으로 흉내낸다
@@ -227,6 +235,21 @@ class AuthServiceImplTest {
             failCounts.remove(invocation.getArgument(0));
             return null;
         }).when(loginFailCounter).reset(anyLong());
+
+        // PasswordResetTokenStore 상태형 Mock — 비밀번호 재설정 토큰→userId 매핑을 인메모리 맵으로 흉내낸다
+        // (Redis password:reset:{token} 구현을 Mockito Answer 로 대체)
+        lenient().doAnswer(invocation -> {
+            savedPasswordResetTokens.put(invocation.getArgument(0), invocation.getArgument(1));
+            return null;
+        }).when(passwordResetTokenStore).save(anyString(), anyLong(), anyLong());
+        lenient().when(passwordResetTokenStore.find(anyString()))
+                .thenAnswer(invocation -> savedPasswordResetTokens.get(invocation.getArgument(0)));
+        lenient().doAnswer(invocation -> {
+            savedPasswordResetTokens.remove(invocation.getArgument(0));
+            return null;
+        }).when(passwordResetTokenStore).delete(anyString());
+        // TTL 설정값 노출 (docs: 5분 = 300초) — getTtlSeconds 는 테스트에서 설정
+        lenient().when(passwordResetTokenStore.getTtlSeconds()).thenReturn(300L);
 
         // users PK 자동 증가 흉내 — insertUser 호출 시 id 를 채운다 (기존 Fake Mapper 대체)
         lenient().when(authMapper.insertUser(any(UserVO.class)))
@@ -1757,5 +1780,302 @@ class AuthServiceImplTest {
         // refreshAccessToken 의 재사용 감지와 동일 — 세션 revoke 로 저장 hash 삭제
         assertFalse(savedRefreshTokens.containsKey(501L));
         verify(refreshTokenStore).delete(501L);
+    }
+
+    // ---------- 비밀번호 재설정 1단계 (본인 확인 및 인증 토큰 발급) ----------
+
+    /**
+     * 비밀번호 재설정(verify) 조회용 회원 등록 — email_hash/phone_hash 조회 경로에 동일 회원을 Stub 한다.
+     * - identityCiHash 는 PASS 인증 결과(CI = "MOCK-CI-{identityVerificationId}") 의 SHA-256 해시와 일치해야 한다
+     * - findUserById 는 재설정 플로우에서 사용하지 않으므로 Stub 하지 않는다
+     */
+    private void registerPasswordResetUser(Long userId, String email, String phoneNumber,
+                                           String identityCiHash, String status) {
+        LoginUserVO user = new LoginUserVO();
+        user.setId(userId);
+        user.setStatus(status);
+        user.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
+        user.setPasswordHash(PasswordEncryptor.encode("password123!"));
+        user.setIdentityCiHash(identityCiHash);
+        lenient().when(authMapper.findUserByEmailHash(sha256(email))).thenReturn(user);
+        lenient().when(authMapper.findUserByPhoneHash(sha256(phoneNumber))).thenReturn(user);
+    }
+
+    /** 비밀번호 재설정 1단계 요청 DTO 생성 헬퍼 */
+    private PasswordVerifyRequestDTO passwordVerifyRequest(String loginId, String identityVerificationId) {
+        PasswordVerifyRequestDTO request = new PasswordVerifyRequestDTO();
+        request.setLoginId(loginId);
+        request.setIdentityVerificationId(identityVerificationId);
+        return request;
+    }
+
+    /** 비밀번호 재설정 2단계 요청 DTO 생성 헬퍼 */
+    private PasswordResetRequestDTO passwordResetRequest(String token, String newPassword) {
+        PasswordResetRequestDTO request = new PasswordResetRequestDTO();
+        request.setPasswordResetToken(token);
+        request.setNewPassword(newPassword);
+        return request;
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 성공 - email hash 조회 + CI 대조 + 5분 TTL Redis 저장 + UUID 반환")
+    void passwordVerify_success() {
+        // Given — PASS 인증 성공 + loginId 이메일과 CI 가 일치하는 ACTIVE 회원
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+
+        // When
+        PasswordVerifyResponseDTO result = authService.verifyPasswordReset(
+                passwordVerifyRequest("user@example.com", "imp_ver_9876543210"));
+
+        // Then — UUID 토큰 발급 + Redis(password:reset:{token})에 userId 매핑 저장 (TTL 300초)
+        assertNotNull(result);
+        assertNotNull(result.getPasswordResetToken());
+        assertFalse(result.getPasswordResetToken().trim().isEmpty());
+
+        ArgumentCaptor<String> tokenCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Long> ttlCaptor = ArgumentCaptor.forClass(Long.class);
+        verify(passwordResetTokenStore).save(tokenCaptor.capture(), eq(501L), ttlCaptor.capture());
+        assertEquals(result.getPasswordResetToken(), tokenCaptor.getValue());
+        assertEquals(Long.valueOf(300L), ttlCaptor.getValue());
+
+        // 저장된 토큰으로 userId 복원 가능 (2단계 reset 에서 사용)
+        assertEquals(Long.valueOf(501L), savedPasswordResetTokens.get(result.getPasswordResetToken()));
+
+        // 이메일 원문이 아니라 email_hash 로만 조회했는지 확인
+        verify(authMapper).findUserByEmailHash(sha256("user@example.com"));
+        verify(authMapper, never()).findUserByPhoneHash(anyString());
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 성공 - 휴대폰 loginId 는 하이픈 제거 후 phone_hash 로 조회")
+    void passwordVerify_phoneLoginId_success() {
+        // Given — PASS 인증 성공 + CI 일치 회원
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+
+        // When — 하이픈 포함 휴대폰 번호로 요청
+        PasswordVerifyResponseDTO result = authService.verifyPasswordReset(
+                passwordVerifyRequest("010-3456-7890", "imp_ver_9876543210"));
+
+        // Then — phone_number_encrypt(원문)이 아니라 phone_hash 로만 조회
+        assertNotNull(result.getPasswordResetToken());
+        verify(authMapper).findUserByPhoneHash(sha256("01034567890"));
+        verify(authMapper, never()).findUserByEmailHash(anyString());
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 - loginId 로 조회되는 회원 없음 → USER_NOT_FOUND (404)")
+    void passwordVerify_userNotFound_throws() {
+        // When — 미가입 loginId (Mock 조회 결과 null)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(
+                        passwordVerifyRequest("unknown@example.com", "imp_ver_9876543210")));
+
+        // Then — Provider 호출 없이 404 (계정 존재 여부 노출 최소화)
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+        verify(identityVerificationProvider, never()).verify(any());
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 - 탈퇴(WITHDRAWN) 회원 → USER_NOT_FOUND (계정 존재 여부 노출 방지)")
+    void passwordVerify_withdrawnUser_throws() {
+        // Given — CI 는 일치하지만 탈퇴 상태
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "WITHDRAWN");
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(
+                        passwordVerifyRequest("user@example.com", "imp_ver_9876543210")));
+
+        // Then — 탈퇴 회원도 USER_NOT_FOUND 로 통일 (토큰 미발급)
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+        assertTrue(savedPasswordResetTokens.isEmpty());
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 - PASS 인증 CI 와 회원 CI 불일치 → VERIFICATION_FAILED (400)")
+    void passwordVerify_ciMismatch_throws() {
+        // Given — 회원의 identity_ci_hash 가 PASS 인증 결과(CI)와 다르다
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210"));
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-OTHER-USER"), "ACTIVE");
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(
+                        passwordVerifyRequest("user@example.com", "imp_ver_9876543210")));
+
+        // Then
+        assertEquals(AuthErrorCode.VERIFICATION_FAILED, ex.getErrorCode());
+        // CI 불일치 시 토큰이 발급되지 않아야 한다
+        assertTrue(savedPasswordResetTokens.isEmpty());
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 - PASS 인증 실패 → INVALID_VERIFICATION_ID (Provider 예외 전파)")
+    void passwordVerify_invalidVerification_throws() {
+        // Given — 회원은 존재하지만 Provider 가 인증 실패를 던진다
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+        when(identityVerificationProvider.verify("invalid"))
+                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(
+                        passwordVerifyRequest("user@example.com", "invalid")));
+
+        // Then
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("재설정 토큰 발급 - loginId/identityVerificationId 누락 → INVALID_PASSWORD_RESET_REQUEST (400)")
+    void passwordVerify_blankRequest_throws() {
+        // When & Then — null 요청
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(null));
+        assertEquals(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST, nullEx.getErrorCode());
+
+        // loginId 누락
+        assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(passwordVerifyRequest("", "imp_ver_9876543210")));
+        // identityVerificationId 누락
+        assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(passwordVerifyRequest("user@example.com", "  ")));
+
+        // 요청 값 검증 실패 시 Provider 호출 없이 차단된다
+        verify(identityVerificationProvider, never()).verify(any());
+    }
+
+    // ---------- 비밀번호 재설정 2단계 (비밀번호 변경) ----------
+
+    @Test
+    @DisplayName("비밀번호 변경 성공 - BCrypt 해시로 password_hash 갱신 + Redis 토큰 1회성 삭제")
+    void passwordReset_success() {
+        // Given — 1단계에서 발급된 유효한 토큰 (userId 매핑 저장) + 갱신 성공
+        savedPasswordResetTokens.put("reset-token-1", 501L);
+        when(authMapper.updatePasswordHash(eq(501L), anyString())).thenReturn(1);
+
+        // When
+        authService.resetPassword(passwordResetRequest("reset-token-1", "NewPassword123!"));
+
+        // Then — BCrypt 해시로 갱신 (원문과 다르고 matches 검증 통과)
+        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+        verify(authMapper).updatePasswordHash(eq(501L), hashCaptor.capture());
+        assertNotEquals("NewPassword123!", hashCaptor.getValue());
+        assertTrue(PasswordEncryptor.matches("NewPassword123!", hashCaptor.getValue()));
+
+        // 사용 완료 후 Redis 토큰 삭제 — 재사용 불가
+        assertTrue(savedPasswordResetTokens.isEmpty());
+        verify(passwordResetTokenStore).delete("reset-token-1");
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 만료/존재하지 않는 토큰 → RESET_TIMEOUT_OR_INVALID_TOKEN (400)")
+    void passwordReset_expiredOrInvalidToken_throws() {
+        // When — Redis 에 저장된 토큰이 없다 (TTL 만료/사용 완료/위조)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("expired-token", "NewPassword123!")));
+
+        // Then
+        assertEquals(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN, ex.getErrorCode());
+        // DB 갱신이 발생하지 않아야 한다
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 약한 비밀번호 → WEAK_PASSWORD (422) + DB 갱신/토큰 삭제 없음")
+    void passwordReset_weakPassword_throws() {
+        // Given — 유효한 토큰
+        savedPasswordResetTokens.put("reset-token-1", 501L);
+
+        // When & Then — 특수문자 누락 (영문+숫자만)
+        BusinessException noSpecial = assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", "password123")));
+        assertEquals(AuthErrorCode.WEAK_PASSWORD, noSpecial.getErrorCode());
+
+        // 숫자 누락 (영문+특수문자만)
+        assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", "Password!")));
+        // 영문 누락 (숫자+특수문자만)
+        assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", "12345678!")));
+        // 8자 미만
+        assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", "Abc12!")));
+
+        // 정책 검증 실패 시 DB 갱신이 발생하지 않고, 토큰은 삭제되지 않는다 (재시도 가능)
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+        assertEquals(Long.valueOf(501L), savedPasswordResetTokens.get("reset-token-1"));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - newPassword 누락/빈 값 → WEAK_PASSWORD (422)")
+    void passwordReset_blankPassword_throws() {
+        // Given — 유효한 토큰
+        savedPasswordResetTokens.put("reset-token-1", 501L);
+
+        // When & Then — null/빈 값은 정책 미달로 간주
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", null)));
+        assertEquals(AuthErrorCode.WEAK_PASSWORD, nullEx.getErrorCode());
+
+        assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", "")));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - passwordResetToken 누락/빈 값 → RESET_TIMEOUT_OR_INVALID_TOKEN (400)")
+    void passwordReset_blankToken_throws() {
+        // When & Then — null 요청
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.resetPassword(null));
+        assertEquals(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN, nullEx.getErrorCode());
+
+        // token 누락
+        BusinessException blankEx = assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("", "NewPassword123!")));
+        assertEquals(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN, blankEx.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 갱신 행 수 0 (회원 인증 정보 없음) → RESET_TIMEOUT_OR_INVALID_TOKEN + 토큰 유지")
+    void passwordReset_updateAffectedZero_throws() {
+        // Given — 유효한 토큰이지만 갱신 대상 행이 없다 (회원 탈퇴 등)
+        savedPasswordResetTokens.put("reset-token-1", 501L);
+        when(authMapper.updatePasswordHash(eq(501L), anyString())).thenReturn(0);
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.resetPassword(passwordResetRequest("reset-token-1", "NewPassword123!")));
+
+        // Then
+        assertEquals(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN, ex.getErrorCode());
+        // 실패 시 토큰은 삭제되지 않아야 한다 (재시도 가능)
+        assertTrue(savedPasswordResetTokens.containsKey("reset-token-1"));
+        verify(passwordResetTokenStore, never()).delete(anyString());
+    }
+
+    @Test
+    @DisplayName("보안 - PasswordResetRequestDTO toString 에 newPassword 원문 미노출")
+    void passwordReset_requestToStringHidesSecret() {
+        // Given
+        PasswordResetRequestDTO request = passwordResetRequest("reset-token-1", "NewPassword123!");
+
+        // When
+        String text = request.toString();
+
+        // Then
+        assertFalse(text.contains("NewPassword123!"));
     }
 }
