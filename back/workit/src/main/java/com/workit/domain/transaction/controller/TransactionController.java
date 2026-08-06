@@ -6,12 +6,11 @@ import com.workit.domain.transaction.service.TransactionService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.dto.PageResponseDTO;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import javax.servlet.http.HttpServletRequest;
 
 @RestController
 @RequiredArgsConstructor
@@ -30,10 +29,8 @@ public class TransactionController {
             @RequestParam(required = false) Long cardId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(transactionService.getTransactions(
                 userId, startDate, endDate, paymentSourceType, transactionType, cardId, page, size
         ));
@@ -46,10 +43,8 @@ public class TransactionController {
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String paymentSourceType,
             @RequestParam(required = false) Long cardId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(transactionService.getTransactionSummary(
                 userId, startDate, endDate, paymentSourceType, cardId
         ));
@@ -59,10 +54,8 @@ public class TransactionController {
     @GetMapping("/api/v1/transactions/{transactionId}")
     public ResponseEntity<CommonResponse<TransactionDetailResponse>> getTransactionDetail(
             @PathVariable Long transactionId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(transactionService.getTransactionDetail(userId, transactionId));
     }
 
@@ -70,10 +63,8 @@ public class TransactionController {
     @GetMapping("/api/v1/transactions/{transactionId}/receipts")
     public ResponseEntity<CommonResponse<ReceiptResponse>> getReceipt(
             @PathVariable Long transactionId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(transactionService.getReceipt(userId, transactionId));
     }
 
@@ -81,10 +72,8 @@ public class TransactionController {
     @PostMapping("/api/v1/payments")
     public ResponseEntity<CommonResponse<PaymentResponse>> pay(
             @RequestBody PaymentRequest requestBody,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.created(transactionService.pay(userId, requestBody));
     }
 
@@ -92,10 +81,8 @@ public class TransactionController {
     @PatchMapping("/api/v1/transactions/{transactionId}/cancel")
     public ResponseEntity<CommonResponse<CancelResponse>> cancelTransaction(
             @PathVariable Long transactionId,
-            HttpServletRequest request
+            @CurrentUser Long userId
     ) {
-        // JWT 토큰에서 userId 추출로 교체 필요(추후 삭제)
-        Long userId = 1L;
         return GlobalResponseFactory.success(transactionService.cancelTransaction(userId, transactionId));
     }
 }
