@@ -6,6 +6,7 @@ import com.workit.domain.recommendation.activities.service.ActivityRecommendatio
 import com.workit.domain.recommendation.dto.request.RecommendationRecalculateRequestDTO;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,28 +26,26 @@ public class ActivityRecommendationController {
 
     @PostMapping
     public ResponseEntity<CommonResponse<ActivityRecommendationResponseDTO>> activityRecommendationAdd(
+            @CurrentUser Long userId,
             @RequestBody ActivityRecommendationCreateRequestDTO request) {
-        // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
-        Long userId = 9001L;
         return GlobalResponseFactory.created(activityRecommendationService.addActivityRecommendation(userId, request));
     }
 
     @GetMapping
     public ResponseEntity<CommonResponse<ActivityRecommendationResponseDTO>> activityRecommendationList(
+            @CurrentUser Long userId,
             @RequestParam(value = "referenceMerchantId", required = false) Long referenceMerchantId,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestParam(value = "size", defaultValue = "20") int size) {
-        // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
-        Long userId = 9001L;
         return GlobalResponseFactory.success(activityRecommendationService.findActivityRecommendation(
                 userId, referenceMerchantId, cursor, size));
     }
 
     @PostMapping("/{recommendationRequestId}/recalculate")
     public ResponseEntity<CommonResponse<ActivityRecommendationResponseDTO>> activityRecommendationRecalculate(
+            @CurrentUser Long userId,
             @PathVariable("recommendationRequestId") Long recommendationRequestId,
             @RequestBody RecommendationRecalculateRequestDTO request) {
-        Long userId = 9001L;
         return GlobalResponseFactory.created(activityRecommendationService.recalculateActivityRecommendation(
                 userId, recommendationRequestId, request));
     }

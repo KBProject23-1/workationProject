@@ -29,36 +29,31 @@ public class SurveyController {
     // 설문 질문과 선택지를 표시 순서대로 조회한다.
     @GetMapping("/questions")
     public ResponseEntity<CommonResponse<SurveyQuestionListResponseDTO>> surveyQuestionList(
-            /*@CurrentUser Long userId*/) {
-        Long userId = 9001L;
+            @CurrentUser Long userId) {
         return GlobalResponseFactory.success(surveyService.findQuestionList(userId));
     }
 
     // 로그인 사용자의 현재 진행 중 워케이션 기준 설문 응답을 최초 저장한다.
     @PostMapping
     public ResponseEntity<CommonResponse<SurveyCreateResponseDTO>> surveyAdd(
-            /*@CurrentUser Long userId,*/
+            @CurrentUser Long userId,
             @RequestBody SurveyCreateRequestDTO request) {
-        Long userId = 9001L;
         return GlobalResponseFactory.created(surveyService.createSurvey(userId, request));
     }
 
     // 로그인 사용자의 저장된 설문과 문항별 선택 결과를 조회한다.
     @GetMapping("/users")
     public ResponseEntity<CommonResponse<SurveyResultResponseDTO>> surveyDetails(
-            /*@CurrentUser Long userId*/) {
-        Long userId = 9001L;
+            @CurrentUser Long userId) {
         return GlobalResponseFactory.success(surveyService.getMySurveyResult(userId));
     }
 
     // 로그인 사용자의 설문 결과를 수정한다.
     @PatchMapping("/{surveyId}")
     public ResponseEntity<CommonResponse<SurveyModifyResponseDTO>> surveyModify(
-            /*@CurrentUser Long userId,*/
+            @CurrentUser Long userId,
             @PathVariable("surveyId") Long surveyId,
             @RequestBody SurveyCreateRequestDTO request) {
-        Long userId = 9001L;
         return GlobalResponseFactory.success(surveyService.modifySurvey(userId, surveyId, request));
     }
 }
-
