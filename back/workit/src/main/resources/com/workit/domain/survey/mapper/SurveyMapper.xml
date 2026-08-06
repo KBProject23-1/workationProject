@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.survey.mapper.SurveyMapper">
+
+    <resultMap id="surveyQuestionMap" type="com.workit.domain.survey.vo.SurveyQuestionVO">
+        <id property="questionId" column="question_id"/>
+        <result property="questionCode" column="question_code"/>
+        <result property="questionText" column="question"/>
+        <result property="category" column="category"/>
+        <result property="questionType" column="question_type"/>
+        <result property="minSelection" column="min_select_count"/>
+        <result property="maxSelection" column="max_select_count"/>
+        <collection property="options" ofType="com.workit.domain.survey.vo.SurveyOptionVO" notNullColumn="option_id">
+            <id property="optionId" column="option_id"/>
+            <result property="questionId" column="option_question_id"/>
+            <result property="optionCode" column="option_code"/>
+            <result property="optionName" column="option_name"/>
+        </collection>
+    </resultMap>
+
+    <resultMap id="userSurveyMap" type="com.workit.domain.survey.vo.UserSurveyVO">
+        <id property="surveyId" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="workationId" column="workation_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <select id="selectSurveyQuestions" resultMap="surveyQuestionMap">
+        SELECT sq.id AS question_id,
+               sq.question_code,
+               sq.question,
+               sq.category,
+               sq.question_type,
+               sq.min_select_count,
+               sq.max_select_count,
+               so.id AS option_id,
+               so.question_id AS option_question_id,
+               so.option_code,
+               so.option_name
+          FROM survey_questions sq
+          LEFT JOIN survey_options so
+                 ON so.question_id = sq.id
+         ORDER BY sq.id ASC, so.id ASC
+    </select>
+
+    <select id="countSurveyByUserAndWorkation" resultType="int">
+        SELECT COUNT(*)
+          FROM user_surveys
+         WHERE user_id = #{userId}
+           AND workation_id = #{workationId}
+    </select>
+
+    <insert id="insertUserSurvey" parameterType="com.workit.domain.survey.vo.UserSurveyVO"
+            useGeneratedKeys="true" keyProperty="surveyId">
+        INSERT INTO user_surveys (
+            user_id, workation_id, created_at, updated_at
+        ) VALUES (
+            #{userId}, #{workationId}, NOW(), NOW()
+        )
+    </insert>
+
+    <select id="selectSurveyById" resultMap="userSurveyMap">
+        SELECT id, user_id, workation_id, created_at, updated_at
+          FROM user_surveys
+         WHERE id = #{surveyId}
+    </select>
+
+    <select id="selectLatestSurveyByUserAndWorkation" resultMap="userSurveyMap">
+        SELECT id, user_id, workation_id, created_at, updated_at
+          FROM user_surveys
+         WHERE user_id = #{userId}
+           AND workation_id = #{workationId}
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+    </select>
+
+    <delete id="deleteSurveyAnswers">
+        DELETE FROM user_survey_answers
+         WHERE survey_id = #{surveyId}
+    </delete>
+
+    <insert id="insertSurveyAnswers">
+        INSERT INTO user_survey_answers (
+            survey_id, option_id, created_at
+        ) VALUES
+        <foreach collection="optionIds" item="optionId" separator=",">
+            (#{surveyId}, #{optionId}, NOW())
+        </foreach>
+    </insert>
+
+    <select id="selectAnswersBySurveyId" resultType="com.workit.domain.survey.vo.SurveyAnswerVO">
+        SELECT sq.id AS question_id,
+               sq.question_code AS question_code,
+               sq.question AS question_text,
+               sq.category,
+               sq.question_type,
+               so.id AS option_id,
+               so.option_name AS option_name
+          FROM user_survey_answers usa
+          JOIN survey_options so ON so.id = usa.option_id
+          JOIN survey_questions sq ON sq.id = so.question_id
+         WHERE usa.survey_id = #{surveyId}
+         ORDER BY sq.id ASC, so.id ASC
+    </select>
+
+</mapper>
