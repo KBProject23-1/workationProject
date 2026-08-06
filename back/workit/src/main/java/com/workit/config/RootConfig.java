@@ -1,5 +1,7 @@
 package com.workit.config;
 
+import com.workit.domain.reservation.scheduler.ReservationStatusScheduler;
+import com.workit.domain.reservation.service.ReservationService;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -14,6 +16,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import javax.sql.DataSource;
@@ -27,6 +30,7 @@ import javax.sql.DataSource;
 @ComponentScan(basePackages = {"com.workit.domain", "com.workit.exception"})
 
 @EnableTransactionManagement
+@EnableScheduling
 @Import({RedisConfig.class, SecurityConfig.class})
 public class RootConfig {
     @Value("${jdbc.driver}")
@@ -39,6 +43,14 @@ public class RootConfig {
     String password;
     @Autowired
     ApplicationContext applicationContext;
+
+    // 이용 종료 예약의 완료 상태 변경 스케줄러 등록
+    @Bean
+    public ReservationStatusScheduler reservationStatusScheduler(
+            ReservationService reservationService) {
+
+        return new ReservationStatusScheduler(reservationService);
+    }
 
     @Bean
     public DataSource dataSource() {

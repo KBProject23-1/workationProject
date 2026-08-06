@@ -12,6 +12,7 @@ import com.workit.domain.reservation.vo.ReservationStatus;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.dto.PageResponseDTO;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,10 +38,8 @@ public class ReservationController {
     // 상품 가격과 재고를 다시 검증하고 지갑 결제가 완료된 예약을 생성한다.
     @PostMapping
     public ResponseEntity<CommonResponse<ReservationCreateResponseDTO>> reservationAdd(
+            @CurrentUser Long userId,
             @RequestBody ReservationCreateRequestDTO request) {
-
-        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
-        Long userId = 1L;
 
         ReservationCreateResponseDTO response = reservationService.addReservation(userId, request);
         return GlobalResponseFactory.created(response);
@@ -49,10 +48,8 @@ public class ReservationController {
     // 로그인 사용자의 예약 취소와 결제 환불 처리
     @PostMapping("/{reservationId}/cancel")
     public ResponseEntity<CommonResponse<ReservationCancelResponseDTO>> reservationCancelSave(
+            @CurrentUser Long userId,
             @PathVariable("reservationId") Long reservationId) {
-
-        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(
                 reservationService.saveReservationCancellation(userId, reservationId)
@@ -65,13 +62,11 @@ public class ReservationController {
      */
     @GetMapping
     public ResponseEntity<CommonResponse<PageResponseDTO<ReservationListItemResponseDTO>>> reservationList(
+            @CurrentUser Long userId,
             @RequestParam("status") List<ReservationStatus> statuses,
             @RequestParam(value = "category", required = false) ReservationCategory category,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
-
-        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(
                 reservationService.findReservationList(userId, statuses, category, page, size)
@@ -82,10 +77,8 @@ public class ReservationController {
 //    로그인 사용자의 예약 확정·이용 완료 상세를 조회
     @GetMapping("/{reservationId}")
     public ResponseEntity<CommonResponse<ReservationDetailResponseDTO>> reservationDetails(
+            @CurrentUser Long userId,
             @PathVariable("reservationId") Long reservationId) {
-
-        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(
                 reservationService.findReservationDetails(userId, reservationId)
@@ -95,10 +88,8 @@ public class ReservationController {
     // 로그인 사용자의 예약 취소 상세를 조회
     @GetMapping("/{reservationId}/cancellation")
     public ResponseEntity<CommonResponse<ReservationCancellationDetailResponseDTO>> reservationCancellationDetails(
+            @CurrentUser Long userId,
             @PathVariable("reservationId") Long reservationId) {
-
-        // 인증 기능 연결 전까지 1번 사용자를 사용하며, 이후 JWT 인증 객체에서 추출하도록 교체한다.
-        Long userId = 1L;
 
         return GlobalResponseFactory.success(
                 reservationService.findReservationCancellationDetails(userId, reservationId)
