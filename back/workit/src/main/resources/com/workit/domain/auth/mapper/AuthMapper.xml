@@ -57,6 +57,24 @@
     </select>
 
     <!--
+        아이디 찾기 - CI(SHA-256 hash) 기준 가입 회원 조회.
+        - user_auth.identity_ci_hash (UNIQUE) + users JOIN
+        - email_encrypt 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
+        - status 도 함께 조회 — 탈퇴/차단 등 비활성 여부 판단은 Service (Mapper 비즈니스 로직 금지)
+        - 결과 없음 → Mapper 는 null 반환, USER_NOT_FOUND(404) 판단은 Service
+    -->
+    <select id="selectUserByCiHash"
+            resultType="com.workit.domain.auth.vo.UserVO">
+        SELECT u.id,
+               u.status,
+               u.email_encrypt,
+               u.created_at
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE a.identity_ci_hash = #{ciHash}
+    </select>
+
+    <!--
         회원가입 이메일 중복 확인.
         - users.email_hash (SHA-256, UNIQUE) 대상 조회
         - email_encrypt(원문)은 복호화하지 않고 hash 만 사용 (knowledge.md: 검색용 hash 저장)

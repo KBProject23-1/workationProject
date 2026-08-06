@@ -3,6 +3,7 @@ package com.workit.domain.auth.service;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
+import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
@@ -92,4 +93,20 @@ public interface AuthService {
      * @param refreshToken HttpOnly Cookie 에서 받은 Refresh Token (없으면 null)
      */
     void logout(String refreshToken);
+
+    /**
+     * 아이디 찾기 — PASS 본인인증 기반 가입 이메일(로그인 ID) 조회
+     *
+     * 흐름:
+     *   1. 요청 값 검증 — null/빈 값 → INVALID_VERIFICATION_ID(400)
+     *   2. PASS 본인인증 결과 검증 → CI 추출 (Provider 실패 시 BusinessException)
+     *   3. CI SHA-256 hash 변환 → user_auth.identity_ci_hash 기준 가입 회원 조회
+     *      - 없음 또는 비활성(탈퇴/차단) 회원 → USER_NOT_FOUND(404)
+     *   4. email_encrypt AES 복호화 → 마스킹 처리 (docs: user****@example.com)
+     *   5. 가입일 yyyy-MM-dd 포맷 → FindIdResponseDTO 반환
+     *
+     * @param identityVerificationId PASS 인증 후 발급받은 포트원 고유 ID (없으면 null)
+     * @return 마스킹된 이메일 + 가입일
+     */
+    FindIdResponseDTO findId(String identityVerificationId);
 }

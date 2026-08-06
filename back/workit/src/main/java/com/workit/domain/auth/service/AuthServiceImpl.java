@@ -4,6 +4,7 @@ import com.workit.domain.auth.LoginType;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
+import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
@@ -13,6 +14,7 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
+import com.workit.domain.auth.util.EmailMasker;
 import com.workit.domain.auth.util.JwtTokenProvider;
 import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
@@ -35,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.format.DateTimeFormatter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -64,6 +67,9 @@ public class AuthServiceImpl implements AuthService {
 
     /** user_profile.nickname VARCHAR(50) — 초과 시 DB 오류(500) 대신 400 으로 처리 */
     private static final int NICKNAME_MAX_LENGTH = 50;
+
+    /** 아이디 찾기 응답 가입일 포맷 (docs: createdAt "2026-07-24") */
+    private static final DateTimeFormatter CREATED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     /**
      * PIN 실패 최대 허용 횟수 (docs: PIN_LOCK_EXCEEDED → "핀번호 입력 횟수가 5회 초과")
@@ -497,6 +503,52 @@ public class AuthServiceImpl implements AuthService {
         // 6. Audit 로그 (knowledge.md Audit Log Policy 스타일 유지)
         //    - userId 는 민감정보가 아니며, JWT/개인정보 원문은 로그에 포함하지 않는다
         log.info("로그아웃 성공 - userId={}", userId);
+    }
+
+    @Override
+    // SELECT 만 수행하므로 읽기 전용 트랜잭션 (checkEmailAvailability 와 동일)
+    @Transactional(readOnly = true)
+    public FindIdResponseDTO findId(String identityVerificationId) {
+
+        // 1. 요청 값 검증 — null/빈 값 → INVALID_VERIFICATION_ID(400)
+        //    (verifyIdentity 와 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
+        if (identityVerificationId == null || identityVerificationId.trim().isEmpty()) {
+            throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
+        }
+
+        // 2. PASS 본인인증 결과 검증 → CI 추출
+        //    - 인증 실패 시 Provider 가 BusinessException(INVALID_VERIFICATION_ID) 을 던진다
+        //    - CI 는 개인식별값 — 원문 로그 출력 금지 (knowledge.md)
+        IdentityVerificationResult result = identityVerificationProvider.verify(identityVerificationId);
+
+        // 3. CI SHA-256 hash 변환 → 가입 회원 조회 (user_auth.identity_ci_hash UNIQUE)
+        //    - CI 원문이 아닌 hash 로만 조회한다 (knowledge.md: 검색용 hash 저장)
+        //    - 가입된 회원이 없으면 404 (docs: USER_NOT_FOUND)
+        String ciHash = sha256Hex(result.getCi());
+        UserVO user = authMapper.selectUserByCiHash(ciHash);
+        if (user == null) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3-1. 회원 상태 확인 — ACTIVE 만 아이디 찾기 허용
+        //    - 탈퇴(WITHDRAWN)/차단(BLOCKED) 등 비활성 회원은 계정 존재 여부를 노출하지 않고
+        //      USER_NOT_FOUND(404) 로 처리 (login/refreshAccessToken 과 동일 정책 — knowledge.md)
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 4. 이메일 복호화 → 마스킹 (Service Layer 에서만 복호화 — Controller/Mapper 금지)
+        //    - 원문 이메일은 응답에 포함하지 않고 마스킹본만 반환 (docs: 개인정보 보호)
+        String maskedEmail = EmailMasker.mask(PersonalDataCipher.decrypt(user.getEmailEncrypt()));
+
+        // 5. 가입일 yyyy-MM-dd 포맷 (docs 응답 예시: "2026-07-24")
+        //    - created_at 은 NOT NULL(DEFAULT CURRENT_TIMESTAMP) 이므로 직접 포맷
+        String createdAt = user.getCreatedAt().format(CREATED_AT_FORMATTER);
+
+        // 6. Audit 로그 — userId 만 기록 (이메일 원문/마스킹본 로그 출력 금지)
+        log.info("아이디 찾기 성공 - userId={}", user.getId());
+
+        return FindIdResponseDTO.of(maskedEmail, createdAt);
     }
 
     /**

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
+import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
@@ -128,6 +129,17 @@ class AuthControllerTest {
     /** 로그아웃 실패 Stub — Service 가 지정 에러를 던진다 */
     private void stubLogoutError(AuthErrorCode errorCode) {
         doThrow(new BusinessException(errorCode)).when(authService).logout(any());
+    }
+
+    /** 아이디 찾기 성공 Stub — Service 가 마스킹 이메일/가입일을 반환한다 */
+    private void stubFindIdSuccess() {
+        when(authService.findId(any()))
+                .thenReturn(FindIdResponseDTO.of("user****@example.com", "2026-07-24"));
+    }
+
+    /** 아이디 찾기 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubFindIdError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).findId(any());
     }
 
     // ---------- PASS 본인인증 검증 ----------
@@ -1062,5 +1074,75 @@ class AuthControllerTest {
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
         assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
+    }
+
+    // ---------- 아이디 찾기 ----------
+
+    @Test
+    @DisplayName("아이디 찾기 성공 - 200 + SUCCESS + 마스킹 이메일/가입일 반환")
+    void findId_success() throws Exception {
+        // Given — Service 가 마스킹 이메일과 가입일을 반환한다
+        stubFindIdSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/find-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("가입된 이메일을 찾았습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("user****@example.com", data.get("email").asText());
+        assertEquals("2026-07-24", data.get("createdAt").asText());
+
+        // Service 가 인증 ID 를 그대로 전달받았는지 확인
+        verify(authService).findId("imp_ver_9876543210");
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - identityVerificationId 누락 → 400 + INVALID_VERIFICATION_ID")
+    void findId_missingId() throws Exception {
+        // Given — Service 는 누락된 인증 ID 를 거부한다
+        stubFindIdError(AuthErrorCode.INVALID_VERIFICATION_ID);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/find-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - 해당 CI 로 가입된 계정 없음 → 404 + USER_NOT_FOUND")
+    void findId_userNotFound() throws Exception {
+        // Given — Service 는 가입 회원 없음을 거부한다
+        stubFindIdError(AuthErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/find-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_0000000000\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("해당 본인인증 정보로 가입된 계정이 존재하지 않습니다.", json.get("message").asText());
     }
 }

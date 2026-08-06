@@ -3,6 +3,7 @@ package com.workit.domain.auth.service;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
+import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
@@ -420,6 +421,95 @@ class AuthServiceImplTest {
                 signupVerificationStore.find(claims.get("temporaryUserKey", String.class));
         assertNotNull(saved);
         assertEquals(CI_HASH_5555555555, saved.getCiHash());
+    }
+
+    // ---------- 아이디 찾기 ----------
+
+    @Test
+    @DisplayName("아이디 찾기 성공 - CI 기준 가입 회원의 마스킹 이메일 + 가입일(yyyy-MM-dd) 반환")
+    void findId_success() {
+        // Given — PASS 인증 성공 + CI 로 가입된 회원 존재 (email_encrypt/created_at 보유)
+        when(identityVerificationProvider.verify("imp_ver_1234567890"))
+                .thenReturn(mockProviderResult("imp_ver_1234567890"));
+        UserVO user = new UserVO();
+        user.setId(501L);
+        user.setStatus("ACTIVE");
+        user.setEmailEncrypt(PersonalDataCipher.encrypt("user1234@example.com"));
+        user.setCreatedAt(LocalDateTime.of(2026, 7, 24, 10, 30, 0));
+        when(authMapper.selectUserByCiHash(CI_HASH_1234567890)).thenReturn(user);
+
+        // When
+        FindIdResponseDTO result = authService.findId("imp_ver_1234567890");
+
+        // Then — 마스킹 이메일 + yyyy-MM-dd 가입일 (docs 응답 스펙)
+        assertNotNull(result);
+        assertEquals("user****@example.com", result.getEmail());
+        assertEquals("2026-07-24", result.getCreatedAt());
+
+        // CI hash 로 조회했는지 검증 (원문 CI 로 조회 금지)
+        verify(authMapper).selectUserByCiHash(CI_HASH_1234567890);
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - 인증 ID 누락/빈 값 → INVALID_VERIFICATION_ID")
+    void findId_blankId_throws() {
+        // When & Then — Provider 호출 없이 Service Layer 에서 즉시 거부
+        assertThrows(BusinessException.class, () -> authService.findId(null));
+        assertThrows(BusinessException.class, () -> authService.findId(""));
+        assertThrows(BusinessException.class, () -> authService.findId("   "));
+        verify(identityVerificationProvider, never()).verify(any());
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - PASS 인증 실패 → INVALID_VERIFICATION_ID")
+    void findId_invalidVerification_throws() {
+        // Given — Provider 가 인증 실패를 던진다
+        when(identityVerificationProvider.verify(MockIdentityVerificationProvider.INVALID_IDENTIFIER))
+                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.findId(MockIdentityVerificationProvider.INVALID_IDENTIFIER));
+
+        // Then
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - CI 로 가입된 회원 없음 → USER_NOT_FOUND (404)")
+    void findId_userNotFound_throws() {
+        // Given — PASS 인증은 성공하지만 해당 CI 로 가입된 회원이 없다
+        when(identityVerificationProvider.verify("imp_ver_9999999999"))
+                .thenReturn(mockProviderResult("imp_ver_9999999999"));
+        when(authMapper.selectUserByCiHash(CI_HASH_9999999999)).thenReturn(null);
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.findId("imp_ver_9999999999"));
+
+        // Then
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - 탈퇴(WITHDRAWN) 회원 → USER_NOT_FOUND (계정 존재 여부 노출 방지)")
+    void findId_withdrawnUser_throws() {
+        // Given — PASS 인증은 성공하지만 해당 CI 의 회원은 탈퇴 상태
+        when(identityVerificationProvider.verify("imp_ver_1234567890"))
+                .thenReturn(mockProviderResult("imp_ver_1234567890"));
+        UserVO withdrawn = new UserVO();
+        withdrawn.setId(501L);
+        withdrawn.setStatus("WITHDRAWN");
+        withdrawn.setEmailEncrypt(PersonalDataCipher.encrypt("user1234@example.com"));
+        withdrawn.setCreatedAt(LocalDateTime.of(2026, 7, 24, 10, 30, 0));
+        when(authMapper.selectUserByCiHash(CI_HASH_1234567890)).thenReturn(withdrawn);
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.findId("imp_ver_1234567890"));
+
+        // Then — 탈퇴 회원도 USER_NOT_FOUND 로 통일 (이메일 미노출)
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
     }
 
     // ---------- 회원가입 이메일 중복 확인 ----------
