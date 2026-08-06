@@ -1,11 +1,14 @@
 package com.workit.domain.auth.service;
 
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 
@@ -109,4 +112,35 @@ public interface AuthService {
      * @return 마스킹된 이메일 + 가입일
      */
     FindIdResponseDTO findId(String identityVerificationId);
+
+    /**
+     * 비밀번호 재설정 1단계 — 본인 확인 및 인증 토큰 발급
+     *
+     * 흐름:
+     *   1. 요청 값 검증 (loginId/identityVerificationId 누락 → INVALID_PASSWORD_RESET_REQUEST)
+     *   2. loginId(이메일/휴대폰) SHA-256 hash 로 회원 조회 → 없음/비활성 → USER_NOT_FOUND(404)
+     *   3. PASS 본인인증 결과 검증 → CI 추출 (Provider 실패 시 BusinessException)
+     *   4. CI SHA-256 hash 변환 → 회원의 identity_ci_hash 와 대조 → 불일치 → VERIFICATION_FAILED(400)
+     *   5. UUID passwordResetToken 생성 → Redis(password:reset:{token})에 5분 TTL 저장
+     *   6. passwordResetToken 반환
+     *
+     * @param request 비밀번호 재설정 1단계 요청 (loginId, identityVerificationId)
+     * @return Redis 에 저장된 5분 유효 임시 토큰
+     */
+    PasswordVerifyResponseDTO verifyPasswordReset(PasswordVerifyRequestDTO request);
+
+    /**
+     * 비밀번호 재설정 2단계 — 비밀번호 변경
+     *
+     * 흐름:
+     *   1. 요청 값 검증 (passwordResetToken 누락 → RESET_TIMEOUT_OR_INVALID_TOKEN)
+     *   2. Redis(password:reset:{token}) 검증 — 없으면(만료/사용 완료/위조) RESET_TIMEOUT_OR_INVALID_TOKEN(400)
+     *   3. 비밀번호 정책 검증 (영문/숫자/특수문자 포함 8자 이상 → WEAK_PASSWORD 422)
+     *   4. 신규 비밀번호 BCrypt 암호화
+     *   5. user_auth.password_hash 갱신 (없으면 RESET_TIMEOUT_OR_INVALID_TOKEN)
+     *   6. 사용 완료 후 Redis 토큰 삭제 (1회성)
+     *
+     * @param request 비밀번호 재설정 2단계 요청 (passwordResetToken, newPassword)
+     */
+    void resetPassword(PasswordResetRequestDTO request);
 }

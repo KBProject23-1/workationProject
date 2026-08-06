@@ -78,6 +78,22 @@ public enum AuthErrorCode implements ErrorCode {
     // (docs: USER_NOT_FOUND — 해당 본인인증 정보로 가입된 계정이 존재하지 않음)
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "해당 본인인증 정보로 가입된 계정이 존재하지 않습니다."),
 
+    // 비밀번호 재설정 - 요청 값 검증 실패 (loginId/identityVerificationId 누락·빈 값) → 400
+    // (signup/login 의 INVALID_*_REQUEST 규약과 동일 — 필수 값 누락은 Service Layer 에서 차단)
+    INVALID_PASSWORD_RESET_REQUEST(HttpStatus.BAD_REQUEST, "비밀번호 재설정 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),
+
+    // 비밀번호 재설정 - 본인확인 실패 (입력한 loginId 의 CI 와 PASS 인증 CI 불일치) → 400
+    // (docs: VERIFICATION_FAILED — 입력한 계정 정보와 본인인증(PASS) 정보가 일치하지 않음)
+    VERIFICATION_FAILED(HttpStatus.BAD_REQUEST, "입력하신 계정 정보와 본인인증(PASS) 정보가 일치하지 않습니다."),
+
+    // 비밀번호 재설정 - passwordResetToken 만료/존재하지 않음/위변조 → 400
+    // (docs: RESET_TIMEOUT_OR_INVALID_TOKEN — Redis 저장 토큰이 없으면 5분 만료 또는 잘못된 접근으로 간주)
+    RESET_TIMEOUT_OR_INVALID_TOKEN(HttpStatus.BAD_REQUEST, "비밀번호 변경 유효시간(5분)이 만료되었거나 올바르지 않은 접근입니다. 처음부터 다시 진행해 주세요."),
+
+    // 비밀번호 재설정 - 비밀번호 정책 미준수 (영문/숫자/특수문자 포함 8자 이상) → 422
+    // (docs: WEAK_PASSWORD — 프론트 1차 검증을 통과하지 못한 약한 비밀번호)
+    WEAK_PASSWORD(HttpStatus.UNPROCESSABLE_ENTITY, "비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다."),
+
     // 로그인 토큰 재발급 - Refresh Token 검증 실패 (쿠키 누락/만료/위변조/용도 오류/Redis 부재·불일치/비활성 회원) → 401
     // (docs: INVALID_REFRESH_TOKEN — 실패 원인을 구분해 노출하지 않아 세션 정보 유출을 방지)
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.");

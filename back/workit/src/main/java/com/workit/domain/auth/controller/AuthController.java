@@ -2,12 +2,15 @@ package com.workit.domain.auth.controller;
 
 import com.workit.domain.auth.dto.request.FindIdRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.service.AuthService;
@@ -20,6 +23,7 @@ import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -197,5 +201,36 @@ public class AuthController {
         return GlobalResponseFactory.success(
                 authService.findId(request.getIdentityVerificationId()),
                 "가입된 이메일을 찾았습니다.");
+    }
+
+    // 1.9 비밀번호 재설정 1단계 - 본인 확인 및 인증 토큰 발급
+    // - docs: 비밀번호 재설정 - 본인 확인 및 인증 토큰 발급 (POST /api/v1/auth/password/verify)
+    // - 비로그인 공개 API: 비밀번호를 잃어버린 유저가 PASS 본인인증을 완료한 뒤 호출
+    // - Service 에서 회원 조회/Provider 검증/CI 대조/토큰 발급·Redis 저장을 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 조회/Redis 접근 금지)
+    // - 회원 없음: USER_NOT_FOUND(404), CI 불일치: VERIFICATION_FAILED(400)
+    @PostMapping("/password/verify")
+    public ResponseEntity<CommonResponse<PasswordVerifyResponseDTO>> passwordVerifyPost(
+            @RequestBody PasswordVerifyRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                authService.verifyPasswordReset(request),
+                "본인 확인이 완료되었습니다. 5분 이내에 비밀번호를 재설정해 주세요.");
+    }
+
+    // 1.10 비밀번호 재설정 2단계 - 비밀번호 변경
+    // - docs: 비밀번호 변경 (PATCH /api/v1/auth/password/reset)
+    // - 비로그인 공개 API: 1단계에서 발급받은 passwordResetToken(5분 유효)으로 비밀번호를 변경한다
+    // - Service 에서 Redis 토큰 검증/비밀번호 정책 검증/BCrypt 암호화/DB 갱신/토큰 폐기를 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (Redis 접근/암호화 금지)
+    // - 토큰 만료·무효: RESET_TIMEOUT_OR_INVALID_TOKEN(400), 약한 비밀번호: WEAK_PASSWORD(422)
+    @PatchMapping("/password/reset")
+    public ResponseEntity<CommonResponse<Void>> passwordResetPatch(
+            @RequestBody PasswordResetRequestDTO request) {
+
+        authService.resetPassword(request);
+
+        return GlobalResponseFactory.success(
+                null, "비밀번호가 성공적으로 변경되었습니다. 새로운 비밀번호로 로그인해 주세요.");
     }
 }

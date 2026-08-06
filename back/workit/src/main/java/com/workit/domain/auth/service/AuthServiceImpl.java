@@ -2,11 +2,14 @@ package com.workit.domain.auth.service;
 
 import com.workit.domain.auth.LoginType;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
@@ -46,6 +49,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -61,6 +65,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenStore refreshTokenStore;
     private final LoginFailCounter loginFailCounter;
+    private final PasswordResetTokenStore passwordResetTokenStore;
 
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
@@ -70,6 +75,13 @@ public class AuthServiceImpl implements AuthService {
 
     /** 아이디 찾기 응답 가입일 포맷 (docs: createdAt "2026-07-24") */
     private static final DateTimeFormatter CREATED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+    /**
+     * 비밀번호 정책 (docs: WEAK_PASSWORD → "비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다.")
+     * - 영문/숫자/특수문자를 각각 1개 이상 포함하고 전체 길이 8자 이상 (순서 무관)
+     */
+    private static final Pattern PASSWORD_POLICY_PATTERN = Pattern.compile(
+            "^(?=.*[A-Za-z])(?=.*\\d)(?=.*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?]).{8,}$");
 
     /**
      * PIN 실패 최대 허용 횟수 (docs: PIN_LOCK_EXCEEDED → "핀번호 입력 횟수가 5회 초과")
@@ -551,6 +563,153 @@ public class AuthServiceImpl implements AuthService {
         return FindIdResponseDTO.of(maskedEmail, createdAt);
     }
 
+    @Override
+    // DB 는 SELECT 만 수행하고 Redis 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
+    // 별도 @Transactional 을 사용하지 않는다 (login 과 동일 — Redis 는 DB 트랜잭션에 참여하지 않음)
+    public PasswordVerifyResponseDTO verifyPasswordReset(PasswordVerifyRequestDTO request) {
+
+        // 1. 요청 값 검증 — loginId/identityVerificationId 누락 → INVALID_PASSWORD_RESET_REQUEST(400)
+        //    (javax.validation 미사용 환경 → Service Layer 에서 수행 — findId 와 동일)
+        if (request == null
+                || isBlank(request.getLoginId())
+                || isBlank(request.getIdentityVerificationId())) {
+            throw new BusinessException(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST);
+        }
+
+        // 2. loginId(이메일 또는 휴대폰) 기준 회원 조회 — loginByPassword 와 동일한 판별 규칙 재사용
+        //    - 개인정보 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md: 검색용 hash)
+        //    - 회원 없음 → USER_NOT_FOUND(404) (docs)
+        LoginUserVO user = findUserByLoginId(request.getLoginId());
+        if (user == null) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. PASS 본인인증 결과 검증 → CI 추출
+        //    - 인증 실패 시 Provider 가 BusinessException(INVALID_VERIFICATION_ID) 을 던진다
+        //    - CI 는 개인식별값 — 원문 로그 출력 금지 (knowledge.md)
+        IdentityVerificationResult result =
+                identityVerificationProvider.verify(request.getIdentityVerificationId());
+
+        // 4. CI SHA-256 hash 대조 — 입력한 계정과 본인인증(PASS) 정보가 일치해야 한다
+        //    - CI 원문이 아닌 hash 로만 비교 (knowledge.md: 검색용 hash 저장)
+        //    - 불일치 → VERIFICATION_FAILED(400) (docs — 원인 비노출)
+        String ciHash = sha256Hex(result.getCi());
+        if (!ciHash.equals(user.getIdentityCiHash())) {
+            throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
+        }
+
+        // 5. 사용자 상태 확인 — ACTIVE 만 비밀번호 재설정 허용
+        //    - 탈퇴(WITHDRAWN)/차단(BLOCKED) 등 비활성 회원은 계정 존재 여부를 노출하지 않고
+        //      USER_NOT_FOUND(404) 로 처리 (findId/refreshAccessToken 과 동일 정책)
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 6. passwordResetToken 발급 + Redis 5분 TTL 저장
+        //    - UUID 는 예측 불가능한 1회성 토큰 — key: password:reset:{token}, value: userId
+        //    - TTL 은 저장소가 설정값(기본 5분)을 내부 적용한다 — Service 에서 하드코딩/전달하지 않는다
+        //      (RedisSignupVerificationStore 패턴과 동일)
+        String passwordResetToken = UUID.randomUUID().toString();
+        passwordResetTokenStore.save(passwordResetToken, user.getId());
+
+        // 7. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지)
+        log.info("비밀번호 재설정 토큰 발급 - userId={}", user.getId());
+
+        return PasswordVerifyResponseDTO.of(passwordResetToken);
+    }
+
+    @Override
+    @Transactional
+    // 비밀번호 변경은 user_auth UPDATE(DB 쓰기) + Redis 토큰 삭제의 조합이므로
+    // signup 과 동일하게 트랜잭션 경계를 Service 에 두고, Redis 삭제는 DB 커밋 확정 후(afterCommit) 수행한다
+    public void resetPassword(PasswordResetRequestDTO request) {
+
+        // 1. 요청 값 검증 — passwordResetToken 누락 → RESET_TIMEOUT_OR_INVALID_TOKEN(400)
+        //    (docs: 만료/존재하지 않음/잘못된 접근을 하나의 에러 코드로 통일)
+        if (request == null || isBlank(request.getPasswordResetToken())) {
+            throw new BusinessException(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN);
+        }
+
+        // 2. Redis(password:reset:{token}) 검증 — 저장된 userId 조회
+        //    - 없으면 TTL(5분) 만료 또는 사용 완료/위조 토큰 → RESET_TIMEOUT_OR_INVALID_TOKEN(400)
+        //    - 실패 원인을 구분해 노출하지 않아 토큰 유효성/탈취 여부를 숨긴다
+        Long userId = passwordResetTokenStore.find(request.getPasswordResetToken());
+        if (userId == null) {
+            throw new BusinessException(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN);
+        }
+
+        // 3. 비밀번호 정책 검증 — 영문/숫자/특수문자 포함 8자 이상 (docs: WEAK_PASSWORD 422)
+        //    - newPassword 누락/빈 값도 정책 미달로 간주 (프론트 1차 검증 이전 서버 차단)
+        validatePasswordPolicy(request.getNewPassword());
+
+        // 4. BCrypt 암호화 — 원문 저장/복호화 금지 (knowledge.md: 비밀번호는 BCrypt 단방향 해시)
+        String newPasswordHash = PasswordEncryptor.encode(request.getNewPassword());
+
+        // 5. user_auth.password_hash 갱신
+        //    - 갱신 행 수가 0 이면 해당 userId 의 인증 정보가 없다(회원 탈퇴 등) → 재설정 흐름 무효 처리
+        int updated = authMapper.updatePasswordHash(userId, newPasswordHash);
+        if (updated == 0) {
+            // 일회성 토큰 정책 — 갱신 대상이 없으면(회원 탈퇴 등) 재시도를 막기 위해 토큰도 즉시 폐기한다.
+            // DB 갱신이 발생하지 않은 상태이므로 afterCommit 없이 바로 삭제한다.
+            passwordResetTokenStore.delete(request.getPasswordResetToken());
+            throw new BusinessException(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN);
+        }
+
+        // 6. 사용 완료 후 Redis 토큰 삭제 — 1회성 (DB 커밋 확정 후 삭제 — signup 의 Redis 정리 패턴과 동일)
+        deletePasswordResetTokenAfterCommit(request.getPasswordResetToken());
+
+        // 7. Audit 로그 (knowledge.md Audit Log Policy: 비밀번호 변경 기록 대상)
+        //    - userId 는 민감정보가 아니며, 비밀번호/토큰 원문은 로그에 포함하지 않는다
+        log.info("비밀번호 재설정 성공 - userId={}", userId);
+    }
+
+    /**
+     * loginId(이메일 또는 휴대폰)로 회원을 조회한다.
+     * - '@' 포함 → 이메일: trim → lowercase → SHA-256 hash → email_hash 조회
+     * - 그 외    → 휴대폰: trim → 하이픈 제거 → SHA-256 hash → phone_number_hash 조회
+     * - 개인정보 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md)
+     * - PASSWORD 로그인(loginByPassword)과 비밀번호 재설정(verifyPasswordReset)이 공통 사용한다
+     *
+     * @return 매칭되는 회원이 없으면 null
+     */
+    private LoginUserVO findUserByLoginId(String loginId) {
+        String normalized = loginId.trim();
+        if (normalized.contains("@")) {
+            return authMapper.findUserByEmailHash(sha256Hex(normalized.toLowerCase(Locale.ROOT)));
+        }
+        String phoneNumber = normalized.replace("-", "");
+        return authMapper.findUserByPhoneHash(sha256Hex(phoneNumber));
+    }
+
+    /**
+     * 비밀번호 정책 검증 — 영문/숫자/특수문자를 각각 1개 이상 포함하고 8자 이상이어야 한다.
+     * - docs: WEAK_PASSWORD(422) "비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다."
+     * - newPassword 누락(null/빈 값)도 정책 미달로 간주
+     */
+    private void validatePasswordPolicy(String newPassword) {
+        if (newPassword == null || !PASSWORD_POLICY_PATTERN.matcher(newPassword).matches()) {
+            throw new BusinessException(AuthErrorCode.WEAK_PASSWORD);
+        }
+    }
+
+    /**
+     * DB 트랜잭션이 커밋된 후(afterCommit)에만 Redis 재설정 토큰을 삭제한다.
+     * - 트랜잭션이 진행 중일 때 Redis 를 지우면 롤백 시 사용자가 동일 토큰으로 재시도할 수 없게 된다.
+     * - 실제 트랜잭션 밖(테스트 등)에서는 즉시 삭제한다 (deleteVerificationDataAfterCommit 과 동일 패턴).
+     */
+    private void deletePasswordResetTokenAfterCommit(String passwordResetToken) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    passwordResetTokenStore.delete(passwordResetToken);
+                }
+            });
+        } else {
+            passwordResetTokenStore.delete(passwordResetToken);
+        }
+    }
+
     /**
      * 검증된 Refresh Token claims 에서 userId(sub) 를 추출한다.
      * - JwtTokenProvider.extractUserId 는 토큰을 다시 파싱하므로, 이미 검증된 claims 에서 직접 추출한다
@@ -570,27 +729,13 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * PASSWORD 로그인 — email/phone SHA-256 hash 조회 + password BCrypt 검증
-     *
-     * loginId 판별:
-     * - '@' 포함 → 이메일: trim → lowercase → SHA-256 hash → email_hash 조회
-     * - 그 외    → 휴대폰: trim → 하이픈 제거 → SHA-256 hash → phone_number_hash 조회
-     *
-     * 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md)
+     * - 회원 조회는 findUserByLoginId 공통 헬퍼를 재사용한다 (비밀번호 재설정과 동일한 판별 규칙)
+     * - 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md)
      *
      * @throws BusinessException INVALID_CREDENTIALS — 회원 없음 또는 password 불일치 (원인 비노출)
      */
     private LoginUserVO loginByPassword(LoginRequestDTO request) {
-        String loginId = request.getLoginId().trim();
-
-        LoginUserVO loginUser;
-        if (loginId.contains("@")) {
-            String emailHash = sha256Hex(loginId.toLowerCase(Locale.ROOT));
-            loginUser = authMapper.findUserByEmailHash(emailHash);
-        } else {
-            String phoneNumber = loginId.replace("-", "");
-            String phoneHash = sha256Hex(phoneNumber);
-            loginUser = authMapper.findUserByPhoneHash(phoneHash);
-        }
+        LoginUserVO loginUser = findUserByLoginId(request.getLoginId());
 
         if (loginUser == null) {
             throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);

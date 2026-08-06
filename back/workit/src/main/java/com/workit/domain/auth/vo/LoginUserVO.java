@@ -38,4 +38,11 @@ public class LoginUserVO {
 
     /** PIN BCrypt 해시 (PIN 로그인 검증용) */
     private String pinHash;
+
+    /**
+     * PASS 본인인증 CI SHA-256 해시 (user_auth.identity_ci_hash)
+     * - 비밀번호 재설정(verify) 시 loginId 로 조회한 회원과 PASS 인증 결과의 CI 를 대조하기 위한 용도
+     * - findUserByEmailHash / findUserByPhoneHash 에서 함께 조회된다 (로그인 검증에는 사용하지 않는다)
+     */
+    private String identityCiHash;
 }

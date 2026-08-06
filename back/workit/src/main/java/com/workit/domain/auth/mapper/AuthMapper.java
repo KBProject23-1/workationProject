@@ -96,8 +96,9 @@ public interface AuthMapper {
 
     /**
      * PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회
-     * - users.email_hash(UNIQUE) + user_auth JOIN (password_hash 포함)
+     * - users.email_hash(UNIQUE) + user_auth JOIN (password_hash/identity_ci_hash 포함)
      * - email_encrypt(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
+     * - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회한다
      *
      * @return 매칭되는 회원이 없으면 null
      */
@@ -105,8 +106,9 @@ public interface AuthMapper {
 
     /**
      * PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회
-     * - users.phone_number_hash(UNIQUE) + user_auth JOIN (password_hash 포함)
+     * - users.phone_number_hash(UNIQUE) + user_auth JOIN (password_hash/identity_ci_hash 포함)
      * - phone_number_encrypt(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
+     * - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회한다
      *
      * @return 매칭되는 회원이 없으면 null
      */
@@ -129,4 +131,14 @@ public interface AuthMapper {
      * @return 해당 회원이 없으면 null
      */
     LoginUserVO findUserById(Long userId);
+
+    /**
+     * 비밀번호 재설정 - user_auth.password_hash 갱신
+     * - BCrypt 해시는 Service Layer 에서 생성 후 전달한다 (Mapper 에서 암호화 금지)
+     * - updated_at 은 DB 기본값 정책과 동일하게 CURRENT_TIMESTAMP 로 갱신
+     * - 갱신 행 수가 0 이면 해당 회원의 인증 정보가 없는 것 (Service 에서 판단)
+     *
+     * @return 갱신된 행 수
+     */
+    int updatePasswordHash(@Param("userId") Long userId, @Param("passwordHash") String passwordHash);
 }

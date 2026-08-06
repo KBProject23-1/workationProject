@@ -156,8 +156,9 @@
 
     <!--
         PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
-        - users.email_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash 함께 조회
+        - users.email_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash/identity_ci_hash 함께 조회
         - email_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회 (로그인에서는 미사용)
         - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
     -->
     <select id="findUserByEmailHash"
@@ -165,7 +166,8 @@
         SELECT u.id,
                u.status,
                u.name_encrypt,
-               a.password_hash
+               a.password_hash,
+               a.identity_ci_hash
         FROM users u
                  JOIN user_auth a ON a.user_id = u.id
         WHERE u.email_hash = #{emailHash}
@@ -173,8 +175,9 @@
 
     <!--
         PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
-        - users.phone_number_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash 함께 조회
+        - users.phone_number_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash/identity_ci_hash 함께 조회
         - phone_number_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회 (로그인에서는 미사용)
         - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
     -->
     <select id="findUserByPhoneHash"
@@ -182,7 +185,8 @@
         SELECT u.id,
                u.status,
                u.name_encrypt,
-               a.password_hash
+               a.password_hash,
+               a.identity_ci_hash
         FROM users u
                  JOIN user_auth a ON a.user_id = u.id
         WHERE u.phone_number_hash = #{phoneHash}
@@ -219,5 +223,18 @@
         FROM users
         WHERE id = #{userId}
     </select>
+
+    <!--
+        비밀번호 재설정 - user_auth.password_hash 갱신 (비밀번호 변경 완료).
+        - password_hash(BCrypt) 는 Service Layer 에서 생성 후 전달 (Mapper 에서 암호화 금지)
+        - updated_at 은 DB 기본값 정책과 동일하게 CURRENT_TIMESTAMP 로 갱신 (created_at 변경 없음)
+        - 갱신 행 수가 0 이면 해당 userId 의 인증 정보가 없는 것 (Service 에서 판단)
+    -->
+    <update id="updatePasswordHash">
+        UPDATE user_auth
+        SET password_hash = #{passwordHash},
+            updated_at    = CURRENT_TIMESTAMP
+        WHERE user_id = #{userId}
+    </update>
 
 </mapper>
