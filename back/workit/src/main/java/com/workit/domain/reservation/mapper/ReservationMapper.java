@@ -1,6 +1,9 @@
 package com.workit.domain.reservation.mapper;
 
 import com.workit.domain.reservation.vo.ReservationCategory;
+import com.workit.domain.reservation.vo.ReservationCancelInventoryVO;
+import com.workit.domain.reservation.vo.ReservationCancelTargetVO;
+import com.workit.domain.reservation.vo.ReservationCancelVO;
 import com.workit.domain.reservation.vo.ReservationCancellationDetailVO;
 import com.workit.domain.reservation.vo.ReservationCreateProductVO;
 import com.workit.domain.reservation.vo.ReservationCreateVO;
@@ -73,9 +76,30 @@ public interface ReservationMapper {
     // 이용 기간이 종료된 확정 예약의 완료 상태 변경
     int updateCompletedReservationStatuses(@Param("today") LocalDate today);
 
-    /**
-     * 사용자·상태·카테고리 조건에 맞는 예약 목록 한 페이지를 조회한다.
-     */
+    // 로그인 사용자가 소유한 취소 대상 예약의 잠금 조회
+    ReservationCancelTargetVO selectReservationCancelTargetForUpdate(
+            @Param("userId") Long userId,
+            @Param("reservationId") Long reservationId
+    );
+
+    // 예약에서 차감한 날짜별 재고 관계의 잠금 조회
+    List<ReservationCancelInventoryVO> selectReservationCancelInventoriesForUpdate(
+            @Param("reservationId") Long reservationId
+    );
+
+    // 취소 예약에서 차감한 날짜별 재고의 조건부 복구
+    int updateDailyInventoryForCancellation(
+            @Param("dailyInventoryId") Long dailyInventoryId,
+            @Param("reservedCount") int reservedCount
+    );
+
+    // 취소 수수료와 환불 완료 이력 저장
+    int insertReservationCancel(ReservationCancelVO reservationCancel);
+
+    // 확정 예약의 취소 상태 변경
+    int updateReservationStatusToCanceled(@Param("reservationId") Long reservationId);
+
+//    사용자·상태·카테고리 조건에 맞는 예약 목록 조회
     List<ReservationListItemVO> selectReservationList(
             @Param("userId") Long userId,
             @Param("statuses") List<ReservationStatus> statuses,
@@ -85,24 +109,20 @@ public interface ReservationMapper {
             @Param("canceledOnly") boolean canceledOnly
     );
 
-    /**
-     * 목록 쿼리와 동일한 필터 조건으로 전체 예약 건수를 조회한다.
-     */
+//  목록 쿼리와 동일한 필터 조건으로 전체 예약 건수를 조회
     long countReservationList(
             @Param("userId") Long userId,
             @Param("statuses") List<ReservationStatus> statuses,
             @Param("category") ReservationCategory category
     );
 
-//  로그인 사용자가 소유한 예약 확정·이용 완료 상세를 조회한다.
+//  로그인 사용자가 소유한 예약 확정·이용 완료 상세를 조회
     ReservationDetailVO selectReservationDetails(
             @Param("userId") Long userId,
             @Param("reservationId") Long reservationId
     );
 
-    /**
-     * 로그인 사용자가 소유한 예약 취소 상세를 조회
-     */
+//    로그인 사용자가 소유한 예약 취소 상세를 조회
     ReservationCancellationDetailVO selectReservationCancellationDetails(
             @Param("userId") Long userId,
             @Param("reservationId") Long reservationId

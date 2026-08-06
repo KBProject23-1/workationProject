@@ -2,12 +2,16 @@ package com.workit.domain.reservation.service;
 
 import com.workit.domain.reservation.dto.request.ReservationCreateRequestDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
+import com.workit.domain.reservation.dto.response.ReservationCancelResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCreateResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
 import com.workit.domain.reservation.exception.ReservationErrorCode;
 import com.workit.domain.reservation.mapper.ReservationMapper;
 import com.workit.domain.reservation.vo.ReservationCategory;
+import com.workit.domain.reservation.vo.ReservationCancelInventoryVO;
+import com.workit.domain.reservation.vo.ReservationCancelTargetVO;
+import com.workit.domain.reservation.vo.ReservationCancelVO;
 import com.workit.domain.reservation.vo.ReservationCancellationDetailVO;
 import com.workit.domain.reservation.vo.ReservationCreateProductVO;
 import com.workit.domain.reservation.vo.ReservationCreateVO;
@@ -18,6 +22,7 @@ import com.workit.domain.reservation.vo.ReservationProductDetailType;
 import com.workit.domain.reservation.vo.ReservationReviewAction;
 import com.workit.domain.reservation.vo.ReservationStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
+import com.workit.domain.transaction.dto.response.CancelResponse;
 import com.workit.domain.transaction.service.TransactionService;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
@@ -29,6 +34,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -47,18 +53,23 @@ public class ReservationServiceImpl implements ReservationService {
 
     private static final int MAX_PAGE_SIZE = 50;
     private static final long MAX_RESERVATION_SEQUENCE = 999999L;
+    private static final ZoneId SEOUL_ZONE_ID = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter RESERVATION_DATE_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private final ReservationMapper reservationMapper;
     private final TransactionService transactionService;
 
+
+//  예약 상태가 CONFIRMED인 예약 중 이용이 끝난 예약을 COMPLETED로 변경
     @Override
     @Transactional
     public int modifyCompletedReservationStatuses(LocalDate today) {
         return reservationMapper.updateCompletedReservationStatuses(today);
     }
 
+
+//    예약 생성, 결제, 재고 차감을 하나의 트랜잭션으로 묶음
     @Override
     @Transactional
     public ReservationCreateResponseDTO addReservation(
@@ -125,7 +136,10 @@ public class ReservationServiceImpl implements ReservationService {
             throw new BusinessException(ReservationErrorCode.RESERVATION_PROCESSING_FAILED);
         }
 
-        String reservationCode = createReservationCode(reservation.getId(), LocalDate.now());
+        String reservationCode = createReservationCode(
+                reservation.getId(),
+                LocalDate.now(SEOUL_ZONE_ID)
+        );
         reservation.setReservationCode(reservationCode);
         int codeUpdatedRows = reservationMapper.updateReservationCode(
                 reservation.getId(),
@@ -165,6 +179,80 @@ public class ReservationServiceImpl implements ReservationService {
         return ReservationCreateResponseDTO.from(reservation, product);
     }
 
+//    예약 취소, 환불, 재고 복구를 하나의 트랜잭션으로 묶음
+    @Override
+    @Transactional
+    public ReservationCancelResponseDTO saveReservationCancellation(
+            Long userId,
+            Long reservationId) {
+
+        validateDetailRequest(userId, reservationId);
+
+        ReservationCancelTargetVO target = reservationMapper
+                .selectReservationCancelTargetForUpdate(userId, reservationId);
+        if (target == null) {
+            throw new BusinessException(ReservationErrorCode.RESERVATION_NOT_FOUND);
+        }
+
+        validateCancellationTarget(target);
+
+        CancelResponse cancelResponse = transactionService.cancelTransaction(
+                userId,
+                target.getPaymentTransactionId()
+        );
+        validateCancellationResult(cancelResponse);
+
+        List<ReservationCancelInventoryVO> inventories = reservationMapper
+                .selectReservationCancelInventoriesForUpdate(reservationId);
+        if (inventories == null || inventories.isEmpty()) {
+            throw new BusinessException(
+                    ReservationErrorCode.RESERVATION_INVENTORY_RESTORE_FAILED
+            );
+        }
+
+        for (ReservationCancelInventoryVO inventory : inventories) {
+            int restoredRows = reservationMapper.updateDailyInventoryForCancellation(
+                    inventory.getDailyInventoryId(),
+                    inventory.getReservedCount()
+            );
+            if (restoredRows != 1) {
+                throw new BusinessException(
+                        ReservationErrorCode.RESERVATION_INVENTORY_RESTORE_FAILED
+                );
+            }
+        }
+
+        BigDecimal cancelFee = BigDecimal.ZERO;
+        ReservationCancelVO reservationCancel = new ReservationCancelVO();
+        reservationCancel.setReservationId(reservationId);
+        reservationCancel.setCancelFee(cancelFee);
+        reservationCancel.setRefundAmount(target.getTotalAmount());
+        reservationCancel.setCanceledAt(cancelResponse.getCancelledAt());
+        reservationCancel.setRefundedAt(cancelResponse.getCancelledAt());
+
+        int insertedRows = reservationMapper.insertReservationCancel(reservationCancel);
+        if (insertedRows != 1) {
+            throw new BusinessException(
+                    ReservationErrorCode.RESERVATION_CANCEL_PROCESSING_FAILED
+            );
+        }
+
+        int updatedRows = reservationMapper.updateReservationStatusToCanceled(reservationId);
+        if (updatedRows != 1) {
+            throw new BusinessException(
+                    ReservationErrorCode.RESERVATION_CANCEL_PROCESSING_FAILED
+            );
+        }
+
+        return ReservationCancelResponseDTO.from(
+                target,
+                cancelFee,
+                target.getTotalAmount(),
+                cancelResponse.getCancelledAt()
+        );
+    }
+
+//    사용자 예약 목록 조회
     @Override
     @Transactional(readOnly = true)
     public PageResponseDTO<ReservationListItemResponseDTO> findReservationList(
@@ -211,6 +299,7 @@ public class ReservationServiceImpl implements ReservationService {
         return PageResponseDTO.of(content, page, size, totalElements);
     }
 
+//    사용자 예약 상세 정보 조회
     @Override
     @Transactional(readOnly = true)
     public ReservationDetailResponseDTO findReservationDetails(Long userId, Long reservationId) {
@@ -221,7 +310,7 @@ public class ReservationServiceImpl implements ReservationService {
             throw new BusinessException(ReservationErrorCode.RESERVATION_NOT_FOUND);
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(SEOUL_ZONE_ID);
         LocalDateTime reviewDeadline = detail.getEndDate()
                 .plusDays(30)
                 .atTime(LocalTime.MAX);
@@ -258,9 +347,9 @@ public class ReservationServiceImpl implements ReservationService {
         );
     }
 
+//    userId 사용자의 reservationId 기준 예약 취소 상세 조회
     @Override
     @Transactional(readOnly = true)
-//    userId 사용자의 reservationId 기준 예약 취소 상세 조회
     public ReservationCancellationDetailResponseDTO findReservationCancellationDetails(
             Long userId,
             Long reservationId) {
@@ -295,6 +384,35 @@ public class ReservationServiceImpl implements ReservationService {
                 || request.getQuantity() < 1) {
 
             throw new BusinessException(ReservationErrorCode.INVALID_RESERVATION_REQUEST);
+        }
+    }
+
+    // 예약 상태와 이용 시작일 및 결제 거래의 취소 가능 조건 검증
+    private void validateCancellationTarget(ReservationCancelTargetVO target) {
+        if (target.getStatus() == ReservationStatus.CANCELED) {
+            throw new BusinessException(ReservationErrorCode.RESERVATION_ALREADY_CANCELED);
+        }
+        if (target.getStatus() != ReservationStatus.CONFIRMED) {
+            throw new BusinessException(ReservationErrorCode.RESERVATION_CANCEL_NOT_ALLOWED);
+        }
+        if (!LocalDate.now(SEOUL_ZONE_ID).isBefore(target.getStartDate())) {
+            throw new BusinessException(
+                    ReservationErrorCode.RESERVATION_CANCEL_PERIOD_EXPIRED
+            );
+        }
+        if (target.getPaymentTransactionId() == null) {
+            throw new BusinessException(ReservationErrorCode.RESERVATION_PAYMENT_NOT_FOUND);
+        }
+    }
+
+    // 거래 취소 결과의 완료 상태와 취소 일시 검증
+    private void validateCancellationResult(CancelResponse cancelResponse) {
+
+        if (cancelResponse == null
+                || !"CANCELED".equals(cancelResponse.getStatus())
+                || cancelResponse.getCancelledAt() == null) {
+
+            throw new BusinessException(ReservationErrorCode.RESERVATION_REFUND_FAILED);
         }
     }
 
@@ -415,7 +533,7 @@ public class ReservationServiceImpl implements ReservationService {
                 .multiply(BigDecimal.valueOf(multiplier));
     }
 
-    // API의 정수 금액 응답과 결제 조건을 만족하는 금액인지 검증
+    // API의 금액 응답과 결제 조건을 만족하는 금액인지 검증
     private void validateTotalAmount(BigDecimal totalAmount) {
         if (totalAmount.compareTo(BigDecimal.ZERO) <= 0
                 || totalAmount.stripTrailingZeros().scale() > 0) {
