@@ -180,4 +180,14 @@
            AND user_id IS NULL
     </select>
 
+    <select id="selectWorkBudgetByCategoryCode" resultType="bigdecimal">
+        SELECT COALESCE(SUM(b.target_amount), 0)
+          FROM budgets b
+         INNER JOIN expense_categories ec
+            ON ec.id = b.expense_category_id
+         WHERE b.workation_id = #{workationId}
+           AND b.budget_type = #{budgetType}
+           AND ec.code = #{categoryCode}
+    </select>
+
 </mapper>

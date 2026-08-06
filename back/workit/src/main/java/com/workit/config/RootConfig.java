@@ -31,7 +31,7 @@ import javax.sql.DataSource;
 
 @EnableTransactionManagement
 @EnableScheduling
-@Import(RedisConfig.class)
+@Import({RedisConfig.class, SecurityConfig.class})
 public class RootConfig {
     @Value("${jdbc.driver}")
     String driver;
@@ -44,7 +44,8 @@ public class RootConfig {
     @Autowired
     ApplicationContext applicationContext;
 
-    // 이용 종료된 예약의 상태를 CONFIRMED에서 COMPLETED로 변경하는 스케줄러 등록    @Bean
+    // 이용 종료 예약의 완료 상태 변경 스케줄러 등록
+    @Bean
     public ReservationStatusScheduler reservationStatusScheduler(
             ReservationService reservationService) {
 

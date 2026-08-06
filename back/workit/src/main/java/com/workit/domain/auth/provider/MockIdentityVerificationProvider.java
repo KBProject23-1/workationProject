@@ -18,6 +18,9 @@ public class MockIdentityVerificationProvider implements IdentityVerificationPro
     /** Mock CI 접두사 — 실제 CI 가 아니며 개인정보가 아님 */
     private static final String MOCK_CI_PREFIX = "MOCK-CI-";
 
+    /** Mock 전화번호 접두사 — 실제 전화번호가 아니며 개인정보가 아님 */
+    private static final String MOCK_PHONE_PREFIX = "010";
+
     /** 실패 시나리오 테스트용 식별자 — 이 값을 넘기면 인증 실패로 처리된다 */
     public static final String INVALID_IDENTIFIER = "invalid";
 
@@ -29,10 +32,35 @@ public class MockIdentityVerificationProvider implements IdentityVerificationPro
             throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
         }
 
-        // 실제 연동 전까지는 입력값 기반의 고정 Mock 결과를 반환한다
+        // 실제 연동 전까지는 입력값 기반의 고정 Mock 결과를 반환한다.
+        // phone 은 CI 처럼 입력 id 로부터 유도한다 — users.phone_number_hash(UNIQUE) 충돌 방지용
+        // (실제 PASS 연동 시 본인인증 결과의 실제 휴대폰 번호가 반환된다)
         return IdentityVerificationResult.builder()
                 .ci(MOCK_CI_PREFIX + id)
                 .name(MOCK_NAME)
+                .phoneNumber(mockPhone(id))
                 .build();
+    }
+
+    /** 입력 id 에서 숫자만 추출해 010-XXXXXXXX 형식(11자리)의 Mock 전화번호를 만든다 */
+    private static String mockPhone(String id) {
+        StringBuilder digits = new StringBuilder();
+        for (char c : id.toCharArray()) {
+            if (Character.isDigit(c)) {
+                digits.append(c);
+            }
+        }
+        String tail = digits.length() >= 8
+                ? digits.substring(digits.length() - 8)
+                : padTo8(digits.toString());
+        return MOCK_PHONE_PREFIX + tail;
+    }
+
+    private static String padTo8(String digits) {
+        StringBuilder sb = new StringBuilder(digits);
+        while (sb.length() < 8) {
+            sb.insert(0, "0");
+        }
+        return sb.toString();
     }
 }

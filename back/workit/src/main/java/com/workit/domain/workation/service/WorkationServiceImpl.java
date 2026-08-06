@@ -123,9 +123,9 @@ public class WorkationServiceImpl implements WorkationService {
     @Transactional
     public void removeWorkation(Long userId, Long workationId) {
 
-        // 1) 존재 여부 + 소유자 + 정산 완료 여부 검증
-        //    정산 완료된 워케이션은 정산 근거 자료이므로 삭제 불가
-        ownershipValidator.getOwnedActive(userId, workationId, "삭제");
+        // 1) 존재 여부 + 소유자 검증
+        //    지난 워케이션 기록 삭제를 지원하므로 정산 완료 건도 허용한다
+        ownershipValidator.getOwned(userId, workationId);
 
         // 2) 결제 원본은 보존하고 워케이션 연결만 해제
         workationMapper.unlinkTransactions(workationId);

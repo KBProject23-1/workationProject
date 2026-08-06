@@ -8,8 +8,8 @@ CREATE TABLE `users`
 (
     `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
     `email_hash`           VARCHAR(100) NOT NULL COMMENT '유저 이메일 (로그인 ID) SHA-256',
-    `email_encrypt`        VARCHAR(100) NOT NULL COMMENT '유저 이메일 (로그인 ID) AES',
-    `name_encrypt`         VARCHAR(50)  NOT NULL COMMENT '유저 이름 AES',
+    `email_encrypt`        VARCHAR(400) NOT NULL COMMENT '유저 이메일 (로그인 ID) AES',
+    `name_encrypt`         VARCHAR(100) NOT NULL COMMENT '유저 이름 AES',
     `phone_number_hash`    VARCHAR(255) NOT NULL COMMENT '유저 핸드폰 번호 SHA-256',
     `phone_number_encrypt` VARCHAR(255) NOT NULL COMMENT '유저 핸드폰 번호 AES',
     `status`               VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
@@ -374,7 +374,8 @@ CREATE TABLE `wallets`
     `id`         BIGINT PRIMARY KEY AUTO_INCREMENT,
     `user_id`    BIGINT         NOT NULL,
     `balance`    DECIMAL(15, 2) NULL DEFAULT 0.00 COMMENT '시스템 계좌 충전금',
-    `updated_at` TIMESTAMP      NULL DEFAULT CURRENT_TIMESTAMP COMMENT '지갑 업데이트 시간'
+    `updated_at` TIMESTAMP      NULL DEFAULT CURRENT_TIMESTAMP COMMENT '지갑 업데이트 시간',
+    CONSTRAINT `UQ_wallets_user_id` UNIQUE (`user_id`)
 );
 
 -- 4. 계좌 테이블
@@ -390,7 +391,9 @@ CREATE TABLE `bank_accounts`
     `is_withdrawal_agreed` TINYINT(1)     NULL COMMENT '계좌 입출금 동의 여부',
     `withdrawal_agreed_at` TIMESTAMP      NULL COMMENT '오픈 뱅킹 약관 동의 시간',
     `balance_updated_at`   TIMESTAMP      NULL DEFAULT CURRENT_TIMESTAMP COMMENT '계좌 잔액 업데이트 시간',
-    `is_deleted`           TINYINT(1)     NULL DEFAULT 0 COMMENT '등록 계좌 삭제 여부'
+    `is_deleted`           TINYINT(1)     NULL DEFAULT 0 COMMENT '등록 계좌 삭제 여부',
+    `primary_active_user_id` BIGINT GENERATED ALWAYS AS (CASE WHEN is_primary = 1 AND is_deleted = 0 THEN user_id END) STORED COMMENT '유저당 활성 대표계좌 1개 강제용(직접 조회 X)',
+    CONSTRAINT `UQ_bank_accounts_primary_per_user` UNIQUE (`primary_active_user_id`)
 );
 
 -- 5. 카드 테이블 (card_companies 외래키 포함)
@@ -409,7 +412,10 @@ CREATE TABLE `cards`
     `is_deleted`          TINYINT(1)                NULL DEFAULT 0 COMMENT '등록 카드 삭제 여부',
     `updated_at`          TIMESTAMP                 NULL COMMENT '수정 일시',
     `deleted_at`          TIMESTAMP                 NULL COMMENT '삭제 일시',
-    CONSTRAINT `FK_card_companies_TO_cards` FOREIGN KEY (`card_company_code`) REFERENCES `card_companies` (`code`)
+    `primary_active_user_id` BIGINT GENERATED ALWAYS AS (CASE WHEN is_primary = 1 AND is_deleted = 0 THEN user_id END) STORED COMMENT '유저당 활성 대표카드 1개 강제용(직접 조회 X)',
+    CONSTRAINT `FK_card_companies_TO_cards` FOREIGN KEY (`card_company_code`) REFERENCES `card_companies` (`code`),
+    CONSTRAINT `UQ_cards_user_card_number` UNIQUE (`user_id`, `card_number`),
+    CONSTRAINT `UQ_cards_primary_per_user` UNIQUE (`primary_active_user_id`)
 );
 
 -- 6. 거래 내역 테이블 (wallets, cards, bank_accounts, merchants 외래키 포함)

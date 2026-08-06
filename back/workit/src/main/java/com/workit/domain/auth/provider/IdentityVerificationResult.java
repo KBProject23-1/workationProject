@@ -17,4 +17,7 @@ public class IdentityVerificationResult {
 
     /** 유저 이름 — 화면 표시 전용 */
     private String name;
+
+    /** 유저 휴대폰 번호 — users.phone_number_* 저장 대상 (개인정보, 암호화 저장) */
+    private String phoneNumber;
 }

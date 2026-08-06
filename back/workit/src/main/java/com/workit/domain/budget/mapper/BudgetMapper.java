@@ -66,4 +66,9 @@ public interface BudgetMapper {
 
     // 기타(ETC) 카테고리 id 조회
     Long selectEtcCategoryId(@Param("budgetType") BudgetType budgetType);
+
+    // 추천 계산에서 업무 예산(예: RENT) 금액을 조회한다
+    BigDecimal selectWorkBudgetByCategoryCode(@Param("workationId") Long workationId,
+                                             @Param("budgetType") BudgetType budgetType,
+                                             @Param("categoryCode") String categoryCode);
 }
