@@ -9,12 +9,16 @@ import com.workit.domain.reservation.vo.ReservationCategory;
 import com.workit.domain.reservation.vo.ReservationStatus;
 import com.workit.global.dto.PageResponseDTO;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
  * 예약 조회 기능에서 제공하는 서비스 규격
  */
 public interface ReservationService {
+
+    // 이용 기간이 종료된 확정 예약의 완료 상태 변경
+    int modifyCompletedReservationStatuses(LocalDate today);
 
     // 상품 가격과 재고를 다시 검증하고 지갑 결제가 완료된 예약을 생성
     ReservationCreateResponseDTO addReservation(
