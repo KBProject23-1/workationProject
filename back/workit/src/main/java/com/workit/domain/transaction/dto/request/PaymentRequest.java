@@ -14,4 +14,5 @@ public class PaymentRequest {
     private Long cardId;
     private String pinNumber;
     private String deviceId;
+    private String idempotencyKey;
 }

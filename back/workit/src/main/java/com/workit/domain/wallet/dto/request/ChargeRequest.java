@@ -10,4 +10,5 @@ public class ChargeRequest {
     private BigDecimal amount;
     private String pinNumber;
     private String deviceId;
+    private String idempotencyKey;
 }

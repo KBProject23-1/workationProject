@@ -21,6 +21,7 @@ public class TransactionVO {
     private Long workationId;
     private Long reservationId;
     private Long merchantId;
+    private String idempotencyKey;
     private String paymentSourceType;
     private String merchantName;
     private BigDecimal amount;
@@ -54,6 +55,7 @@ public class TransactionVO {
         vo.setCardId(card.getId());
         vo.setReservationId(request.getReservationId());
         vo.setMerchantId(request.getMerchantId());
+        vo.setIdempotencyKey(request.getIdempotencyKey());
         vo.setPaymentSourceType("CARD");
         vo.setMerchantName(request.getMerchantName());
         vo.setAmount(request.getAmount());
@@ -72,6 +74,7 @@ public class TransactionVO {
         vo.setWalletId(wallet.getId());
         vo.setReservationId(request.getReservationId());
         vo.setMerchantId(request.getMerchantId());
+        vo.setIdempotencyKey(request.getIdempotencyKey());
         vo.setPaymentSourceType("WALLET");
         vo.setMerchantName(request.getMerchantName());
         vo.setAmount(request.getAmount());
@@ -99,11 +102,12 @@ public class TransactionVO {
         return vo;
     }
 
-    public static TransactionVO forWalletCharge(Long userId, WalletVO wallet, BankAccountVO account, BigDecimal amount) {
+    public static TransactionVO forWalletCharge(Long userId, WalletVO wallet, BankAccountVO account, BigDecimal amount, String idempotencyKey) {
         TransactionVO vo = new TransactionVO();
         vo.setUserId(userId);
         vo.setWalletId(wallet.getId());
         vo.setBankAccountId(account.getId());
+        vo.setIdempotencyKey(idempotencyKey);
         vo.setPaymentSourceType("WALLET");
         vo.setMerchantName("지갑 충전");
         vo.setAmount(amount);
@@ -115,11 +119,12 @@ public class TransactionVO {
         return vo;
     }
 
-    public static TransactionVO forWalletRefund(Long userId, WalletVO wallet, BankAccountVO account, BigDecimal amount) {
+    public static TransactionVO forWalletRefund(Long userId, WalletVO wallet, BankAccountVO account, BigDecimal amount, String idempotencyKey) {
         TransactionVO vo = new TransactionVO();
         vo.setUserId(userId);
         vo.setWalletId(wallet.getId());
         vo.setBankAccountId(account.getId());
+        vo.setIdempotencyKey(idempotencyKey);
         vo.setPaymentSourceType("WALLET");
         vo.setMerchantName("지갑 환불");
         vo.setAmount(amount);

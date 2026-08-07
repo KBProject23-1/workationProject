@@ -16,6 +16,7 @@ import com.workit.domain.security.service.PinValidationResult;
 import com.workit.domain.security.service.PinValidator;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -76,12 +77,15 @@ public class WalletServiceImpl implements WalletService {
         }
 
         walletMapper.increaseBalance(userId, amount);
-        WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
-        TransactionVO chargeTx = TransactionVO.forWalletCharge(userId, wallet, account, amount);
-        transactionMapper.insertTransaction(chargeTx);
+        TransactionVO chargeTx = TransactionVO.forWalletCharge(userId, wallet, account, amount, request.getIdempotencyKey());
+        try {
+            transactionMapper.insertTransaction(chargeTx);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(WalletErrorCode.WALLET_DUPLICATE_REQUEST);
+        }
 
-        return ChargeResponse.of(chargeTx, updatedWallet.getBalance());
+        return ChargeResponse.of(chargeTx, wallet.getBalance().add(amount));
     }
 
     @Override
@@ -115,8 +119,12 @@ public class WalletServiceImpl implements WalletService {
 
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
-        TransactionVO refundTx = TransactionVO.forWalletRefund(userId, wallet, primaryAccount, amount);
-        transactionMapper.insertTransaction(refundTx);
+        TransactionVO refundTx = TransactionVO.forWalletRefund(userId, wallet, primaryAccount, amount, request.getIdempotencyKey());
+        try {
+            transactionMapper.insertTransaction(refundTx);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(WalletErrorCode.WALLET_DUPLICATE_REQUEST);
+        }
 
         return RefundResponse.of(refundTx, updatedWallet.getBalance(), primaryAccount);
     }
@@ -133,6 +141,9 @@ public class WalletServiceImpl implements WalletService {
         }
         if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
             throw new BusinessException(WalletErrorCode.WALLET_DEVICE_ID_REQUIRED);
+        }
+        if (request.getIdempotencyKey() == null || request.getIdempotencyKey().trim().isEmpty()) {
+            throw new BusinessException(WalletErrorCode.WALLET_IDEMPOTENCY_KEY_REQUIRED);
         }
 
         BigDecimal amount = request.getAmount();
@@ -153,6 +164,9 @@ public class WalletServiceImpl implements WalletService {
         }
         if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
             throw new BusinessException(WalletErrorCode.WALLET_DEVICE_ID_REQUIRED);
+        }
+        if (request.getIdempotencyKey() == null || request.getIdempotencyKey().trim().isEmpty()) {
+            throw new BusinessException(WalletErrorCode.WALLET_IDEMPOTENCY_KEY_REQUIRED);
         }
 
         BigDecimal amount = request.getAmount();

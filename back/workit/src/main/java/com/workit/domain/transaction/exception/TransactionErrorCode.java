@@ -21,6 +21,8 @@ public enum TransactionErrorCode implements ErrorCode {
     TRANSACTION_PIN_INVALID(HttpStatus.BAD_REQUEST, "PIN 번호가 유효하지 않습니다."),
     TRANSACTION_PIN_NOT_REGISTERED(HttpStatus.BAD_REQUEST, "등록된 PIN 번호가 없습니다. PIN 번호를 먼저 설정해주세요."),
     TRANSACTION_PIN_LOCKED(HttpStatus.FORBIDDEN, "PIN 번호 입력 횟수가 초과되어 잠겼습니다. PASS 본인인증을 통해 PIN 번호를 재설정해 주세요."),
+    TRANSACTION_IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "요청 식별 키가 필요합니다."),
+    TRANSACTION_DUPLICATE_REQUEST(HttpStatus.CONFLICT, "이미 처리된 요청입니다."),
     TRANSACTION_CARD_ID_REQUIRED(HttpStatus.BAD_REQUEST, "카드를 선택해주세요."),
     TRANSACTION_CARD_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 카드입니다."),
     TRANSACTION_WALLET_NOT_FOUND(HttpStatus.NOT_FOUND, "지갑이 존재하지 않습니다."),

@@ -429,6 +429,7 @@ CREATE TABLE `transactions`
     `workation_id`        BIGINT                                    NULL COMMENT '워케이션 고유 번호(FK)',
     `reservation_id`      BIGINT                                    NULL COMMENT '예약과 관련된 거래인 경우 연결되는 예약 고유번호(FK)',
     `merchant_id`         BIGINT                                    NULL COMMENT '결제한 가맹점 고유 번호(FK)',
+    `idempotency_key`     VARCHAR(100)                              NULL COMMENT '중복 요청 방지용 클라이언트 생성 키 (충전/환불/결제 요청 단위)',
     `payment_source_type` ENUM ('CARD', 'WALLET')                   NOT NULL COMMENT '결제 수단',
     `merchant_name`       VARCHAR(150)                              NOT NULL COMMENT '가맹점명',
     `amount`              DECIMAL(15, 2)                            NOT NULL COMMENT '거래 금액',
@@ -445,7 +446,8 @@ CREATE TABLE `transactions`
     CONSTRAINT `FK_wallets_TO_transactions` FOREIGN KEY (`wallet_id`) REFERENCES `wallets` (`id`),
     CONSTRAINT `FK_cards_TO_transactions` FOREIGN KEY (`card_id`) REFERENCES `cards` (`id`),
     CONSTRAINT `FK_bank_accounts_TO_transactions` FOREIGN KEY (`bank_account_id`) REFERENCES `bank_accounts` (`id`),
-    CONSTRAINT `FK_merchants_TO_transactions` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`)
+    CONSTRAINT `FK_merchants_TO_transactions` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`),
+    UNIQUE KEY `ux_transactions_user_idempotency` (`user_id`, `idempotency_key`) -- 동일 유저의 중복 충전/환불/결제 요청 방지
 );
 
 -- 7. 연동 가능 계좌 테이블
