@@ -1,6 +1,7 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
+import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 
@@ -37,4 +38,23 @@ public interface UserService {
      * @return profileId, userId, nickname, companyName
      */
     ProfileOnboardingResponseDTO onboardProfile(Long userId, ProfileOnboardingRequestDTO request);
+
+    /**
+     * 프로필 수정 — 로그인 사용자의 nickname/companyName 부분 수정 (PATCH: 전달된 값만)
+     *
+     * 흐름:
+     *   1. 로그인 사용자 존재 + ACTIVE 상태 확인 → USER_NOT_FOUND(404)
+     *   2. 프로필 존재 확인 (최초 등록 전 사용자는 수정 불가) → PROFILE_NOT_FOUND(404)
+     *   3. 요청 값 검증 — 수정 대상 필드 최소 1개, nickname 길이(50자), companyName 길이(100자)
+     *      → INVALID_PROFILE_REQUEST(400)
+     *   4. nickname 중복 확인 — 기존 nickname 과 동일하면 허용, 변경 시 다른 사용자 중복 조회
+     *      → DUPLICATE_NICKNAME(409)
+     *   5. 전달된 필드만 동적 UPDATE (name/phoneNumber/email 은 수정 불가 — 요청에서 받지 않음)
+     *
+     * name/phoneNumber/email 은 PASS 본인인증 기반 기존 값 유지 (재인증 API 경유 — knowledge.md)
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 프로필 수정 요청 (nickname/companyName 중 하나 이상)
+     */
+    void updateProfile(Long userId, ProfileUpdateRequestDTO request);
 }

@@ -21,7 +21,11 @@ public enum UserErrorCode implements ErrorCode {
 
     // 프로필 최초 등록 - 이미 프로필이 등록된 사용자의 재등록 시도 → 409
     // (ERD: user_profile.user_id UNIQUE 1:1 — 최초 등록 API는 프로필 미등록 사용자만 호출 가능)
-    PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 프로필이 등록되어 있습니다.");
+    PROFILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 프로필이 등록되어 있습니다."),
+
+    // 프로필 수정 - 프로필 미등록 사용자의 수정 시도 → 404
+    // (최초 등록되지 않은 사용자는 수정 불가 — docs: 내 프로필 정보 수정)
+    PROFILE_NOT_FOUND(HttpStatus.NOT_FOUND, "등록된 프로필 정보가 없습니다. 프로필을 먼저 등록해주세요.");
 
     private final HttpStatus status;
     private final String message;

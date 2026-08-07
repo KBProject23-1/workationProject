@@ -52,4 +52,39 @@
         VALUES (#{userId}, #{nickname}, #{companyName})
     </insert>
 
+    <!--
+        프로필 수정 - 닉네임 중복 조회 (자기 자신 제외).
+        - 변경 요청 닉네임이 다른 사용자의 프로필에서 이미 사용 중인지 확인
+        - 기존 닉네임과 동일하면 Service 에서 중복 확인을 건너뛴다 (본인 제외 조건과 함께 이중 방어)
+        - Mapper 는 조회만 담당 (중복 판단은 Service — DUPLICATE_NICKNAME)
+    -->
+    <select id="countByNicknameExcludingUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM user_profile
+        WHERE nickname = #{nickname}
+          AND user_id != #{userId}
+    </select>
+
+    <!--
+        프로필 수정 - user_profile 부분 수정 (PATCH: 전달된 값만 UPDATE).
+        - <set> + <if>: nickname/companyName 중 null 이 아닌 필드만 UPDATE 문에 포함된다
+          (PATCH 특성 반영 — 미전달 필드는 기존 값 유지)
+        - Service Layer 에서 검증/trim 후 전달 (Mapper 에서 검증 금지)
+        - updated_at 은 DB ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신
+        - 동시 요청으로 인한 nickname UNIQUE 충돌은 DuplicateKeyException → 409 매핑 (Service)
+    -->
+    <update id="updateUserProfile"
+            parameterType="com.workit.domain.user.vo.UserProfileVO">
+        UPDATE user_profile
+        <set>
+            <if test="nickname != null">
+                nickname = #{nickname},
+            </if>
+            <if test="companyName != null">
+                company_name = #{companyName},
+            </if>
+        </set>
+        WHERE user_id = #{userId}
+    </update>
+
 </mapper>

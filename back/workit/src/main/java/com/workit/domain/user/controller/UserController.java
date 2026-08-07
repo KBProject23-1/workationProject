@@ -1,6 +1,7 @@
 package com.workit.domain.user.controller;
 
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
+import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.service.UserService;
@@ -10,6 +11,7 @@ import com.workit.security.CurrentUser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -61,5 +63,23 @@ public class UserController {
         return GlobalResponseFactory.created(
                 userService.onboardProfile(userId, request),
                 "유저 프로필 정보가 성공적으로 등록되었습니다.");
+    }
+
+    // 1.3 내 프로필 수정
+    // - docs: 내 프로필 정보 수정 (PATCH /api/v1/users/me)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    // - PATCH 방식 — nickname/companyName 중 전달된 값만 수정 (name/phoneNumber/email 은 수정 불가,
+    //   재인증 API 경유 개인정보만 변경 가능 — knowledge.md)
+    // - Service 에서 사용자/프로필 확인/요청 검증/닉네임 중복 확인/동적 UPDATE 를 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 접근/검증 금지)
+    // - 회원 없음: USER_NOT_FOUND(404), 프로필 미등록: PROFILE_NOT_FOUND(404),
+    //   잘못된 요청: INVALID_PROFILE_REQUEST(400), 닉네임 중복: DUPLICATE_NICKNAME(409)
+    @PatchMapping("/me")
+    public ResponseEntity<CommonResponse<Void>> updateProfile(
+            @CurrentUser Long userId,
+            @RequestBody ProfileUpdateRequestDTO request) {
+
+        userService.updateProfile(userId, request);
+        return GlobalResponseFactory.success(null, "프로필 정보가 성공적으로 수정되었습니다.");
     }
 }
