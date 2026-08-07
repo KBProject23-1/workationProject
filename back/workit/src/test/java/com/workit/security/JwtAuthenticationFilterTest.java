@@ -167,6 +167,61 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    @DisplayName("컨텍스트 패스 배포 - 공개 인증 API는 토큰 검증 없이 통과 (재발급 흐름 보호)")
+    void publicAuthPath_withContextPath_passesThrough() throws Exception {
+        // WAR 배포 시 getRequestURI() 에 컨텍스트 패스가 붙어도(예: /workit/api/v1/auth/refresh)
+        // 공개 경로 판별이 실패하지 않아야 한다 — 만료/위변조 토큰이 재발급 흐름을 막지 않는다
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/workit/api/v1/auth/refresh");
+        request.setContextPath("/workit");
+        request.addHeader("Authorization", "Bearer invalid.token.value");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertNotNull(chain.getRequest(), "컨텍스트 패스가 있어도 공개 경로는 오류 응답 없이 통과해야 한다");
+        assertEquals(200, response.getStatus());
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+    }
+
+    @Test
+    @DisplayName("컨텍스트 패스 배포 + 만료 Access Token - 재발급 API 통과 (401 EXPIRED_TOKEN 금지)")
+    void publicAuthPath_withContextPath_expiredToken_passesThrough() throws Exception {
+        // 실제 장애 재현: Access Token 만료 + 컨텍스트 패스 배포에서 재발급 요청이
+        // 401 EXPIRED_TOKEN 으로 차단되던 버그 — 쿠키의 Refresh Token 과 무관하게 필터 단계에서 막힌다
+        String expiredToken = provider.createAccessToken(42L, new Date(System.currentTimeMillis() - 60_000L));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/workit/api/v1/auth/refresh");
+        request.setContextPath("/workit");
+        request.addHeader("Authorization", "Bearer " + expiredToken);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus(), "만료 토큰이 재발급 요청을 막으면 안 된다");
+        assertNotNull(chain.getRequest());
+        assertNull(SecurityContextHolder.getContext().getAuthentication());
+    }
+
+    @Test
+    @DisplayName("컨텍스트 패스 배포 - 보호 경로는 여전히 토큰 검증 (공개 범위 확대 없음)")
+    void protectedPath_withContextPath_stillValidates() throws Exception {
+        // 정규화가 과하게 적용되어 보호 경로가 공개로 분류되지 않아야 한다
+        String expiredToken = provider.createAccessToken(42L, new Date(System.currentTimeMillis() - 60_000L));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/workit/api/v1/wallets/me");
+        request.setContextPath("/workit");
+        request.addHeader("Authorization", "Bearer " + expiredToken);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(401, response.getStatus());
+        assertTrue(response.getContentAsString().contains("\"errorCode\":\"EXPIRED_TOKEN\""));
+        assertNull(chain.getRequest());
+    }
+
+    @Test
     @DisplayName("로그인 사용자 전용 경로(/api/v1/auth/me/pin) - 정상 토큰 → 인증 처리")
     void authenticatedAuthPath_withValidToken_authenticates() throws Exception {
         String token = provider.createAccessToken(77L);

@@ -106,6 +106,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (uri == null) {
             return false;
         }
+        // 컨텍스트 패스 제거 — getRequestURI() 는 컨텍스트 패스를 포함하므로
+        // (예: /workit/api/v1/auth/refresh) WAR 배포(비루트 컨텍스트)에서 공개 경로 판별이
+        // 실패해 만료된 Access Token 이 재발급/로그인 흐름을 막지 않도록 컨텍스트 기준 경로로 정규화한다.
+        // - 루트 컨텍스트는 getContextPath() 가 "" 를 반환하므로 제거할 것이 없다.
+        // - "/" 컨텍스트는 이론상 가능하나 서블릿 명세상 발생하지 않으며, 안전하게 제외한다.
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && !"/".equals(contextPath)
+                && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
         // 로그인 사용자 전용 경로(/api/v1/auth/me/**)는 공개 예외에서 제외 — JWT 검증 필수
         // (SecurityConfig 의 authenticated 규칙과 동일한 SecurityPath 정의를 공유한다)
         if (uri.startsWith(SecurityPath.AUTHENTICATED_AUTH_PREFIX)) {
