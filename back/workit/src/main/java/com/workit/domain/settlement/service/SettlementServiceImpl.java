@@ -72,8 +72,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional(readOnly = true)
-    public byte[] exportExcel(Long userId, Long workationId, BudgetType budgetType) {
-
+    public byte[] exportExcel(Long userId, Long workationId) {
         SettlementDocumentVO doc = buildDocument(userId, workationId,
                 SettlementErrorCode.NO_EXPENSE_TO_SETTLE);
 
@@ -89,8 +88,7 @@ public class SettlementServiceImpl implements SettlementService {
 
     @Override
     @Transactional(readOnly = true)
-    public byte[] exportPdf(Long userId, Long workationId, BudgetType budgetType) {
-
+    public byte[] exportPdf(Long userId, Long workationId) {
         SettlementDocumentVO doc = buildDocument(userId, workationId,
                 SettlementErrorCode.NO_EXPENSE_TO_EXPORT);
 
@@ -117,7 +115,7 @@ public class SettlementServiceImpl implements SettlementService {
         return SettlementDocumentVO.builder()
                 .workation(workation)
                 .userName(PersonalDataCipher.decrypt(settlementMapper.selectUserName(userId)))
-                .cardLabels(settlementMapper.selectUsedCardLabels(workationId, BudgetType.WORK))
+                .companyName(settlementMapper.selectCompanyName(userId))                .cardLabels(settlementMapper.selectUsedCardLabels(workationId, BudgetType.WORK))
                 .summary(summaries.isEmpty()
                         ? SettlementSummaryDTO.of(BudgetType.WORK, Collections.emptyList())
                         : summaries.get(0))
@@ -170,6 +168,8 @@ public class SettlementServiceImpl implements SettlementService {
                 .startDate(workation.getStartDate())
                 .endDate(workation.getEndDate())
                 .totalDays(totalDays(workation.getStartDate(), workation.getEndDate()))
+                .businessBudgetTotal(workation.getBusinessBudgetTotal())
+                .personalBudgetTotal(workation.getPersonalBudgetTotal())
                 .status(workation.getStatus())
                 .settledAt(workation.getSettledAt())
                 .build();

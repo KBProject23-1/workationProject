@@ -17,6 +17,7 @@ public class SettlementDocumentVO {
 
     private final WorkationVO workation;
     private final String userName;
+    private final String companyName;
     private final List<String> cardLabels;
     private final SettlementSummaryDTO summary;
     private final List<WorkationExpenseVO> expenses;

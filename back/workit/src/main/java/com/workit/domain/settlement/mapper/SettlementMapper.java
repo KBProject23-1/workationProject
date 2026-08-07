@@ -36,6 +36,9 @@ public interface SettlementMapper {
     // 문서 상단 기본정보에 넣을 신청자 성명
     String selectUserName(@Param("userId") Long userId);
 
+    // 문서 상단 기본정보에 넣을 소속 회사명 (미입력 시 null)
+    String selectCompanyName(@Param("userId") Long userId);
+
     // 해당 워케이션 지출에 실제로 사용된 법인카드 목록
     // 카드가 여러 장이면 문서에 모두 표기한다
     List<String> selectUsedCardLabels(@Param("workationId") Long workationId,

@@ -110,6 +110,7 @@ public class SettlementPdfWriter {
         t.setWidths(new float[]{1.1f, 2.4f, 1.1f, 2.4f});
         t.setSpacingAfter(20f);
 
+        info(t, "회사명", doc.getCompanyName());
         info(t, "성명", doc.getUserName());
         info(t, "워케이션명", w.getTitle());
         info(t, "지역", w.getRegion() != null ? w.getRegion().getName() : "-");
