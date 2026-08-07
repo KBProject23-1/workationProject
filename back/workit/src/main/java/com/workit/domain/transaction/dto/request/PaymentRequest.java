@@ -13,4 +13,5 @@ public class PaymentRequest {
     private String paymentSourceType;  // WALLET, CARD
     private Long cardId;
     private String pinNumber;
+    private String deviceId;
 }
