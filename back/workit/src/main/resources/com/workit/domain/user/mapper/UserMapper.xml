@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.user.mapper.UserMapper">
+
+    <!--
+        내 프로필 조회 - 로그인 사용자 기본 정보 + 프로필 정보 함께 조회.
+        - users + user_profile LEFT JOIN — 프로필 미등록 회원은 nickname/company_name/profile_id 가 null
+        - email_encrypt/name_encrypt/phone_number_encrypt 는 AES 암호화본이므로 SELECT 가능 —
+          복호화는 Service Layer 에서만 수행 (knowledge.md: 원문 컬럼 없음, 복호화는 Service)
+        - status 도 함께 조회 — 탈퇴/차단 등 비활성 여부 판단은 Service (Mapper 비즈니스 로직 금지)
+        - 결과 없음 → Mapper 는 null 반환, USER_NOT_FOUND(404) 판단은 Service
+    -->
+    <select id="selectMyProfileByUserId"
+            resultType="com.workit.domain.user.vo.MyProfileVO">
+        SELECT u.id                  AS user_id,
+               u.status,
+               u.email_encrypt,
+               u.name_encrypt,
+               u.phone_number_encrypt,
+               up.id                 AS profile_id,
+               up.nickname,
+               up.company_name
+        FROM users u
+                 LEFT JOIN user_profile up ON up.user_id = u.id
+        WHERE u.id = #{userId}
+    </select>
+
+    <!--
+        프로필 최초 등록 - 닉네임 중복 확인.
+        - user_profile.nickname (UNIQUE) 대상 조회
+        - Mapper 는 조회만 담당 (중복 판단은 Service — DUPLICATE_NICKNAME)
+    -->
+    <select id="countByNickname" resultType="int">
+        SELECT COUNT(*)
+        FROM user_profile
+        WHERE nickname = #{nickname}
+    </select>
+
+    <!--
+        프로필 최초 등록 - user_profile insert (nickname/company_name 저장).
+        - nickname/companyName 은 Service Layer 에서 검증 후 전달 (Mapper 에서 검증 금지)
+        - useGeneratedKeys: 자동 생성 PK 를 UserProfileVO.id 로 채운다 (응답 profileId 용)
+        - created_at/updated_at 은 DB 기본값(CURRENT_TIMESTAMP) 사용
+    -->
+    <insert id="insertUserProfile"
+            parameterType="com.workit.domain.user.vo.UserProfileVO"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO user_profile (user_id, nickname, company_name)
+        VALUES (#{userId}, #{nickname}, #{companyName})
+    </insert>
+
+</mapper>
