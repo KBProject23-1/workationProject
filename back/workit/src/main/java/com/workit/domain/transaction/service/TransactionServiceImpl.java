@@ -13,6 +13,8 @@ import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.transaction.vo.TransactionReviewAction;
 import com.workit.domain.wallet.mapper.WalletMapper;
 import com.workit.domain.wallet.vo.WalletVO;
+import com.workit.domain.security.service.PinValidationResult;
+import com.workit.domain.security.service.PinValidator;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +41,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
     private final CardMapper cardMapper;
+    private final PinValidator pinValidator;
 
     @Override
     public PageResponseDTO<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
@@ -138,7 +141,7 @@ public class TransactionServiceImpl implements TransactionService {
     public PaymentResponse pay(Long userId, PaymentRequest request) {
 
         validatePaymentRequest(request);
-        validatePin(userId, request.getPinNumber());
+        validatePin(userId, request.getDeviceId(), request.getPinNumber());
 
         if ("WALLET".equals(request.getPaymentSourceType())) {
             return payWithWallet(userId, request);
@@ -233,12 +236,26 @@ public class TransactionServiceImpl implements TransactionService {
         if (request.getPinNumber() == null) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_REQUIRED);
         }
+        if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_DEVICE_ID_REQUIRED);
+        }
     }
 
-    private void validatePin(Long userId, String pinNumber) {
-        // TODO: user_device.pin_number 검증 로직 — 담당자 확인 후 구현
+    private void validatePin(Long userId, String deviceId, String pinNumber) {
         if (pinNumber == null || pinNumber.length() != 6) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_INVALID);
+        }
+
+        PinValidationResult result = pinValidator.validate(userId, deviceId, pinNumber);
+        switch (result) {
+            case DEVICE_NOT_REGISTERED:
+                throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_NOT_REGISTERED);
+            case LOCKED:
+                throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_LOCKED);
+            case MISMATCH:
+                throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_INVALID);
+            default:
+                // VALID
         }
     }
 

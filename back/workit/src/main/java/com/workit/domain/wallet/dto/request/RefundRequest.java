@@ -8,4 +8,5 @@ import java.math.BigDecimal;
 public class RefundRequest {
     private BigDecimal amount;
     private String pinNumber;
+    private String deviceId;
 }

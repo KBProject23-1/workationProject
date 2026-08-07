@@ -12,6 +12,8 @@ import com.workit.domain.wallet.dto.response.WalletResponse;
 import com.workit.domain.wallet.exception.WalletErrorCode;
 import com.workit.domain.wallet.mapper.WalletMapper;
 import com.workit.domain.wallet.vo.WalletVO;
+import com.workit.domain.security.service.PinValidationResult;
+import com.workit.domain.security.service.PinValidator;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -29,6 +31,7 @@ public class WalletServiceImpl implements WalletService {
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
     private final TransactionMapper transactionMapper;
+    private final PinValidator pinValidator;
 
     @Override
     public void createWallet(Long userId) {
@@ -53,7 +56,7 @@ public class WalletServiceImpl implements WalletService {
     public ChargeResponse charge(Long userId, ChargeRequest request) {
 
         validateChargeRequest(request);
-        validatePin(userId, request.getPinNumber());
+        validatePin(userId, request.getDeviceId(), request.getPinNumber());
 
         BigDecimal amount = request.getAmount();
 
@@ -86,7 +89,7 @@ public class WalletServiceImpl implements WalletService {
     public RefundResponse refund(Long userId, RefundRequest request) {
 
         validateRefundRequest(request);
-        validatePin(userId, request.getPinNumber());
+        validatePin(userId, request.getDeviceId(), request.getPinNumber());
 
         BigDecimal amount = request.getAmount();
 
@@ -128,6 +131,9 @@ public class WalletServiceImpl implements WalletService {
         if (request.getPinNumber() == null) {
             throw new BusinessException(WalletErrorCode.WALLET_PIN_REQUIRED);
         }
+        if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
+            throw new BusinessException(WalletErrorCode.WALLET_DEVICE_ID_REQUIRED);
+        }
 
         BigDecimal amount = request.getAmount();
         if (amount.compareTo(MIN_CHARGE_AMOUNT) < 0) {
@@ -145,6 +151,9 @@ public class WalletServiceImpl implements WalletService {
         if (request.getPinNumber() == null) {
             throw new BusinessException(WalletErrorCode.WALLET_PIN_REQUIRED);
         }
+        if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
+            throw new BusinessException(WalletErrorCode.WALLET_DEVICE_ID_REQUIRED);
+        }
 
         BigDecimal amount = request.getAmount();
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
@@ -155,10 +164,21 @@ public class WalletServiceImpl implements WalletService {
         }
     }
 
-    private void validatePin(Long userId, String pinNumber) {
-        // TODO: user_device.pin_number 검증 로직 — 담당자 확인 후 구현
+    private void validatePin(Long userId, String deviceId, String pinNumber) {
         if (pinNumber == null || pinNumber.length() != 6) {
             throw new BusinessException(WalletErrorCode.WALLET_PIN_INVALID);
+        }
+
+        PinValidationResult result = pinValidator.validate(userId, deviceId, pinNumber);
+        switch (result) {
+            case DEVICE_NOT_REGISTERED:
+                throw new BusinessException(WalletErrorCode.WALLET_PIN_NOT_REGISTERED);
+            case LOCKED:
+                throw new BusinessException(WalletErrorCode.WALLET_PIN_LOCKED);
+            case MISMATCH:
+                throw new BusinessException(WalletErrorCode.WALLET_PIN_INVALID);
+            default:
+                // VALID
         }
     }
 }

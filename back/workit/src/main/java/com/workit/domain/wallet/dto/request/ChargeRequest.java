@@ -9,4 +9,5 @@ public class ChargeRequest {
     private Long accountId;
     private BigDecimal amount;
     private String pinNumber;
+    private String deviceId;
 }
