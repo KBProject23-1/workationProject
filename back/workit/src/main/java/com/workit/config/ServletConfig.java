@@ -29,7 +29,7 @@ public class ServletConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
-                .allowedOrigins("http://localhost:5173")  // 프론트 개발서버 주소, 배포 시 실제 도메인으로 변경
+                .allowedOrigins("http://localhost:5173", "http://localhost:4173")  // FE 개발서버 주소, FE 성능 테스트 주소, 배포 시 실제 도메인으로 변경
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true);
