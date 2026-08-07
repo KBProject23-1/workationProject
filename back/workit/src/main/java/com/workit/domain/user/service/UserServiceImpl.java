@@ -1,6 +1,7 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
+import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
@@ -116,6 +117,96 @@ public class UserServiceImpl implements UserService {
         //    - insert 성공 후 userProfile 필드 값을 그대로 사용 (저장된 trim/정규화 값)
         return ProfileOnboardingResponseDTO.of(
                 userProfile.getId(), userId, userProfile.getNickname(), userProfile.getCompanyName());
+    }
+
+    @Override
+    @Transactional
+    // user_profile UPDATE(DB 쓰기) 하나의 작업이므로 트랜잭션 경계를 Service 에 둔다
+    // (onboardProfile 과 동일 — 검증은 전부 Service Layer 에서 수행)
+    public void updateProfile(Long userId, ProfileUpdateRequestDTO request) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인
+        //    - 없음/비활성(탈퇴/차단) 회원은 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404) 로 처리
+        //      (getMyProfile/onboardProfile 과 동일 정책)
+        MyProfileVO existing = userMapper.selectMyProfileByUserId(userId);
+        if (existing == null || !USER_STATUS_ACTIVE.equals(existing.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 프로필 존재 확인 — 최초 등록되지 않은 사용자는 수정 불가 → PROFILE_NOT_FOUND(404)
+        //    (docs: 내 프로필 정보 수정 — 프로필 미등록 시 수정 API 호출 불가)
+        if (existing.getProfileId() == null) {
+            throw new BusinessException(UserErrorCode.PROFILE_NOT_FOUND);
+        }
+
+        // 3. 요청 값 검증 — 수정 대상 필드 최소 1개, nickname 길이, companyName 길이 → INVALID_PROFILE_REQUEST(400)
+        //    - PATCH 방식: nickname 또는 companyName 중 하나만 전달 가능
+        //    - name/phoneNumber/email 은 요청에서 받지 않는다 (DTO 에 미존재 — 개인정보 수정 금지)
+        String nickname = validateUpdateRequest(request);
+        String companyName = isBlank(request.getCompanyName()) ? null : request.getCompanyName().trim();
+
+        // 4. nickname 중복 확인 (nickname 변경 요청이 있는 경우에만)
+        //    - 기존 nickname 과 동일하면 허용 (본인 유지)
+        //    - 다른 nickname 으로 변경 시 다른 사용자의 중복 조회 → DUPLICATE_NICKNAME(409)
+        if (nickname != null && !nickname.equals(existing.getNickname())
+                && userMapper.countByNicknameExcludingUserId(nickname, userId) > 0) {
+            throw new BusinessException(UserErrorCode.DUPLICATE_NICKNAME);
+        }
+
+        // 5. 전달된 필드만 동적 UPDATE — null 필드는 Mapper XML <if> 로 UPDATE 문에서 제외된다
+        //    - name/phoneNumber/email 은 수정 대상이 아니며 기존 PASS 인증 정보 유지
+        //    - 사전 중복 체크(SELECT)와 실제 UPDATE 사이의 Race Condition 은
+        //      DB UNIQUE 제약(nickname)이 최종 방어선 — DuplicateKeyException → 409 로 변환
+        UserProfileVO userProfile = new UserProfileVO();
+        userProfile.setUserId(userId);
+        userProfile.setNickname(nickname);
+        userProfile.setCompanyName(companyName);
+        try {
+            int updated = userMapper.updateUserProfile(userProfile);
+            // 조회(SELECT)와 수정(UPDATE) 사이 프로필이 소실된 경우(이론적) — 안전장치
+            if (updated == 0) {
+                throw new BusinessException(UserErrorCode.PROFILE_NOT_FOUND);
+            }
+        } catch (DuplicateKeyException e) {
+            throw mapDuplicateKeyException(e);
+        }
+
+        // 6. Audit 로그 — userId 만 기록 (닉네임/회사명 등 로그 출력 금지 — knowledge.md)
+        log.info("프로필 수정 성공 - userId={}", userId);
+    }
+
+    /**
+     * 프로필 수정 요청 값 검증 → INVALID_PROFILE_REQUEST(400)
+     * - javax.validation 미사용 환경 → Service Layer 에서 수행 (Auth 도메인과 동일)
+     * - 수정 대상 필드(nickname/companyName)가 최소 하나 이상 존재해야 함 (PATCH 특성)
+     * - nickname: 존재 시 저장될 값(trim 후) 기준 VARCHAR(50) 초과 금지
+     * - companyName: 존재 시 저장될 값(trim 후) 기준 VARCHAR(100) 초과 금지
+     *
+     * @return 수정 대상 nickname (미전달 시 null — UPDATE 제외 대상)
+     */
+    private String validateUpdateRequest(ProfileUpdateRequestDTO request) {
+        if (request == null) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
+        }
+
+        boolean hasNickname = !isBlank(request.getNickname());
+        boolean hasCompanyName = !isBlank(request.getCompanyName());
+
+        // PATCH: 수정 대상 필드가 최소 하나 이상 존재해야 함
+        //   (둘 다 null/빈 값이면 수정할 내용이 없음 → 400)
+        if (!hasNickname && !hasCompanyName) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
+        }
+
+        // DB 컬럼 길이 초과(VARCHAR(50)/VARCHAR(100))로 인한 500 오류 방지 — trim 후 길이 기준
+        if (hasNickname && request.getNickname().trim().length() > NICKNAME_MAX_LENGTH) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
+        }
+        if (hasCompanyName && request.getCompanyName().trim().length() > COMPANY_NAME_MAX_LENGTH) {
+            throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
+        }
+
+        return hasNickname ? request.getNickname().trim() : null;
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
+import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
@@ -342,6 +343,235 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.INVALID_PROFILE_REQUEST, ex.getErrorCode());
 
         verify(userMapper, never()).insertUserProfile(any(UserProfileVO.class));
+    }
+
+    // ---------- 프로필 수정 ----------
+
+    @Test
+    @DisplayName("프로필 수정 성공 - nickname 만 수정 (PATCH: companyName 은 유지)")
+    void updateProfile_nicknameOnly() {
+        // Given — 프로필 등록 완료 회원 (기존 nickname: 지갑대장홍길동, companyName: 6인조테크)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.updateUserProfile(any(UserProfileVO.class))).thenReturn(1);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("새로운닉네임");
+
+        // When
+        userService.updateProfile(501L, request);
+
+        // Then — nickname 만 전달되어 동적 UPDATE (companyName 은 null → XML <if> 로 제외)
+        ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
+        verify(userMapper).updateUserProfile(captor.capture());
+        UserProfileVO saved = captor.getValue();
+        assertEquals(501L, saved.getUserId());
+        assertEquals("새로운닉네임", saved.getNickname());
+        assertNull(saved.getCompanyName());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 성공 - companyName 만 수정 (PATCH: nickname 은 유지)")
+    void updateProfile_companyNameOnly() {
+        // Given — 프로필 등록 완료 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.updateUserProfile(any(UserProfileVO.class))).thenReturn(1);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setCompanyName("구글코리아");
+
+        // When
+        userService.updateProfile(501L, request);
+
+        // Then — companyName 만 전달되어 동적 UPDATE (nickname 은 null → XML <if> 로 제외)
+        ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
+        verify(userMapper).updateUserProfile(captor.capture());
+        UserProfileVO saved = captor.getValue();
+        assertEquals(501L, saved.getUserId());
+        assertNull(saved.getNickname());
+        assertEquals("구글코리아", saved.getCompanyName());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 성공 - nickname/companyName 둘 다 수정 + trim 적용")
+    void updateProfile_bothFields() {
+        // Given — 프로필 등록 완료 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.updateUserProfile(any(UserProfileVO.class))).thenReturn(1);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("  새닉네임  ");
+        request.setCompanyName("  구글코리아  ");
+
+        // When
+        userService.updateProfile(501L, request);
+
+        // Then — trim 후 두 필드 모두 전달
+        ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
+        verify(userMapper).updateUserProfile(captor.capture());
+        UserProfileVO saved = captor.getValue();
+        assertEquals("새닉네임", saved.getNickname());
+        assertEquals("구글코리아", saved.getCompanyName());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 성공 - 기존 nickname 과 동일한 값이면 중복 확인 없이 허용")
+    void updateProfile_sameNicknameAllowed() {
+        // Given — 프로필 등록 완료 회원 (기존 nickname: 지갑대장홍길동)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.updateUserProfile(any(UserProfileVO.class))).thenReturn(1);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("지갑대장홍길동"); // 기존 nickname 과 동일
+
+        // When
+        userService.updateProfile(501L, request);
+
+        // Then — 중복 조회 없이(본인 유지 허용) UPDATE 만 호출
+        verify(userMapper, never()).countByNicknameExcludingUserId(any(), any());
+        verify(userMapper).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - UPDATE 영향 row 0 (조회 후 프로필 소실) → PROFILE_NOT_FOUND")
+    void updateProfile_updateNoRows() {
+        // Given — 프로필 등록 완료 회원 + UPDATE 가 0 row 반환 (이론적 안전장치)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.updateUserProfile(any(UserProfileVO.class))).thenReturn(0);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("새로운닉네임");
+
+        // When & Then — 조회-수정 사이 프로필 소실로 간주
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.PROFILE_NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 사용자 없음 → USER_NOT_FOUND + update 미호출")
+    void updateProfile_userNotFound() {
+        // Given — 회원 없음
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(null);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("새로운닉네임");
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        // Then — 저장 Mapper 미호출
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 비활성 회원(탈퇴) → USER_NOT_FOUND + update 미호출")
+    void updateProfile_withdrawnUser() {
+        // Given — WITHDRAWN 상태 회원
+        MyProfileVO withdrawn = activeUserWithProfile();
+        withdrawn.setStatus("WITHDRAWN");
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(withdrawn);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("새로운닉네임");
+
+        // When & Then — 탈퇴 회원도 USER_NOT_FOUND 로 통일 처리
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 프로필 미등록 사용자 → PROFILE_NOT_FOUND + update 미호출")
+    void updateProfile_profileNotFound() {
+        // Given — ACTIVE 회원이지만 프로필 미등록 (profileId null)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("새로운닉네임");
+
+        // When & Then — 최초 등록 전 사용자는 수정 불가
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.PROFILE_NOT_FOUND, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - nickname 중복(다른 사용자 사용 중) → DUPLICATE_NICKNAME + update 미호출")
+    void updateProfile_duplicateNickname() {
+        // Given — 프로필 등록 완료 회원 + 변경 닉네임이 다른 사용자에게 사용 중
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.countByNicknameExcludingUserId("이미쓴닉네임", 501L)).thenReturn(1);
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname("이미쓴닉네임");
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.DUPLICATE_NICKNAME, ex.getErrorCode());
+
+        // Then — 중복 시 UPDATE 미호출
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - nickname 길이 초과(51자) → INVALID_PROFILE_REQUEST + update 미호출")
+    void updateProfile_nicknameTooLong() {
+        // Given — 프로필 등록 완료 회원 (사용자/프로필 확인 통과)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setNickname(buildString(51, 'a'));
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.INVALID_PROFILE_REQUEST, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - companyName 길이 초과(101자) → INVALID_PROFILE_REQUEST + update 미호출")
+    void updateProfile_companyNameTooLong() {
+        // Given — 프로필 등록 완료 회원 (사용자/프로필 확인 통과)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setCompanyName(buildString(101, 'b'));
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(501L, request));
+        assertEquals(UserErrorCode.INVALID_PROFILE_REQUEST, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 수정 대상 필드 없음(둘 다 null/빈 값) → INVALID_PROFILE_REQUEST + update 미호출")
+    void updateProfile_noFields() {
+        // Given — 프로필 등록 완료 회원 (사용자/프로필 확인 통과)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+
+        ProfileUpdateRequestDTO nullRequest = new ProfileUpdateRequestDTO();
+        ProfileUpdateRequestDTO blankRequest = new ProfileUpdateRequestDTO();
+        blankRequest.setNickname("   ");
+        blankRequest.setCompanyName("");
+
+        // When & Then — 모두 INVALID_PROFILE_REQUEST (PATCH: 최소 1개 필드 필요)
+        assertThrows(BusinessException.class, () -> userService.updateProfile(501L, null));
+        assertThrows(BusinessException.class, () -> userService.updateProfile(501L, nullRequest));
+        assertThrows(BusinessException.class, () -> userService.updateProfile(501L, blankRequest));
+
+        // Then — 저장 Mapper 미호출
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
     }
 
     /** 지정한 길이의 문자열 생성 — Java 8 호환 (String.repeat 미사용) */
