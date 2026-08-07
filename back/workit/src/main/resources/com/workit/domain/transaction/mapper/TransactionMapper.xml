@@ -129,12 +129,12 @@
 
     <insert id="insertTransaction" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO transactions (
-        user_id, wallet_id, bank_account_id, card_id, workation_id, reservation_id, merchant_id,
+        user_id, wallet_id, bank_account_id, card_id, workation_id, reservation_id, merchant_id, idempotency_key,
         payment_source_type, merchant_name, amount, transaction_type,
         category_assigned, is_business_expense, approved_number, transaction_number,
         status, approved_at, created_at
         ) VALUES (
-        #{userId}, #{walletId}, #{bankAccountId}, #{cardId}, #{workationId}, #{reservationId}, #{merchantId},
+        #{userId}, #{walletId}, #{bankAccountId}, #{cardId}, #{workationId}, #{reservationId}, #{merchantId}, #{idempotencyKey},
         #{paymentSourceType}, #{merchantName}, #{amount}, #{transactionType},
         #{categoryAssigned}, #{isBusinessExpense}, #{approvedNumber}, #{transactionNumber},
         #{status}, #{approvedAt}, NOW()

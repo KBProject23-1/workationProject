@@ -7,8 +7,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.workit.security.CurrentUserArgumentResolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.multipart.MultipartResolver;
 import org.springframework.web.multipart.support.StandardServletMultipartResolver;
@@ -17,7 +20,16 @@ import org.springframework.web.servlet.config.annotation.*;
 import java.util.List;
 
 @EnableWebMvc
-@ComponentScan(basePackages = {"com.workit.domain", "com.workit.exception"})
+// 컨트롤러/예외 어드바이스만 스캔 — 서비스/리포지토리는 RootConfig 에서만 생성되어야
+// @Transactional 프록시가 정상 적용된 단일 인스턴스가 컨트롤러에 주입된다 (RootConfig 참고)
+@ComponentScan(
+        basePackages = {"com.workit.domain", "com.workit.exception"},
+        useDefaultFilters = false,
+        includeFilters = @ComponentScan.Filter(
+                type = FilterType.ANNOTATION,
+                classes = {Controller.class, ControllerAdvice.class}
+        )
+)
 public class ServletConfig implements WebMvcConfigurer {
 
     @Override

@@ -18,6 +18,7 @@ import com.workit.domain.security.service.PinValidator;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -193,7 +194,11 @@ public class TransactionServiceImpl implements TransactionService {
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
         TransactionVO paymentTx = TransactionVO.forWalletPayment(userId, wallet, request);
-        transactionMapper.insertTransaction(paymentTx);
+        try {
+            transactionMapper.insertTransaction(paymentTx);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
+        }
 
         return PaymentResponse.ofWallet(paymentTx, updatedWallet.getBalance(), isAutoCharged, autoChargedAmount);
     }
@@ -212,7 +217,11 @@ public class TransactionServiceImpl implements TransactionService {
         String approvalNumber = TransactionNumberGenerator.generateApprovalNumber();
 
         TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense, approvalNumber);
-        transactionMapper.insertTransaction(paymentTx);
+        try {
+            transactionMapper.insertTransaction(paymentTx);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
+        }
 
         return PaymentResponse.ofCard(paymentTx);
     }
@@ -238,6 +247,9 @@ public class TransactionServiceImpl implements TransactionService {
         }
         if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_DEVICE_ID_REQUIRED);
+        }
+        if (request.getIdempotencyKey() == null || request.getIdempotencyKey().trim().isEmpty()) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_IDEMPOTENCY_KEY_REQUIRED);
         }
     }
 
