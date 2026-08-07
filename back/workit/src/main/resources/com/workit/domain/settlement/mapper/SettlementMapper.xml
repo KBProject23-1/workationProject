@@ -143,6 +143,11 @@
         SELECT name_encrypt FROM users WHERE id = #{userId}
     </select>
 
+    <!-- 회사명은 선택 입력이라 미입력 회원은 null -->
+    <select id="selectCompanyName" resultType="string">
+        SELECT company_name FROM user_profile WHERE user_id = #{userId}
+    </select>
+
     <!--
         지출에 실제로 쓰인 카드만 뽑는다.
         지갑에 등록만 하고 사용하지 않은 카드는 정산 문서에 표기할 이유가 없다.

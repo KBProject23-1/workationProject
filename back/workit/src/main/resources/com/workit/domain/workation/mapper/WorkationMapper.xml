@@ -163,7 +163,7 @@
         SELECT COUNT(*)
         FROM workation_expenses
         WHERE workation_id = #{workationId}
-          AND (spent_at &lt; #{startDate} OR spent_at &gt; #{endDate})
+          AND (DATE(spent_at) &lt; #{startDate} OR DATE(spent_at) &gt; #{endDate})
     </select>
 
     <delete id="deleteExpensesByWorkationId">

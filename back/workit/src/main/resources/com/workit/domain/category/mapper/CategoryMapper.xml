@@ -29,6 +29,7 @@
                ON ucl.expense_category_id = ec.id
               AND ucl.user_id = #{userId}
         WHERE ec.budget_type = #{budgetType}
+        AND (ec.user_id IS NULL OR ec.user_id = #{userId})
         ORDER BY ec.sort_order
     </select>
 
@@ -44,7 +45,8 @@
                ON ucl.expense_category_id = ec.id
               AND ucl.user_id = #{userId}
         WHERE b.workation_id = #{workationId}
-          AND b.budget_type = #{budgetType}
+        AND b.budget_type = #{budgetType}
+        AND (ec.user_id IS NULL OR ec.user_id = #{userId})
         ORDER BY ec.sort_order
     </select>
 
@@ -57,6 +59,7 @@
                ON ucl.expense_category_id = ec.id
               AND ucl.user_id = #{userId}
         WHERE ec.id = #{categoryId}
+        AND (ec.user_id IS NULL OR ec.user_id = #{userId})
     </select>
 
     <!--

@@ -49,10 +49,9 @@ public class SettlementController {
     public void settlementExcelGet(
             @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
-            @RequestParam(value = "budgetType", required = false) BudgetType budgetType,
             HttpServletResponse response) {
 
-        byte[] file = settlementService.exportExcel(userId, workationId, budgetType);
+        byte[] file = settlementService.exportExcel(userId, workationId);
         String fileName = settlementService.buildFileName(userId, workationId, "정산내역", "xlsx");
 
         writeFile(response, file, fileName, EXCEL_CONTENT_TYPE);
@@ -63,10 +62,9 @@ public class SettlementController {
     public void settlementPdfGet(
             @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
-            @RequestParam(value = "budgetType", required = false) BudgetType budgetType,
             HttpServletResponse response) {
 
-        byte[] file = settlementService.exportPdf(userId, workationId, budgetType);
+        byte[] file = settlementService.exportPdf(userId, workationId);
         String fileName = settlementService.buildFileName(userId, workationId, "증빙자료", "pdf");
 
         writeFile(response, file, fileName, MediaType.APPLICATION_PDF_VALUE);

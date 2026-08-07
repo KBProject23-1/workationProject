@@ -69,6 +69,8 @@ public class SettlementExcelWriter {
         sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, OVERVIEW_HEADERS.length - 1));
         r++;
 
+        r = info(sheet, s, r, "회사명", doc.getCompanyName() != null ? doc.getCompanyName() : "-");
+        r = info(sheet, s, r, "성명", doc.getUserName());
         r = info(sheet, s, r, "워케이션명", w.getTitle());
         r = info(sheet, s, r, "기간",
                 w.getStartDate().format(DATE) + " ~ " + w.getEndDate().format(DATE));
