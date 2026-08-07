@@ -3,6 +3,7 @@ package com.workit.domain.user.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
+import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -96,6 +98,12 @@ class UserControllerTest {
     private void stubOnboardProfileError(UserErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(userService).onboardProfile(anyLong(), any(ProfileOnboardingRequestDTO.class));
+    }
+
+    /** 프로필 수정 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubUpdateProfileError(UserErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(userService).updateProfile(anyLong(), any(ProfileUpdateRequestDTO.class));
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -258,6 +266,151 @@ class UserControllerTest {
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("PROFILE_ALREADY_EXISTS", json.get("errorCode").asText());
+    }
+
+    // ---------- 프로필 수정 ----------
+
+    @Test
+    @DisplayName("프로필 수정 성공 - 200 + SUCCESS + 수정 완료 메시지")
+    void updateProfile_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + nickname/companyName 동시 수정 요청
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"새로운닉네임\",\"companyName\":\"구글코리아\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: data null + 수정 완료 메시지
+        //   (CommonResponse 는 NON_NULL 직렬화 — data 가 null 이면 JSON 에서 제외됨)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("프로필 정보가 성공적으로 수정되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+
+        // Controller 는 userId 와 요청을 Service 로 위임만 한다 (DB 접근/검증 금지)
+        verify(userService).updateProfile(eq(501L), any(ProfileUpdateRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 성공 - nickname 만 전달 (PATCH 부분 수정)")
+    void updateProfile_nicknameOnly() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + nickname 만 수정 요청
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"새로운닉네임\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        verify(userService).updateProfile(eq(501L), any(ProfileUpdateRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 성공 - companyName 만 전달 (PATCH 부분 수정)")
+    void updateProfile_companyNameOnly() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + companyName 만 수정 요청
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"companyName\":\"구글코리아\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        verify(userService).updateProfile(eq(501L), any(ProfileUpdateRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 잘못된 요청(수정 필드 없음) → 400 + INVALID_PROFILE_REQUEST")
+    void updateProfile_invalidRequest() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 요청 검증 실패를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubUpdateProfileError(UserErrorCode.INVALID_PROFILE_REQUEST);
+
+        // When — 수정 대상 필드 없는 빈 본문
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PROFILE_REQUEST", json.get("errorCode").asText());
+        assertEquals("프로필 정보를 확인해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 프로필 미등록 → 404 + PROFILE_NOT_FOUND")
+    void updateProfile_profileNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 프로필 미등록을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubUpdateProfileError(UserErrorCode.PROFILE_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"새로운닉네임\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("PROFILE_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 닉네임 중복 → 409 + DUPLICATE_NICKNAME")
+    void updateProfile_duplicateNickname() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 닉네임 중복을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubUpdateProfileError(UserErrorCode.DUPLICATE_NICKNAME);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"이미쓴닉네임\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_NICKNAME", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void updateProfile_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nickname\":\"새로운닉네임\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(userService, never()).updateProfile(anyLong(), any(ProfileUpdateRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
     }
 
     @Test
