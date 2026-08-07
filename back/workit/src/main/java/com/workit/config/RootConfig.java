@@ -13,11 +13,14 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.web.bind.annotation.ControllerAdvice;
 
 import javax.sql.DataSource;
 
@@ -27,7 +30,15 @@ import javax.sql.DataSource;
         "classpath:/application-secret.properties"
 })
 @MapperScan(basePackages = {"com.workit.domain.**.mapper"})
-@ComponentScan(basePackages = {"com.workit.domain", "com.workit.exception"})
+// 컨트롤러/예외 어드바이스는 Servlet(자식) 컨텍스트 전용 — 여기서 스캔하면 서비스 빈이 두 컨텍스트에 중복 생성되어
+// @Transactional 프록시가 안 걸린 자식 컨텍스트 인스턴스가 컨트롤러에 주입되는 문제가 있었음 (ServletConfig 참고)
+@ComponentScan(
+        basePackages = {"com.workit.domain", "com.workit.exception"},
+        excludeFilters = @ComponentScan.Filter(
+                type = FilterType.ANNOTATION,
+                classes = {Controller.class, ControllerAdvice.class}
+        )
+)
 
 @EnableTransactionManagement
 @EnableScheduling
