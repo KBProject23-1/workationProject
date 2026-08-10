@@ -2,6 +2,7 @@ package com.workit.domain.transaction.vo;
 
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.card.vo.CardVO;
+import com.workit.domain.transaction.constant.TransactionStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.util.TransactionNumberGenerator;
 import com.workit.domain.wallet.vo.WalletVO;
@@ -29,6 +30,7 @@ public class TransactionVO {
     private String categoryAssigned;
     private Boolean isBusinessExpense;
     private String approvedNumber;
+    private String pgTransactionId;
     private String transactionNumber;
     private String status;
     private LocalDateTime approvedAt;
@@ -49,7 +51,7 @@ public class TransactionVO {
     private String cardClassification;
 
     public static TransactionVO forCardPayment(Long userId, CardVO card, PaymentRequest request,
-                                               boolean isBusinessExpense, String approvalNumber) {
+                                               boolean isBusinessExpense) {
         TransactionVO vo = new TransactionVO();
         vo.setUserId(userId);
         vo.setCardId(card.getId());
@@ -61,10 +63,9 @@ public class TransactionVO {
         vo.setAmount(request.getAmount());
         vo.setTransactionType("PAYMENT");
         vo.setIsBusinessExpense(isBusinessExpense);
-        vo.setApprovedNumber(approvalNumber);
         vo.setTransactionNumber(TransactionNumberGenerator.generateTransactionNumber());
-        vo.setStatus("PAID");
-        vo.setApprovedAt(LocalDateTime.now());
+        // 상태머신: REQUESTED 로 생성 → PG 승인 시 AUTHORIZED(+승인번호/PG거래ID) → 매입 시 PAID
+        vo.setStatus(TransactionStatus.REQUESTED.name());
         return vo;
     }
 
@@ -81,8 +82,8 @@ public class TransactionVO {
         vo.setTransactionType("PAYMENT");
         vo.setIsBusinessExpense(false);
         vo.setTransactionNumber(TransactionNumberGenerator.generateTransactionNumber());
-        vo.setStatus("PAID");
-        vo.setApprovedAt(LocalDateTime.now());
+        // 상태머신: REQUESTED 로 생성 후 서비스에서 PAID 로 전이
+        vo.setStatus(TransactionStatus.REQUESTED.name());
         return vo;
     }
 
@@ -114,8 +115,8 @@ public class TransactionVO {
         vo.setTransactionType("DEPOSIT");
         vo.setIsBusinessExpense(false);
         vo.setTransactionNumber(TransactionNumberGenerator.generateTransactionNumber());
-        vo.setStatus("PAID");
-        vo.setApprovedAt(LocalDateTime.now());
+        // 상태머신: REQUESTED 로 생성한 뒤 잔액이동/원장기입 성공 시 서비스에서 PAID 로 전이. approvedAt 은 승인 시점에 채움.
+        vo.setStatus(TransactionStatus.REQUESTED.name());
         return vo;
     }
 
@@ -131,8 +132,8 @@ public class TransactionVO {
         vo.setTransactionType("WITHDRAWAL");
         vo.setIsBusinessExpense(false);
         vo.setTransactionNumber(TransactionNumberGenerator.generateTransactionNumber());
-        vo.setStatus("PAID");
-        vo.setApprovedAt(LocalDateTime.now());
+        // 상태머신: REQUESTED 로 생성한 뒤 잔액이동/원장기입 성공 시 서비스에서 PAID 로 전이.
+        vo.setStatus(TransactionStatus.REQUESTED.name());
         return vo;
     }
 }

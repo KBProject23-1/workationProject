@@ -28,7 +28,11 @@ public enum TransactionErrorCode implements ErrorCode {
     TRANSACTION_WALLET_NOT_FOUND(HttpStatus.NOT_FOUND, "지갑이 존재하지 않습니다."),
     TRANSACTION_PRIMARY_ACCOUNT_NOT_FOUND_FOR_AUTO_CHARGE(HttpStatus.BAD_REQUEST, "연동된 주 계좌가 없어 자동충전이 불가합니다."),
     TRANSACTION_INSUFFICIENT_ACCOUNT_BALANCE(HttpStatus.BAD_REQUEST, "계좌 잔액이 부족합니다."),
-    TRANSACTION_INSUFFICIENT_WALLET_BALANCE(HttpStatus.BAD_REQUEST, "지갑 잔액이 부족합니다.");
+    TRANSACTION_INSUFFICIENT_WALLET_BALANCE(HttpStatus.BAD_REQUEST, "지갑 잔액이 부족합니다."),
+
+    // 카드결제 PG(외부 결제망) 관련
+    TRANSACTION_PG_AUTH_FAILED(HttpStatus.BAD_GATEWAY, "카드 결제 승인에 실패했습니다. 잠시 후 다시 시도해주세요."),
+    TRANSACTION_PG_CAPTURE_FAILED(HttpStatus.BAD_GATEWAY, "카드 결제 매입에 실패했습니다. 승인이 취소되었습니다.");
 
     private final HttpStatus status;
     private final String message;

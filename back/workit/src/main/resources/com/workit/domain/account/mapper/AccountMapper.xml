@@ -115,13 +115,13 @@
     <update id="decreaseBalance">
         UPDATE bank_accounts
         SET balance = balance - #{amount}, balance_updated_at = NOW()
-        WHERE id = #{accountId} AND balance >= #{amount} AND is_deleted = 0 AND #{amount} > 0
+        WHERE id = #{accountId} AND user_id = #{userId} AND balance >= #{amount} AND is_deleted = 0 AND #{amount} > 0
     </update>
 
     <update id="increaseBalance">
         UPDATE bank_accounts
         SET balance = balance + #{amount}, balance_updated_at = NOW()
-        WHERE id = #{accountId} AND is_deleted = 0 AND #{amount} > 0
+        WHERE id = #{accountId} AND user_id = #{userId} AND is_deleted = 0 AND #{amount} > 0
     </update>
 
     <select id="findPrimaryAccount" resultMap="BankAccountResultMap">

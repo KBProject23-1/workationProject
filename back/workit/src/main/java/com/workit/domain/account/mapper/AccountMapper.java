@@ -39,10 +39,10 @@ public interface AccountMapper {
     // 계좌 삭제
     void deleteAccount(@Param("accountId") Long accountId, @Param("userId") Long userId);
 
-    // 계좌 잔액 변경
-    int decreaseBalance(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
+    // 계좌 잔액 변경 (소유자 스코프: user_id 로 자가 스코프해 IDOR 방어 심화)
+    int decreaseBalance(@Param("accountId") Long accountId, @Param("userId") Long userId, @Param("amount") BigDecimal amount);
 
-    int  increaseBalance(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
+    int  increaseBalance(@Param("accountId") Long accountId, @Param("userId") Long userId, @Param("amount") BigDecimal amount);
 
     BankAccountVO findPrimaryAccount(@Param("userId") Long userId);
 }
