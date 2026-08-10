@@ -134,6 +134,17 @@ public interface AuthMapper {
     LoginUserVO findUserById(Long userId);
 
     /**
+     * 비밀번호 변경 - 로그인 사용자의 현재 비밀번호 hash 조회
+     * - 현재 비밀번호 BCrypt 대조용 — password_hash(해시) 만 조회한다
+     * - BCrypt 는 단방향 해시이므로 조회 결과를 그대로 matches() 에 사용하며 원문을 복호화하지 않는다
+     *   (selectPinHashesByUserId 와 동일 원칙 — knowledge.md: 비밀번호 원문 조회 금지)
+     * - user_auth 행이 없는 회원(회원 탈퇴 등)이면 null 반환 (USER_NOT_FOUND 판단은 Service)
+     *
+     * @return 비밀번호 BCrypt 해시, user_auth 가 없으면 null
+     */
+    String selectPasswordHashByUserId(@Param("userId") Long userId);
+
+    /**
      * 비밀번호 재설정 - user_auth.password_hash 갱신
      * - BCrypt 해시는 Service Layer 에서 생성 후 전달한다 (Mapper 에서 암호화 금지)
      * - updated_at 은 DB 기본값 정책과 동일하게 CURRENT_TIMESTAMP 로 갱신

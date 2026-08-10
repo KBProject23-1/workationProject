@@ -94,6 +94,18 @@ public enum AuthErrorCode implements ErrorCode {
     // (docs: WEAK_PASSWORD — 프론트 1차 검증을 통과하지 못한 약한 비밀번호)
     WEAK_PASSWORD(HttpStatus.UNPROCESSABLE_ENTITY, "비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다."),
 
+    // 비밀번호 변경 - 요청 값 검증 실패 (currentPassword/newPassword 누락·빈 값) → 400
+    // (signup/login 의 INVALID_*_REQUEST 규약과 동일 — docs: INVALID_REQUEST "필수 입력값을 확인해 주세요.")
+    INVALID_PASSWORD_CHANGE_REQUEST(HttpStatus.BAD_REQUEST, "필수 입력값을 확인해 주세요."),
+
+    // 비밀번호 변경 - 현재 비밀번호 불일치 → 400
+    // (docs: AUTH_INVALID_PASSWORD — "현재 비밀번호가 올바르지 않습니다.")
+    AUTH_INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다."),
+
+    // 비밀번호 변경 - 신규 비밀번호가 현재 비밀번호와 동일 → 400
+    // (docs: AUTH_SAME_PASSWORD — "현재 비밀번호와 다른 비밀번호를 입력해 주세요.")
+    AUTH_SAME_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호와 다른 비밀번호를 입력해 주세요."),
+
     // PIN 번호 최초 설정 - 요청 값 검증 실패 (pinNumber/deviceId/deviceName 누락·빈 값) → 400
     // (signup/login 의 INVALID_*_REQUEST 규약과 동일 — 필수 값 누락은 Service Layer 에서 차단)
     INVALID_PIN_SETUP_REQUEST(HttpStatus.BAD_REQUEST, "PIN 설정 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),

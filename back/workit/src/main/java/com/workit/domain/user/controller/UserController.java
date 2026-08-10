@@ -1,5 +1,7 @@
 package com.workit.domain.user.controller;
 
+import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
+import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -28,8 +30,13 @@ public class UserController {
 
     private final UserService userService;
 
-    public UserController(UserService userService) {
+    // 비밀번호 변경은 인증(Password 검증/변경, Refresh Token 폐기)의 책임이므로
+    // Auth Domain 의 AuthService 로 위임한다 (knowledge.md: Auth Domain 책임 — User Domain 에 인증 로직 금지)
+    private final AuthService authService;
+
+    public UserController(UserService userService, AuthService authService) {
         this.userService = userService;
+        this.authService = authService;
     }
 
     // 1.1 내 프로필 조회
@@ -81,5 +88,25 @@ public class UserController {
 
         userService.updateProfile(userId, request);
         return GlobalResponseFactory.success(null, "프로필 정보가 성공적으로 수정되었습니다.");
+    }
+
+    // 1.4 내 비밀번호 변경 (로그인 사용자 전용 — Auth 도메인 책임)
+    // - docs: 유저 개인정보 재설정 - 비밀번호 변경 (PATCH /api/v1/users/me/password)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 현재 비밀번호 재입력 본인 인증/BCrypt 검증·암호화/DB 갱신/Refresh Token 전체 폐기/Audit 로그는
+    //   AuthService(changePassword) 에서 수행한다 — User Domain 에 인증 로직을 구현하지 않는다
+    //   (knowledge.md: Auth Domain 이 Password 검증/변경을 담당)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (암호화/DB/Redis 접근 금지)
+    // - 현재 비밀번호 불일치: AUTH_INVALID_PASSWORD(400), 동일 비밀번호: AUTH_SAME_PASSWORD(400),
+    //   약한 비밀번호: WEAK_PASSWORD(422), 요청 값 누락: INVALID_PASSWORD_CHANGE_REQUEST(400),
+    //   회원 없음: USER_NOT_FOUND(404)
+    @PatchMapping("/me/password")
+    public ResponseEntity<CommonResponse<Void>> changePassword(
+            @CurrentUser Long userId,
+            @RequestBody ChangePasswordRequestDTO request) {
+
+        authService.changePassword(userId, request);
+        return GlobalResponseFactory.success(null, "비밀번호가 성공적으로 변경되었습니다.");
     }
 }

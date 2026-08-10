@@ -1,6 +1,7 @@
 package com.workit.domain.auth.service;
 
 import com.workit.domain.auth.LoginType;
+import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
@@ -680,6 +681,76 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
+    // 비밀번호 변경은 user_auth UPDATE(DB 쓰기) + Redis Refresh Token 폐기의 조합이므로
+    // resetPassword 와 동일하게 트랜잭션 경계를 Service 에 두고, Redis 폐기는 DB 커밋 확정 후(afterCommit) 수행한다
+    public void changePassword(Long userId, ChangePasswordRequestDTO request) {
+
+        // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
+        //    - currentPassword/newPassword 누락·빈 값 → INVALID_PASSWORD_CHANGE_REQUEST(400)
+        //      (docs: INVALID_REQUEST "필수 입력값을 확인해 주세요.")
+        if (request == null
+                || isBlank(request.getCurrentPassword())
+                || isBlank(request.getNewPassword())) {
+            throw new BusinessException(AuthErrorCode.INVALID_PASSWORD_CHANGE_REQUEST);
+        }
+
+        // 2. JWT 로그인 사용자 조회 + 상태 확인 (users.status)
+        //    - 탈퇴/차단/미존재 회원은 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404) 로 처리
+        //      (setupPin/refreshAccessToken 과 동일 정책 — docs: 404 USER_NOT_FOUND)
+        LoginUserVO user = authMapper.findUserById(userId);
+        if (user == null || !USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 현재 비밀번호 hash(BCrypt) 조회 — 본인 인증용
+        //    - BCrypt 는 단방향 해시이므로 원문을 조회/복호화하지 않고 해시를 그대로 matches() 에 사용한다
+        //      (knowledge.md: 비밀번호 원문 저장 금지, 검증은 BCrypt matches)
+        String currentPasswordHash = authMapper.selectPasswordHashByUserId(userId);
+        if (currentPasswordHash == null) {
+            // user_auth 행이 없는 회원(회원 탈퇴 등 비정상 상태) → 인증 정보 없음
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 4. 현재 비밀번호 BCrypt 검증 — 본인 인증
+        //    - 불일치 → AUTH_INVALID_PASSWORD(400) (docs: "현재 비밀번호가 올바르지 않습니다.")
+        if (!PasswordEncryptor.matches(request.getCurrentPassword(), currentPasswordHash)) {
+            throw new BusinessException(AuthErrorCode.AUTH_INVALID_PASSWORD);
+        }
+
+        // 5. 신규 비밀번호 정책 검증 — 영문/숫자/특수문자 포함 8자 이상 (docs: WEAK_PASSWORD 422)
+        //    - resetPassword 와 동일한 정책 재사용 (프로젝트 공통 비밀번호 규칙)
+        validatePasswordPolicy(request.getNewPassword());
+
+        // 6. 신규 비밀번호가 현재 비밀번호와 동일한지 확인 (docs: AUTH_SAME_PASSWORD 400)
+        //    - BCrypt matches() 검증이므로 비밀번호 원문을 조회/복호화하지 않는다 (원문 저장 금지)
+        //    - resetPin 의 SAME_AS_CURRENT_PIN 대조 방식과 동일 패턴
+        if (PasswordEncryptor.matches(request.getNewPassword(), currentPasswordHash)) {
+            throw new BusinessException(AuthErrorCode.AUTH_SAME_PASSWORD);
+        }
+
+        // 7. 신규 비밀번호 BCrypt 암호화 — 원문 저장/복호화 금지 (knowledge.md: 비밀번호는 BCrypt 단방향 해시)
+        String newPasswordHash = PasswordEncryptor.encode(request.getNewPassword());
+
+        // 8. user_auth.password_hash 갱신
+        //    - 갱신 행 수가 0 이면 해당 userId 의 인증 정보가 없다(회원 탈퇴 등) → 변경 불가
+        int updated = authMapper.updatePasswordHash(userId, newPasswordHash);
+        if (updated == 0) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 9. 기존 Refresh Token 전체 폐기 (knowledge.md: 비밀번호 변경 후 기존 Refresh Token 전체 폐기)
+        //    - Redis(refresh:token:{userId}) 삭제 — DB 커밋 확정 후(afterCommit) 수행
+        //      (트랜잭션 롤백 시 세션이 유지되어 사용자가 재시도할 수 있어야 한다)
+        //    - Access Token 은 Stateless 이므로 만료까지 유지된다 (JWT 구조 변경/신규 발급 없음)
+        deleteRefreshTokenAfterCommit(userId);
+
+        // 10. Audit 로그 (knowledge.md Audit Log Policy: 비밀번호 변경 기록 대상)
+        //     - userId 는 민감정보가 아니며, 비밀번호 원문/해시는 로그에 포함하지 않는다
+        log.info("비밀번호 변경 성공 - userId={}", userId);
+    }
+
+    @Override
+    @Transactional
     // user_device INSERT(DB 쓰기) 하나의 작업이므로 단순 트랜잭션 경계를 Service 에 둔다
     // (signup 과 동일 — 검증/암호화는 전부 Service Layer 에서 수행)
     public void setupPin(Long userId, PinSetupRequestDTO request) {
@@ -854,6 +925,25 @@ public class AuthServiceImpl implements AuthService {
     private void validatePasswordPolicy(String newPassword) {
         if (newPassword == null || !PASSWORD_POLICY_PATTERN.matcher(newPassword).matches()) {
             throw new BusinessException(AuthErrorCode.WEAK_PASSWORD);
+        }
+    }
+
+    /**
+     * DB 트랜잭션이 커밋된 후(afterCommit)에만 사용자의 Refresh Token 세션을 삭제한다.
+     * - 비밀번호 변경 시 기존 Refresh Token 전체 폐기 — 트랜잭션이 진행 중일 때 Redis 를 지우면
+     *   롤백 시 세션이 사라진 상태로 남아 사용자가 재시도할 수 없게 된다.
+     * - 실제 트랜잭션 밖(테스트 등)에서는 즉시 삭제한다 (deletePasswordResetTokenAfterCommit 과 동일 패턴).
+     */
+    private void deleteRefreshTokenAfterCommit(Long userId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refreshTokenStore.delete(userId);
+                }
+            });
+        } else {
+            refreshTokenStore.delete(userId);
         }
     }
 
