@@ -49,6 +49,11 @@ public interface TransactionMapper {
                      @Param("status") String status,
                      @Param("approvedAt") java.time.LocalDateTime approvedAt);
 
+    // PG 승인(authorize) 성공 반영: pg_transaction_id / approved_number 기록 + AUTHORIZED 로 전이
+    int applyPgAuthorization(@Param("transactionId") Long transactionId,
+                             @Param("pgTransactionId") String pgTransactionId,
+                             @Param("approvedNumber") String approvedNumber);
+
     // 취소 대상 조회
     TransactionVO findTransactionForCancel(@Param("transactionId") Long transactionId,
                                            @Param("userId") Long userId);

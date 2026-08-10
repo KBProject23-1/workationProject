@@ -30,6 +30,7 @@ public class TransactionVO {
     private String categoryAssigned;
     private Boolean isBusinessExpense;
     private String approvedNumber;
+    private String pgTransactionId;
     private String transactionNumber;
     private String status;
     private LocalDateTime approvedAt;
@@ -50,7 +51,7 @@ public class TransactionVO {
     private String cardClassification;
 
     public static TransactionVO forCardPayment(Long userId, CardVO card, PaymentRequest request,
-                                               boolean isBusinessExpense, String approvalNumber) {
+                                               boolean isBusinessExpense) {
         TransactionVO vo = new TransactionVO();
         vo.setUserId(userId);
         vo.setCardId(card.getId());
@@ -62,9 +63,8 @@ public class TransactionVO {
         vo.setAmount(request.getAmount());
         vo.setTransactionType("PAYMENT");
         vo.setIsBusinessExpense(isBusinessExpense);
-        vo.setApprovedNumber(approvalNumber);
         vo.setTransactionNumber(TransactionNumberGenerator.generateTransactionNumber());
-        // 상태머신: REQUESTED 로 생성 후 서비스에서 PAID 로 전이 (item 2 에서 AUTHORIZED 중간상태 추가 예정)
+        // 상태머신: REQUESTED 로 생성 → PG 승인 시 AUTHORIZED(+승인번호/PG거래ID) → 매입 시 PAID
         vo.setStatus(TransactionStatus.REQUESTED.name());
         return vo;
     }

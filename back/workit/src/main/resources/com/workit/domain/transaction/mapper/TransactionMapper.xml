@@ -18,6 +18,7 @@
         <result column="category_assigned" property="categoryAssigned"/>
         <result column="is_business_expense" property="isBusinessExpense"/>
         <result column="approved_number" property="approvedNumber"/>
+        <result column="pg_transaction_id" property="pgTransactionId"/>
         <result column="transaction_number" property="transactionNumber"/>
         <result column="status" property="status"/>
         <result column="approved_at" property="approvedAt"/>
@@ -140,6 +141,16 @@
         #{status}, #{approvedAt}, NOW()
         )
     </insert>
+
+    <!-- PG 승인 반영: PG 거래ID/승인번호 기록 + AUTHORIZED 로 전이 -->
+    <update id="applyPgAuthorization">
+        UPDATE transactions
+        SET pg_transaction_id = #{pgTransactionId},
+            approved_number   = #{approvedNumber},
+            status            = 'AUTHORIZED',
+            updated_at        = NOW()
+        WHERE id = #{transactionId}
+    </update>
 
     <!-- 상태 전이. approved_at 은 전달된 값이 있을 때만 갱신(승인 성공 시점) -->
     <update id="updateStatus">

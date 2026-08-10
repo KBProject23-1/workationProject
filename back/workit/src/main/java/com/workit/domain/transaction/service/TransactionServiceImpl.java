@@ -10,8 +10,10 @@ import com.workit.domain.transaction.constant.TransactionStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.transaction.exception.TransactionErrorCode;
+import com.workit.domain.transaction.gateway.PaymentGatewayClient;
+import com.workit.domain.transaction.gateway.PgAuthResult;
+import com.workit.domain.transaction.gateway.PgException;
 import com.workit.domain.transaction.mapper.TransactionMapper;
-import com.workit.domain.transaction.util.TransactionNumberGenerator;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.transaction.vo.TransactionReviewAction;
 import com.workit.domain.wallet.mapper.WalletMapper;
@@ -46,6 +48,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final AccountMapper accountMapper;
     private final CardMapper cardMapper;
     private final LedgerEntryMapper ledgerEntryMapper;
+    private final PaymentGatewayClient paymentGatewayClient;
     private final PinValidator pinValidator;
 
     @Override
@@ -240,24 +243,43 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         boolean isBusinessExpense = "WORK".equals(card.getCardType());
-        String approvalNumber = TransactionNumberGenerator.generateApprovalNumber();
+        BigDecimal amount = request.getAmount();
 
         // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409)
-        TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense, approvalNumber);
+        TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense);
         try {
             transactionMapper.insertTransaction(paymentTx);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
         }
 
-        // 2) 원장: CARD DEBIT / MERCHANT CREDIT. 카드는 외부 발급사 자금이라 내부 잔액 이동 없음 -> balance_after null
-        BigDecimal amount = request.getAmount();
+        // 2) PG 승인(authorize) — 실패 시 트랜잭션 롤백(거래 미생성). 승인번호/PG거래ID 기록 + AUTHORIZED 전이
+        PgAuthResult auth;
+        try {
+            auth = paymentGatewayClient.authorize(userId, card.getId(), amount, request.getMerchantName());
+        } catch (PgException e) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_AUTH_FAILED);
+        }
+        transactionMapper.applyPgAuthorization(paymentTx.getId(), auth.getPgTransactionId(), auth.getApprovalNumber());
+        paymentTx.setPgTransactionId(auth.getPgTransactionId());
+        paymentTx.setApprovedNumber(auth.getApprovalNumber());
+        paymentTx.setStatus(TransactionStatus.AUTHORIZED.name());
+
+        // 3) PG 매입(capture) — 실패 시 승인 취소(cancel)로 보상 후 롤백
+        try {
+            paymentGatewayClient.capture(auth.getPgTransactionId(), amount);
+        } catch (PgException e) {
+            paymentGatewayClient.cancel(auth.getPgTransactionId());
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_CAPTURE_FAILED);
+        }
+
+        // 4) 원장: CARD DEBIT / MERCHANT CREDIT. 카드는 외부 발급사 자금이라 내부 잔액 이동 없음 -> balance_after null
         ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
                 paymentTx.getId(), 1, LedgerEntryVO.ACCOUNT_CARD, card.getId(), amount, null));
         ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
                 paymentTx.getId(), 2, LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
 
-        // 3) PAID 로 전이 (item 2 에서 REQUESTED -> AUTHORIZED -> PAID 로 확장 예정)
+        // 5) PAID 로 전이 (매입 완료)
         LocalDateTime approvedAt = LocalDateTime.now();
         transactionMapper.updateStatus(paymentTx.getId(), TransactionStatus.PAID.name(), approvedAt);
         paymentTx.setStatus(TransactionStatus.PAID.name());
