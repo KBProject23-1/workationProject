@@ -43,6 +43,16 @@ public interface WorkationMapper {
                                  @Param("startDate") LocalDate startDate,
                                  @Param("endDate") LocalDate endDate);
 
+    // 기간을 벗어나는 지출 중 수기 등록 건수. 삭제하면 복구할 수 없어 따로 센다
+    int countManualExpensesOutOfPeriod(@Param("workationId") Long workationId,
+                                       @Param("startDate") LocalDate startDate,
+                                       @Param("endDate") LocalDate endDate);
+
+    // 기간을 벗어나는 지출을 워케이션에서 분리. transactions 는 남으므로 앱 결제는 재유입된다
+    int deleteExpensesOutOfPeriod(@Param("workationId") Long workationId,
+                                  @Param("startDate") LocalDate startDate,
+                                  @Param("endDate") LocalDate endDate);
+
     // 워케이션 삭제 (하위 데이터 정리 후 호출)
     int deleteWorkation(@Param("id") Long id);
 

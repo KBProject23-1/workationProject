@@ -166,6 +166,30 @@
           AND (DATE(spent_at) &lt; #{startDate} OR DATE(spent_at) &gt; #{endDate})
     </select>
 
+    <!--
+        기간을 벗어나는 지출 중 수기 등록 건수.
+        앱 결제는 transactions 가 남아 있어 기간을 되돌리면 다시 유입되지만,
+        수기 등록은 지우면 복구할 수 없어 사용자에게 따로 알려야 한다.
+    -->
+    <select id="countManualExpensesOutOfPeriod" resultType="int">
+        SELECT COUNT(*)
+        FROM workation_expenses
+        WHERE workation_id = #{workationId}
+          AND transaction_id IS NULL
+          AND (DATE(spent_at) &lt; #{startDate} OR DATE(spent_at) &gt; #{endDate})
+    </select>
+
+    <!--
+        기간 축소 시 벗어나는 지출을 워케이션에서 떼어낸다.
+        workation_expenses 행만 지우고 transactions 는 건드리지 않으므로
+        나중에 기간을 다시 늘리면 유입 쿼리의 NOT EXISTS 조건에 걸려 자동으로 되돌아온다.
+    -->
+    <delete id="deleteExpensesOutOfPeriod">
+        DELETE FROM workation_expenses
+        WHERE workation_id = #{workationId}
+          AND (DATE(spent_at) &lt; #{startDate} OR DATE(spent_at) &gt; #{endDate})
+    </delete>
+
     <delete id="deleteExpensesByWorkationId">
         DELETE FROM workation_expenses
         WHERE workation_id = #{workationId}

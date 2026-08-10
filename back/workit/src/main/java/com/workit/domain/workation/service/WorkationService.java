@@ -17,7 +17,9 @@ public interface WorkationService {
     PageResponseDTO<WorkationHistoryResponseDTO> getWorkationHistory(Long userId, int page, int size);
 
     // 1.4 워케이션 수정
-    WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto);
+    // force = true 면 기간을 벗어나게 되는 지출을 워케이션에서 분리하고 진행한다
+    WorkationResponseDTO modifyWorkation(Long userId, Long workationId,
+                                         WorkationUpdateRequestDTO dto, boolean force);
 
     // 1.5 워케이션 삭제
     void removeWorkation(Long userId, Long workationId);

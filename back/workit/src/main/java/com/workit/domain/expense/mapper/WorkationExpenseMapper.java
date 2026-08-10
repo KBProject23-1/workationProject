@@ -52,11 +52,17 @@ public interface WorkationExpenseMapper {
 
     int deleteExpense(@Param("expenseId") Long expenseId);
 
-    // 앱 내 결제 유입 대상. 워케이션 기간 안의 결제 중 아직 지출로 등록되지 않은 건
+    // 앱 내 결제 유입 대상
+    // 예약 결제는 결제일과 무관하게 reservations.workation_id 로, 일반 결제는 기간으로 찾는다
     List<WorkationExpenseVO> selectImportTargets(@Param("workationId") Long workationId,
                                                  @Param("userId") Long userId,
                                                  @Param("startDate") LocalDate startDate,
                                                  @Param("endDate") LocalDate endDate);
+
+    // 일괄 확정. 카테고리는 두고 is_auto_categorized 만 0 으로 내린다
+    int confirmExpenses(@Param("workationId") Long workationId,
+                        @Param("userId") Long userId,
+                        @Param("expenseIds") List<Long> expenseIds);
 
     // 유입 대상 일괄 저장. UNIQUE(transaction_id) 로 중복 유입을 막는다
     int insertImportedExpenses(@Param("items") List<WorkationExpenseVO> items);
