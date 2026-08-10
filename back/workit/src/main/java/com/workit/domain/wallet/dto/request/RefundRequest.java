@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 
 @Data
 public class RefundRequest {
+    private Long accountId;
     private BigDecimal amount;
     private String pinNumber;
     private String deviceId;
