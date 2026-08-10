@@ -760,7 +760,7 @@ CREATE TABLE `reservations`
 (
     `id`               BIGINT                                       NOT NULL AUTO_INCREMENT COMMENT '예약 고유번호(PK)',
     `user_id`          BIGINT                                       NOT NULL COMMENT '회원 고유번호(FK)',
-    `workation_id`     BIGINT                                       NOT NULL COMMENT '워케이션 고유번호(FK)',
+    `workation_id`     BIGINT                                       NULL COMMENT '워케이션 고유번호(FK). 워케이션 삭제 시 NULL 로 연결만 끊고 예약 이력은 남긴다',
     `product_id`       BIGINT                                       NOT NULL COMMENT '예약 상품 고유번호(FK)',
     `reservation_code` VARCHAR(50)                                  NOT NULL COMMENT '예약번호',
     `start_date`       DATE                                         NOT NULL COMMENT '사용자가 예약한 시작일',
@@ -1177,3 +1177,5 @@ SELECT 'PERSONAL', 'ACTIVITY', id
 FROM `expense_categories`
 WHERE `budget_type` = 'PERSONAL'
   AND `code` = 'LEISURE';
+
+

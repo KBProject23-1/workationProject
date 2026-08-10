@@ -10,8 +10,11 @@ import com.workit.global.response.GlobalResponseFactory;
 import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/workations")
@@ -68,6 +71,22 @@ public class WorkationController {
 
         workationService.removeWorkation(userId, workationId);
         return GlobalResponseFactory.noContent();
+    }
+
+    // 1.8 기간 변경 영향 조회
+    // 기간을 바꾸기 전에 어긋나는 예약과 숙소가 빈 날짜를 미리 확인한다
+    // startDate·endDate 를 생략하면 현재 기간 기준으로 조회한다
+    @GetMapping("/{workationId}/reservation-check")
+    public ResponseEntity<CommonResponse<ReservationCheckResponseDTO>> reservationCheckGet(
+            @CurrentUser Long userId,
+            @PathVariable("workationId") Long workationId,
+            @RequestParam(value = "startDate", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(value = "endDate", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        return GlobalResponseFactory.success(
+                workationService.checkReservations(userId, workationId, startDate, endDate));
     }
 
     // 1.6 워케이션 종료

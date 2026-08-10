@@ -5,6 +5,8 @@ import com.workit.domain.workation.dto.request.WorkationUpdateRequestDTO;
 import com.workit.domain.workation.dto.response.*;
 import com.workit.global.dto.PageResponseDTO;
 
+import java.time.LocalDate;
+
 public interface WorkationService {
 
     // 1.1 워케이션 등록
@@ -23,6 +25,12 @@ public interface WorkationService {
 
     // 1.5 워케이션 삭제
     void removeWorkation(Long userId, Long workationId);
+
+    // 1.8 기간 변경 영향 조회
+    // 기간을 바꾸기 전에 어긋나는 예약과 숙소가 빈 날짜를 알려준다
+    // 날짜를 주지 않으면 현재 기간 기준으로 본다
+    ReservationCheckResponseDTO checkReservations(Long userId, Long workationId,
+                                                  LocalDate startDate, LocalDate endDate);
 
     // 1.6 워케이션 종료
     WorkationSettleResponseDTO settleWorkation(Long userId, Long workationId);

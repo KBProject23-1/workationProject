@@ -190,6 +190,62 @@
           AND (DATE(spent_at) &lt; #{startDate} OR DATE(spent_at) &gt; #{endDate})
     </delete>
 
+    <!--
+        워케이션에 묶인 살아 있는 예약.
+        취소 건은 일정 변경에 영향을 주지 않으므로 제외한다.
+        예약 테이블은 읽기만 하고 수정하지 않는다.
+    -->
+    <select id="selectActiveReservations"
+            resultType="com.workit.domain.workation.vo.WorkationReservationVO">
+        SELECT r.id                    AS reservation_id,
+               r.reservation_code,
+               m.name                  AS merchant_name,
+               rp.product_name,
+               rp.product_detail_type,
+               r.start_date,
+               r.end_date,
+               r.status
+          FROM reservations r
+          JOIN reservation_products rp ON rp.id = r.product_id
+          JOIN merchants m             ON m.id  = rp.merchant_id
+         WHERE r.workation_id = #{workationId}
+           AND r.status &lt;&gt; 'CANCELED'
+         ORDER BY r.start_date, r.id
+    </select>
+
+    <!--
+        추천 이력은 워케이션이 사라지면 의미가 없으므로 함께 지운다.
+        recommendation_results 는 FK 가 ON DELETE CASCADE 라 따라서 삭제된다.
+    -->
+    <delete id="deleteRecommendationRequestsByWorkationId">
+        DELETE FROM recommendation_requests
+        WHERE workation_id = #{workationId}
+    </delete>
+
+    <!--
+        아직 시작하지 않은 예약 건수.
+        이용 시작일 전이면 사용자가 취소하고 환불받을 수 있으므로,
+        워케이션을 지우기 전에 직접 취소하도록 막는다.
+    -->
+    <select id="countUpcomingReservations" resultType="int">
+        SELECT COUNT(*)
+        FROM reservations
+        WHERE workation_id = #{workationId}
+          AND status = 'CONFIRMED'
+          AND start_date &gt; CURDATE()
+    </select>
+
+    <!--
+        예약은 결제·환불 이력이라 워케이션과 함께 지우지 않고 연결만 끊는다.
+        transactions 와 같은 방식이다.
+        이미 이용했거나 취소된 예약은 사용자가 손댈 수 없으므로 여기서 정리한다.
+    -->
+    <update id="unlinkReservations">
+        UPDATE reservations
+           SET workation_id = NULL
+         WHERE workation_id = #{workationId}
+    </update>
+
     <delete id="deleteExpensesByWorkationId">
         DELETE FROM workation_expenses
         WHERE workation_id = #{workationId}
