@@ -21,7 +21,7 @@
         JOIN survey_options so ON so.id = usa.option_id
         JOIN survey_questions q ON q.id = so.question_id
         WHERE usa.survey_id = #{surveyId}
-          AND q.question_code IN ('COMMON_PRIORITY', 'OFFICE_STYLE', 'OFFICE_NOISE')
+        AND q.question_code IN ('Q1', 'Q2')
     </select>
 
     <select id="selectAccommodationReference"
@@ -96,6 +96,54 @@
         ORDER BY m.id ASC
     </select>
 
+    <select id="selectOfficeCandidatesByMerchantIds"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeCandidateVO">
+        SELECT m.id           AS merchant_id,
+               m.name,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.latitude,
+               m.longitude,
+               m.rating,
+               CAST(COUNT(r.review_id) AS UNSIGNED) AS review_count,
+               o.noise_level,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'QUIET' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS quiet_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'OPEN' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS open_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'COLLAB' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS collab_review_count,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM bookmarks b
+                       WHERE b.users_id = #{userId}
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END AS bookmarked
+          FROM merchants m
+                   INNER JOIN offices o
+                              ON o.merchant_id = m.id
+                   LEFT JOIN reviews r
+                             ON r.merchant_id = m.id
+                                 AND r.status = 'ACTIVE'
+         WHERE m.category = 'OFFICE'
+           AND m.id IN
+           <foreach collection="merchantIds" item="merchantId" open="(" separator="," close=")">
+               #{merchantId}
+           </foreach>
+        GROUP BY m.id,
+                 m.name,
+                 m.address,
+                 m.thumbnail_url,
+                 m.price,
+                 m.latitude,
+                 m.longitude,
+                 m.rating,
+                 o.noise_level
+        ORDER BY m.id ASC
+    </select>
+
     <insert id="insertRecommendationRequest" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO recommendation_requests (
             user_id,
@@ -145,6 +193,29 @@
             AND rr.reference_merchant_id = #{referenceMerchantId}
         </if>
         ORDER BY rr.created_at DESC, rr.id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectRecommendationRequestById" resultType="com.workit.domain.recommendation.offices.vo.OfficeRecommendationRequestVO">
+        SELECT rr.id,
+               rr.user_id,
+               rr.workation_id,
+               rr.reference_merchant_id,
+               rr.secondary_reference_merchant_id,
+               rr.recommendation_type AS recommendationType,
+               rr.reference_type AS referenceType,
+               rr.meal_type,
+               rr.reference_latitude,
+               rr.reference_longitude,
+               rr.created_at,
+               m.name AS referenceMerchantName,
+               m2.name AS secondaryReferenceMerchantName
+        FROM recommendation_requests rr
+        LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+        LEFT JOIN merchants m2 ON m2.id = rr.secondary_reference_merchant_id
+        WHERE rr.id = #{recommendationRequestId}
+          AND rr.user_id = #{userId}
+          AND rr.recommendation_type = 'OFFICE'
         LIMIT 1
     </select>
 

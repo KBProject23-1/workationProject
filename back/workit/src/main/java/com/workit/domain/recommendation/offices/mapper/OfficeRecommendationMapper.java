@@ -24,11 +24,17 @@ public interface OfficeRecommendationMapper {
                                                    @Param("startDate") LocalDate startDate,
                                                    @Param("endDate") LocalDate endDate);
 
+    List<OfficeCandidateVO> selectOfficeCandidatesByMerchantIds(@Param("userId") Long userId,
+                                                                @Param("merchantIds") List<Long> merchantIds);
+
     void insertRecommendationRequest(OfficeRecommendationRequestVO requestVO);
 
     OfficeRecommendationRequestVO selectLatestRecommendationRequestByUser(@Param("userId") Long userId,
                                                                          @Param("workationId") Long workationId,
                                                                          @Param("referenceMerchantId") Long referenceMerchantId);
+
+    OfficeRecommendationRequestVO selectRecommendationRequestById(@Param("userId") Long userId,
+                                                                @Param("recommendationRequestId") Long recommendationRequestId);
 
     OfficeRecommendationRequestVO selectTodayLatestRecommendationRequestByUser(@Param("userId") Long userId,
                                                                               @Param("workationId") Long workationId,

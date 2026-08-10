@@ -23,6 +23,13 @@ public interface ReviewMapper {
             @Param("size") int size
     );
 
+    List<MerchantReviewVO> selectMerchantReviewListWithMine(
+            @Param("merchantId") Long merchantId,
+            @Param("userId") Long userId,
+            @Param("offset") int offset,
+            @Param("size") int size
+    );
+
     MerchantReviewStatisticsVO selectMerchantReviewStatistics(
             @Param("merchantId") Long merchantId
     );

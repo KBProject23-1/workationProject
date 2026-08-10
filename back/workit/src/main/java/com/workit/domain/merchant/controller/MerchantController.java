@@ -1,59 +1,126 @@
 package com.workit.domain.merchant.controller;
 
-import com.workit.domain.merchant.dto.request.AccommodationListRequestDTO;
-import com.workit.domain.merchant.dto.request.RestaurantListRequestDTO;
-import com.workit.domain.merchant.dto.response.AccommodationListResponseDTO;
-import com.workit.domain.merchant.dto.response.AccommodationDetailResponseDTO;
-import com.workit.domain.merchant.dto.response.RestaurantListResponseDTO;
-import com.workit.domain.merchant.dto.response.RestaurantDetailResponseDTO;
+import com.workit.domain.merchant.dto.MerchantDetailCommonResponseDTO;
 import com.workit.domain.merchant.service.MerchantService;
-import com.workit.global.dto.PageResponseDTO;
+import com.workit.domain.merchant.dto.MerchantDetailResponseDTO;
+import com.workit.domain.merchant.dto.MerchantItemResponseDTO;
+import com.workit.domain.merchant.dto.MerchantListResponseDTO;
+import com.workit.domain.merchant.vo.MerchantSortType;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
-import lombok.RequiredArgsConstructor;
+import com.workit.security.CurrentUser;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/merchants")
-@RequiredArgsConstructor
 public class MerchantController {
 
     private final MerchantService merchantService;
 
-    // 지역과 선택 조회 조건에 맞는 숙소 목록 조회
-    @GetMapping("/accommodations")
-    public ResponseEntity<CommonResponse<PageResponseDTO<AccommodationListResponseDTO>>> accommodationList(
-            @ModelAttribute AccommodationListRequestDTO request) {
-
-        return GlobalResponseFactory.success(merchantService.findAccommodationList(request));
+    public MerchantController(
+            MerchantService merchantService
+    ) {
+        this.merchantService = merchantService;
     }
 
-    // 숙소의 기본 정보와 위치, 이용 정보, 태그 조회
-    @GetMapping("/accommodations/{merchantId}")
-    public ResponseEntity<CommonResponse<AccommodationDetailResponseDTO>> accommodationDetails(
-            @PathVariable Long merchantId) {
-
-        return GlobalResponseFactory.success(merchantService.findAccommodationDetails(merchantId));
+    @GetMapping
+    public ResponseEntity<CommonResponse<MerchantListResponseDTO<MerchantItemResponseDTO>>> findMerchants(
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "checkInDate", required = false) LocalDate checkInDate,
+            @RequestParam(value = "checkOutDate", required = false) LocalDate checkOutDate,
+            @RequestParam(value = "headcount", required = false) Integer headcount,
+            @RequestParam(value = "minPrice", required = false) Long minPrice,
+            @RequestParam(value = "maxPrice", required = false) Long maxPrice,
+            @RequestParam(value = "sort", defaultValue = "RATING_DESC") String sort,
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "regionId", required = false) Long regionId
+    ) {
+        return GlobalResponseFactory.success(
+                merchantService.findMerchants(
+                        category,
+                        checkInDate,
+                        checkOutDate,
+                        headcount,
+                        minPrice,
+                        maxPrice,
+                        MerchantSortType.from(sort),
+                        cursor,
+                        size,
+                        regionId
+                )
+        );
     }
 
-    // 지역과 선택 조회 조건에 맞는 음식점 목록 조회
-    @GetMapping("/restaurants")
-    public ResponseEntity<CommonResponse<PageResponseDTO<RestaurantListResponseDTO>>> restaurantList(
-            @ModelAttribute RestaurantListRequestDTO request) {
-
-        return GlobalResponseFactory.success(merchantService.findRestaurantList(request));
+    @GetMapping("/{merchantId}/accommodations")
+    public ResponseEntity<CommonResponse<MerchantDetailResponseDTO>> findAccommodationProducts(
+            @PathVariable("merchantId") Long merchantId,
+            @RequestParam(value = "checkInDate", required = false) LocalDate checkInDate,
+            @RequestParam(value = "checkOutDate", required = false) LocalDate checkOutDate,
+            @RequestParam(value = "roomCount", required = false) Integer roomCount,
+            @RequestParam(value = "guestCount", required = false) Integer guestCount
+    ) {
+        return GlobalResponseFactory.success(
+                merchantService.findAccommodationProducts(
+                        merchantId,
+                        checkInDate,
+                        checkOutDate,
+                        roomCount,
+                        guestCount
+                )
+        );
     }
 
-    // 음식점의 기본 정보와 위치, 음식 종류, 가격, 태그 조회
+    @GetMapping("/{merchantId}/offices")
+    public ResponseEntity<CommonResponse<MerchantDetailResponseDTO>> findOfficeProducts(
+            @PathVariable("merchantId") Long merchantId
+    ) {
+        return GlobalResponseFactory.success(
+                merchantService.findOfficeProducts(merchantId)
+        );
+    }
+
+    @GetMapping("/{merchantId}/restaurants")
+    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findRestaurantDetailByLegacyPath(
+            @CurrentUser Long userId,
+            @PathVariable("merchantId") Long merchantId
+    ) {
+        MerchantDetailCommonResponseDTO detail = merchantService.findRestaurantProducts(userId, merchantId);
+        return GlobalResponseFactory.success(List.of(detail));
+    }
+
     @GetMapping("/restaurants/{merchantId}")
-    public ResponseEntity<CommonResponse<RestaurantDetailResponseDTO>> restaurantDetails(
-            @PathVariable Long merchantId) {
+    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findRestaurantDetail(
+            @CurrentUser Long userId,
+            @PathVariable("merchantId") Long merchantId
+    ) {
+        MerchantDetailCommonResponseDTO detail = merchantService.findRestaurantProducts(userId, merchantId);
+        return GlobalResponseFactory.success(List.of(detail));
+    }
 
-        return GlobalResponseFactory.success(merchantService.findRestaurantDetails(merchantId));
+    @GetMapping("/{merchantId}/activities")
+    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findActivityDetailByLegacyPath(
+            @CurrentUser Long userId,
+            @PathVariable("merchantId") Long merchantId
+    ) {
+        MerchantDetailCommonResponseDTO detail = merchantService.findActivityProducts(userId, merchantId);
+        return GlobalResponseFactory.success(List.of(detail));
+    }
+
+    @GetMapping("/activities/{merchantId}")
+    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findActivityDetail(
+            @CurrentUser Long userId,
+            @PathVariable("merchantId") Long merchantId
+    ) {
+        MerchantDetailCommonResponseDTO detail = merchantService.findActivityProducts(userId, merchantId);
+        return GlobalResponseFactory.success(List.of(detail));
     }
 }

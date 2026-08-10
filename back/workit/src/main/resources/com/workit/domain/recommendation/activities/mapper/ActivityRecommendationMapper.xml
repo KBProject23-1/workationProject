@@ -4,7 +4,7 @@
 
 <mapper namespace="com.workit.domain.recommendation.activities.mapper.ActivityRecommendationMapper">
 
-    <resultMap id="requestMap" type="com.workit.domain.recommendation.vo.RecommendationRequestVO">
+    <resultMap id="requestMap" type="com.workit.domain.recommendation.activities.vo.RecommendationRequestVO">
         <id property="id" column="id"/>
         <result property="userId" column="user_id"/>
         <result property="workationId" column="workation_id"/>
@@ -100,8 +100,20 @@
          ORDER BY m.id ASC
     </select>
 
+    <select id="selectConfirmedAccommodation"
+            resultType="com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category,
+               m.address, m.thumbnail_url, m.price, m.rating, m.latitude, m.longitude, 1 AS reserved
+          FROM reservations r
+          JOIN reservation_products rp ON rp.id = r.product_id
+          JOIN merchants m ON m.id = rp.merchant_id
+         WHERE r.user_id = #{userId} AND r.workation_id = #{workationId}
+           AND r.status = 'CONFIRMED' AND m.category = 'ACCOMMODATION'
+         ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+    </select>
+
     <select id="selectActivityReferenceMerchant"
-            resultType="com.workit.domain.recommendation.vo.RecommendationMerchantVO">
+            resultType="com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO">
         SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.latitude, m.longitude
           FROM merchants m
          WHERE m.id = #{merchantId}
@@ -120,6 +132,28 @@
              #{result.ranking}, NOW())
         </foreach>
     </insert>
+
+    <insert id="insertRecommendationRequest" parameterType="com.workit.domain.recommendation.activities.vo.RecommendationRequestVO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO recommendation_requests (
+            user_id, workation_id, recommendation_type, meal_type, reference_type,
+            reference_merchant_id, secondary_reference_merchant_id,
+            reference_latitude, reference_longitude, created_at
+        ) VALUES (
+            #{userId}, #{workationId}, #{recommendationType}, #{mealType}, #{referenceType},
+            #{referenceMerchantId}, #{secondaryReferenceMerchantId},
+            #{referenceLatitude}, #{referenceLongitude}, NOW()
+        )
+    </insert>
+
+    <select id="selectRecommendationRequest" resultMap="requestMap">
+        SELECT <include refid="requestColumns"/>
+          FROM recommendation_requests rr
+          LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+          LEFT JOIN merchants sm ON sm.id = rr.secondary_reference_merchant_id
+         WHERE rr.id = #{requestId}
+           AND rr.user_id = #{userId}
+    </select>
 
     <select id="selectLatestActivityRequest" resultMap="requestMap">
         SELECT <include refid="requestColumns"/>

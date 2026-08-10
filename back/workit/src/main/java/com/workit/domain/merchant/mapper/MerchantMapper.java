@@ -1,61 +1,56 @@
 package com.workit.domain.merchant.mapper;
 
-import com.workit.domain.merchant.vo.AccommodationListItemVO;
-import com.workit.domain.merchant.vo.AccommodationDetailVO;
-import com.workit.domain.merchant.vo.AccommodationType;
-import com.workit.domain.merchant.vo.FoodType;
-import com.workit.domain.merchant.vo.RestaurantListItemVO;
-import com.workit.domain.merchant.vo.RestaurantDetailVO;
+import com.workit.domain.merchant.vo.MerchantDetailVO;
+import com.workit.domain.merchant.vo.MerchantVO;
+import com.workit.domain.merchant.vo.MerchantProductVO;
 import org.apache.ibatis.annotations.Param;
 
-import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 public interface MerchantMapper {
 
-    AccommodationDetailVO selectAccommodationDetails(@Param("merchantId") Long merchantId);
-
-    List<String> selectMerchantTagNames(@Param("merchantId") Long merchantId);
-
-    RestaurantDetailVO selectRestaurantDetails(@Param("merchantId") Long merchantId);
-
-    List<RestaurantListItemVO> selectRestaurantList(
+    List<MerchantVO> selectReservationMerchantsByCursor(
+            @Param("category") String category,
+            @Param("cursorValue") Object cursorValue,
+            @Param("cursorMerchantId") Long cursorMerchantId,
+            @Param("size") int size,
             @Param("regionId") Long regionId,
-            @Param("foodType") FoodType foodType,
+            @Param("checkInDate") LocalDate checkInDate,
+            @Param("checkOutDate") LocalDate checkOutDate,
+            @Param("requiredDateCount") Integer requiredDateCount,
+            @Param("headcount") Integer headcount,
             @Param("minPrice") Long minPrice,
             @Param("maxPrice") Long maxPrice,
-            @Param("minRating") BigDecimal minRating,
-            @Param("sort") String sort,
-            @Param("offset") int offset,
-            @Param("size") int size
+            @Param("sort") String sort
     );
 
-    long countRestaurantList(
-            @Param("regionId") Long regionId,
-            @Param("foodType") FoodType foodType,
-            @Param("minPrice") Long minPrice,
-            @Param("maxPrice") Long maxPrice,
-            @Param("minRating") BigDecimal minRating
+    MerchantDetailVO selectMerchantAccommodationDetails(@Param("merchantId") Long merchantId);
+
+    List<MerchantProductVO> selectMerchantAccommodationReservationProducts(
+            @Param("merchantId") Long merchantId
     );
 
-    // 지역과 조회 조건에 맞는 숙소 목록 한 페이지 조회
-    List<AccommodationListItemVO> selectAccommodationList(
-            @Param("regionId") Long regionId,
-            @Param("accommodationType") AccommodationType accommodationType,
-            @Param("minPrice") Long minPrice,
-            @Param("maxPrice") Long maxPrice,
-            @Param("minRating") BigDecimal minRating,
-            @Param("sort") String sort,
-            @Param("offset") int offset,
-            @Param("size") int size
+    List<MerchantProductVO> selectMerchantAccommodationReservationProductsByPeriod(
+            @Param("merchantId") Long merchantId,
+            @Param("checkInDate") LocalDate checkInDate,
+            @Param("checkOutDate") LocalDate checkOutDate,
+            @Param("headcount") Integer headcount,
+            @Param("roomCount") Integer roomCount,
+            @Param("requiredDateCount") Integer requiredDateCount,
+            @Param("requiredQuantity") Integer requiredQuantity,
+            @Param("includeEndDate") boolean includeEndDate
     );
 
-    // 목록 조회와 같은 조건으로 전체 숙소 수 조회
-    long countAccommodationList(
-            @Param("regionId") Long regionId,
-            @Param("accommodationType") AccommodationType accommodationType,
-            @Param("minPrice") Long minPrice,
-            @Param("maxPrice") Long maxPrice,
-            @Param("minRating") BigDecimal minRating
+    int selectMerchantAccommodationReviewCount(@Param("merchantId") Long merchantId);
+
+    List<MerchantProductVO> selectMerchantOfficeProducts(
+            @Param("merchantId") Long merchantId
     );
+
+    MerchantDetailVO selectMerchantOfficeDetails(@Param("merchantId") Long merchantId);
+
+    MerchantDetailVO selectMerchantRestaurantDetails(@Param("merchantId") Long merchantId);
+
+    MerchantDetailVO selectMerchantActivityDetails(@Param("merchantId") Long merchantId);
 }
