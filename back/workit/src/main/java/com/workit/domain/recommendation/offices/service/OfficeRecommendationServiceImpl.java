@@ -11,16 +11,18 @@ import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendatio
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationResultItemResponseDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationScoreResponseDTO;
 import com.workit.domain.recommendation.offices.exception.OfficeRecommendationErrorCode;
-import com.workit.domain.recommendation.offices.enums.OfficeAtmosphereType;
-import com.workit.domain.recommendation.offices.enums.OfficePriorityType;
-import com.workit.domain.recommendation.offices.enums.OfficeReferenceType;
-import com.workit.domain.recommendation.offices.enums.RecommendationType;
+import com.workit.domain.recommendation.offices.vo.OfficeAtmosphereType;
+import com.workit.domain.recommendation.offices.vo.OfficePriorityType;
+import com.workit.domain.recommendation.offices.vo.OfficeReferenceType;
+import com.workit.domain.recommendation.offices.vo.RecommendationType;
 import com.workit.domain.recommendation.offices.mapper.OfficeRecommendationMapper;
 import com.workit.domain.recommendation.offices.vo.OfficeCandidateVO;
 import com.workit.domain.recommendation.offices.vo.OfficeRecommendationRequestVO;
 import com.workit.domain.recommendation.offices.vo.OfficeReferenceMerchantVO;
 import com.workit.domain.recommendation.offices.vo.OfficeRecommendationResultVO;
 import com.workit.domain.recommendation.offices.vo.OfficeSurveyAnswerVO;
+import com.workit.domain.recommendation.common.mapper.ReservationProductAvailabilityMapper;
+import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
 import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.domain.workation.service.WorkationOwnershipValidator;
 import com.workit.domain.workation.vo.BudgetType;
@@ -74,10 +76,13 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
     private final BudgetMapper budgetMapper;
     private final WorkationOwnershipValidator ownershipValidator;
     private final WorkationMapper workationMapper;
+    private final ReservationProductAvailabilityMapper reservationProductAvailabilityMapper;
 
     @Override
     @Transactional
-    public void createOfficeRecommendation(Long userId, OfficeRecommendationCreateRequestDTO request) {
+    public RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> createOfficeRecommendation(
+            Long userId,
+            OfficeRecommendationCreateRequestDTO request) {
         validateCreateRequest(request);
         WorkationVO workation = ownershipValidator.getOwned(userId, request.getWorkationId());
 
@@ -94,7 +99,7 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
                 todayRange[1]
         );
         if (todayRequest != null && hasSavedRecommendationResult(todayRequest.getId())) {
-            return;
+            return toCommon(buildOfficeRecommendationResponse(userId, todayRequest, null, request.getSize()));
         }
 
         List<OfficeSurveyAnswerVO> surveyAnswers = loadSurveyAnswers(userId, workation.getId());
@@ -121,12 +126,19 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         recommendationMapper.insertRecommendationRequest(requestVO);
         Long recommendationRequestId = requestVO.getId();
 
-        List<OfficeCandidateVO> candidates = recommendationMapper.selectOfficeCandidates(
-                userId,
+        List<Long> availableMerchantIds = reservationProductAvailabilityMapper.selectAvailableMerchantIdsByPeriod(
                 workation.getRegionId(),
+                "OFFICE",
+                null,
                 workation.getStartDate(),
-                workation.getEndDate()
+                workation.getEndDate(),
+                true,
+                null
         );
+
+        List<OfficeCandidateVO> candidates = availableMerchantIds == null || availableMerchantIds.isEmpty()
+                ? new ArrayList<>()
+                : recommendationMapper.selectOfficeCandidatesByMerchantIds(userId, availableMerchantIds);
 
         log.info(
                 "공유오피스 추천 후보 조회: userId={}, workationId={}, regionId={}, startDate={}, endDate={}, candidateCount={}",
@@ -155,11 +167,13 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             }
             recommendationMapper.insertRecommendationResults(recommendationRequestId, recommendationResultList);
         }
+
+        return toCommon(buildOfficeRecommendationResponse(userId, requestVO, null, request.getSize()));
     }
 
     @Override
     @Transactional
-    public OfficeRecommendationResponseDTO getOfficeRecommendation(Long userId, Long referenceMerchantId,
+    public RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> getOfficeRecommendation(Long userId, Long referenceMerchantId,
                                                                   String cursor, Integer size) {
 
         WorkationVO workation = workationMapper.selectActiveWorkation(userId);
@@ -179,7 +193,11 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             OfficeRecommendationCreateRequestDTO createRequest = new OfficeRecommendationCreateRequestDTO();
             createRequest.setWorkationId(workation.getId());
             createRequest.setSize(size);
-            createOfficeRecommendation(userId, createRequest);
+            RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> createdResponse =
+                    createOfficeRecommendation(userId, createRequest);
+            if (createdResponse != null) {
+                return createdResponse;
+            }
 
             requestVO = recommendationMapper.selectLatestRecommendationRequestByUser(
                     userId,
@@ -193,7 +211,60 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
 
-        return buildOfficeRecommendationResponse(userId, requestVO, cursor, size);
+        return toCommon(buildOfficeRecommendationResponse(userId, requestVO, cursor, size));
+    }
+
+    @Override
+    @Transactional
+    public RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> getOfficeRecommendationByRequestId(Long userId,
+                                                                              Long recommendationRequestId,
+                                                                              String cursor,
+                                                                              Integer size) {
+        OfficeRecommendationRequestVO requestVO = recommendationMapper.selectRecommendationRequestById(
+                userId,
+                recommendationRequestId
+        );
+        if (requestVO == null || !RecommendationType.OFFICE.name().equals(requestVO.getRecommendationType())
+                || !hasSavedRecommendationResult(requestVO.getId())) {
+            throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+        }
+        return toCommon(buildOfficeRecommendationResponse(userId, requestVO, cursor, size));
+    }
+
+    private RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> toCommon(
+            OfficeRecommendationResponseDTO response) {
+        if (response == null) {
+            return RecommendationListResponseDTO.<OfficeRecommendationResultItemResponseDTO>of(
+                    null, null, null, null, null, 0, false, null);
+        }
+
+        RecommendationListResponseDTO.RecommendationReference reference =
+                new RecommendationListResponseDTO.RecommendationReference(
+                        response.getRecommendationType(),
+                        response.getReference() == null ? null : response.getReference().getPrimaryMerchantId(),
+                        response.getReference() == null ? null : response.getReference().getPrimaryMerchantName(),
+                        response.getReference() == null ? null : response.getReference().getSecondaryMerchantId(),
+                        response.getReference() == null ? null : response.getReference().getSecondaryMerchantName(),
+                        response.getReference() == null || response.getReference().getLatitude() == null
+                                ? null
+                                : response.getReference().getLatitude().toPlainString(),
+                        response.getReference() == null || response.getReference().getLongitude() == null
+                                ? null
+                                : response.getReference().getLongitude().toPlainString(),
+                        null
+                );
+
+        return RecommendationListResponseDTO.of(
+                response.getRecommendationRequestId(),
+                response.getRecommendationType(),
+                null,
+                reference,
+                response.getContent(),
+                response.getPageInfo() == null ? 0 : response.getPageInfo().getSize(),
+                response.getPageInfo() != null && response.getPageInfo().getHasNext() != null
+                        && response.getPageInfo().getHasNext(),
+                response.getPageInfo() == null ? null : response.getPageInfo().getNextCursor()
+        );
     }
 
     private OfficeRecommendationResponseDTO buildOfficeRecommendationResponse(Long userId,
@@ -656,7 +727,7 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
 
     private String extractQ1Code(List<OfficeSurveyAnswerVO> answers) {
         for (OfficeSurveyAnswerVO answer : answers) {
-            if ("COMMON_PRIORITY".equals(answer.getQuestionCode())
+            if ("Q1".equals(answer.getQuestionCode())
                     && StringUtils.hasText(answer.getOptionCode())) {
                 return answer.getOptionCode().trim();
             }
@@ -666,7 +737,7 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
 
     private Set<String> extractQ2Codes(List<OfficeSurveyAnswerVO> answers) {
         Set<String> codes = answers.stream()
-                .filter(a -> "OFFICE_STYLE".equals(a.getQuestionCode()) || "OFFICE_NOISE".equals(a.getQuestionCode()))
+                .filter(a -> "Q2".equals(a.getQuestionCode()))
                 .map(OfficeSurveyAnswerVO::getOptionCode)
                 .filter(StringUtils::hasText)
                 .map(String::trim)
@@ -756,20 +827,24 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         if (referenceType == OfficeReferenceType.REGION_ONLY) {
             return String.format(
                     "가격 %.1f점, 선호도 %.1f점, 평점 %.1f점을 반영해 계산했어요.",
-                    resultVO.getPriceScore(),
-                    resultVO.getPreferenceScore(),
-                    resultVO.getRatingScore()
+                    toScoreDouble(resultVO.getPriceScore()),
+                    toScoreDouble(resultVO.getPreferenceScore()),
+                    toScoreDouble(resultVO.getRatingScore())
             );
         }
         BigDecimal accessibilityScore = resultVO.getAccessibilityScore();
         String accessibilityValue = accessibilityScore == null ? "미계산" : String.format("%.1f", accessibilityScore);
         return String.format(
                 "가격 %.1f점, 선호도 %.1f점, 접근성 %s점, 평점 %.1f점을 반영해 계산했어요.",
-                resultVO.getPriceScore(),
-                resultVO.getPreferenceScore(),
+                toScoreDouble(resultVO.getPriceScore()),
+                toScoreDouble(resultVO.getPreferenceScore()),
                 accessibilityValue,
-                resultVO.getRatingScore()
+                toScoreDouble(resultVO.getRatingScore())
         );
+    }
+
+    private double toScoreDouble(BigDecimal score) {
+        return score == null ? 0.0 : score.doubleValue();
     }
 
     private RecommendationCursor decodeCursor(String cursor) {
@@ -835,7 +910,12 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         if (!StringUtils.hasText(referenceTypeRaw)) {
             return OfficeReferenceType.REGION_ONLY;
         }
-        return OfficeReferenceType.valueOf(referenceTypeRaw);
+        try {
+            return OfficeReferenceType.valueOf(referenceTypeRaw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("알 수 없는 추천 기준 타입입니다. referenceTypeRaw={}", referenceTypeRaw);
+            return OfficeReferenceType.REGION_ONLY;
+        }
     }
 
     private int normalizeSize(Integer size) {

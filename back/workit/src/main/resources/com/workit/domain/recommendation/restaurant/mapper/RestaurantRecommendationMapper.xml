@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.recommendation.restaurant.mapper.RestaurantRecommendationMapper">
+
+    <resultMap id="requestMap" type="com.workit.domain.recommendation.restaurant.vo.RecommendationRequestVO">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="workationId" column="workation_id"/>
+        <result property="recommendationType" column="recommendation_type"/>
+        <result property="referenceType" column="reference_type"/>
+        <result property="mealType" column="meal_type"/>
+        <result property="referenceMerchantId" column="reference_merchant_id"/>
+        <result property="secondaryReferenceMerchantId" column="secondary_reference_merchant_id"/>
+        <result property="referenceLatitude" column="reference_latitude"/>
+        <result property="referenceLongitude" column="reference_longitude"/>
+        <result property="referenceMerchantName" column="reference_merchant_name"/>
+        <result property="secondaryReferenceMerchantName" column="secondary_reference_merchant_name"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <select id="selectRestaurantCondition"
+            resultType="com.workit.domain.recommendation.restaurant.vo.RestaurantConditionVO">
+        SELECT w.id AS workation_id, w.region_id, w.start_date, w.end_date,
+               (SELECT SUM(b.target_amount) FROM budgets b
+                 JOIN expense_categories ec ON ec.id = b.expense_category_id
+                WHERE b.workation_id = w.id AND ec.code = 'FOOD') AS food_budget,
+               (SELECT so.option_code FROM user_surveys us
+                 JOIN user_survey_answers usa ON usa.survey_id = us.id
+                 JOIN survey_options so ON so.id = usa.option_id
+                 JOIN survey_questions sq ON sq.id = so.question_id
+                WHERE us.user_id = w.user_id AND us.workation_id = w.id AND sq.question_code = 'Q1'
+                ORDER BY usa.id DESC LIMIT 1) AS priority_option_code,
+               (SELECT so.option_name FROM user_surveys us
+                 JOIN user_survey_answers usa ON usa.survey_id = us.id
+                 JOIN survey_options so ON so.id = usa.option_id
+                 JOIN survey_questions sq ON sq.id = so.question_id
+                WHERE us.user_id = w.user_id AND us.workation_id = w.id AND sq.question_code = 'Q1'
+                ORDER BY usa.id DESC LIMIT 1) AS priority_option_name,
+               (SELECT so.option_code FROM user_surveys us
+                 JOIN user_survey_answers usa ON usa.survey_id = us.id
+                 JOIN survey_options so ON so.id = usa.option_id
+                 JOIN survey_questions sq ON sq.id = so.question_id
+                WHERE us.user_id = w.user_id AND us.workation_id = w.id AND sq.question_code = 'Q4'
+                ORDER BY usa.id DESC LIMIT 1) AS meal_style_option_code,
+               (SELECT so.option_name FROM user_surveys us
+                 JOIN user_survey_answers usa ON usa.survey_id = us.id
+                 JOIN survey_options so ON so.id = usa.option_id
+                 JOIN survey_questions sq ON sq.id = so.question_id
+                WHERE us.user_id = w.user_id AND us.workation_id = w.id AND sq.question_code = 'Q4'
+                ORDER BY usa.id DESC LIMIT 1) AS meal_style_option_name
+          FROM workations w
+         WHERE w.user_id = #{userId} AND w.status = 'ACTIVE'
+         ORDER BY w.created_at DESC LIMIT 1
+    </select>
+
+    <select id="selectRestaurants" resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.address,
+               m.thumbnail_url, m.price, m.rating, m.latitude, m.longitude
+          FROM merchants m
+         WHERE m.region_id = #{regionId} AND m.category = 'RESTAURANT'
+         ORDER BY m.id ASC
+    </select>
+
+    <select id="selectConfirmedAccommodation"
+            resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category,
+               m.latitude, m.longitude, 1 AS reserved
+          FROM reservations r
+          JOIN reservation_products rp ON rp.id = r.product_id
+          JOIN merchants m ON m.id = rp.merchant_id
+         WHERE r.user_id = #{userId} AND r.workation_id = #{workationId}
+           AND r.status = 'CONFIRMED' AND m.category = 'ACCOMMODATION'
+         ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+    </select>
+
+    <select id="selectConfirmedOffice"
+            resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category,
+               m.latitude, m.longitude, 1 AS reserved
+          FROM reservations r
+          JOIN reservation_products rp ON rp.id = r.product_id
+          JOIN merchants m ON m.id = rp.merchant_id
+         WHERE r.user_id = #{userId} AND r.workation_id = #{workationId}
+           AND r.status = 'CONFIRMED' AND m.category = 'OFFICE'
+         ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+    </select>
+
+    <select id="selectRestaurantReferenceMerchant"
+            resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.latitude, m.longitude
+          FROM merchants m
+         WHERE m.id = #{merchantId} AND m.region_id = #{regionId}
+           AND m.category IN ('ACCOMMODATION', 'OFFICE', 'ACTIVITY')
+    </select>
+
+    <select id="selectRestaurantReferenceCandidates"
+            resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.latitude, m.longitude,
+               EXISTS (SELECT 1 FROM reservations r
+                       JOIN reservation_products rp ON rp.id = r.product_id
+                       WHERE r.user_id = #{userId} AND r.workation_id = #{workationId}
+                         AND r.status = 'CONFIRMED' AND rp.merchant_id = m.id) AS reserved
+          FROM merchants m
+         WHERE m.region_id = #{regionId}
+           AND m.category IN ('ACCOMMODATION', 'OFFICE', 'ACTIVITY')
+         ORDER BY reserved DESC, m.category ASC, m.id ASC
+    </select>
+
+    <insert id="insertRecommendationRequest"
+            parameterType="com.workit.domain.recommendation.restaurant.vo.RecommendationRequestVO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO recommendation_requests (
+            user_id, workation_id, recommendation_type, meal_type, reference_type,
+            reference_merchant_id, secondary_reference_merchant_id,
+            reference_latitude, reference_longitude, created_at
+        ) VALUES (
+            #{userId}, #{workationId}, #{recommendationType}, #{mealType}, #{referenceType},
+            #{referenceMerchantId}, #{secondaryReferenceMerchantId},
+            #{referenceLatitude}, #{referenceLongitude}, NOW()
+        )
+    </insert>
+
+    <insert id="insertRecommendationResults">
+        INSERT INTO recommendation_results (
+            recommendation_request_id, merchant_id, price_score, preference_score,
+            accessibility_score, rating_score, total_score, ranking, distance, calculated_at
+        ) VALUES
+        <foreach collection="results" item="result" separator=",">
+            (#{requestId}, #{result.merchantId}, #{result.priceScore}, #{result.preferenceScore},
+             #{result.accessibilityScore}, #{result.ratingScore}, #{result.totalScore},
+             #{result.ranking}, #{result.distance}, NOW())
+        </foreach>
+    </insert>
+
+    <sql id="requestColumns">
+        rr.id, rr.user_id, rr.workation_id, rr.recommendation_type, rr.meal_type,
+        rr.reference_type, rr.reference_merchant_id, rr.secondary_reference_merchant_id,
+        rr.reference_latitude, rr.reference_longitude, rr.created_at,
+        m.name AS reference_merchant_name, sm.name AS secondary_reference_merchant_name
+    </sql>
+
+    <select id="selectRecommendationRequest" resultMap="requestMap">
+        SELECT <include refid="requestColumns"/>
+          FROM recommendation_requests rr
+          LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+          LEFT JOIN merchants sm ON sm.id = rr.secondary_reference_merchant_id
+         WHERE rr.id = #{requestId}
+           AND rr.user_id = #{userId}
+    </select>
+
+    <select id="selectLatestRestaurantRequest" resultMap="requestMap">
+        SELECT <include refid="requestColumns"/>
+          FROM recommendation_requests rr
+          LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+          LEFT JOIN merchants sm ON sm.id = rr.secondary_reference_merchant_id
+         WHERE rr.user_id = #{userId}
+           AND rr.recommendation_type = 'RESTAURANT'
+        <if test="mealType != null">
+           AND rr.meal_type = #{mealType}
+        </if>
+        <if test="referenceMerchantId != null">
+           AND rr.reference_merchant_id = #{referenceMerchantId}
+        </if>
+         ORDER BY rr.created_at DESC, rr.id DESC LIMIT 1
+    </select>
+
+    <select id="selectRecommendationResults"
+            resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationResultVO">
+        SELECT result.id AS recommendation_result_id,
+               result.recommendation_request_id,
+               result.merchant_id,
+               result.price_score,
+               result.accessibility_score,
+               result.rating_score,
+               result.total_score,
+               result.calculated_at,
+               result.ranking,
+               result.distance,
+               m.name AS merchant_name,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.rating,
+               EXISTS (SELECT 1 FROM bookmarks b
+                       WHERE b.users_id = (SELECT user_id FROM recommendation_requests WHERE id = #{requestId})
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL) AS bookmarked
+          FROM recommendation_results result
+          JOIN merchants m ON m.id = result.merchant_id
+         WHERE result.recommendation_request_id = #{requestId}
+        <if test="cursorRanking != null and cursorId != null">
+           AND (result.ranking &gt; #{cursorRanking}
+                OR (result.ranking = #{cursorRanking} AND result.id &gt; #{cursorId}))
+        </if>
+         ORDER BY result.ranking ASC, result.id ASC
+         LIMIT #{limit}
+    </select>
+</mapper>

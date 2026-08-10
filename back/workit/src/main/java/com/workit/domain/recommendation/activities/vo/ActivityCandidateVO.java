@@ -1,6 +1,5 @@
 package com.workit.domain.recommendation.activities.vo;
 
-import com.workit.domain.recommendation.vo.RecommendationMerchantVO;
 import lombok.Getter;
 import lombok.Setter;
 

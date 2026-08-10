@@ -2,15 +2,15 @@ package com.workit.domain.recommendation.activities.service;
 
 import com.workit.domain.recommendation.activities.vo.ActivityCandidateVO;
 import com.workit.domain.recommendation.activities.vo.ActivityRecommendationResultVO;
-import com.workit.domain.recommendation.enums.ReferenceType;
-import com.workit.domain.recommendation.vo.RecommendationMerchantVO;
+import com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO;
+import com.workit.domain.recommendation.activities.vo.ReferenceType;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -258,48 +258,28 @@ public class ActivityScoreCalculator {
             rating = BigDecimal.valueOf(0.10);
         }
 
-        if (!accessibilityUsed) {
-            accessibility = ZERO;
-        }
-        if (!preferenceUsed) {
-            preference = ZERO;
-        }
+        return new BigDecimal[]{price, preferenceUsed ? preference : ZERO,
+                accessibilityUsed ? accessibility : ZERO, rating};
+    }
 
-        BigDecimal sum = price.add(preference).add(accessibility).add(rating);
-        if (sum.compareTo(ZERO) <= 0) {
-            return new BigDecimal[]{ZERO, ZERO, ZERO, ZERO};
-        }
-
-        price = price.divide(sum, 8, RoundingMode.HALF_UP);
-        preference = preference.divide(sum, 8, RoundingMode.HALF_UP);
-        accessibility = accessibility.divide(sum, 8, RoundingMode.HALF_UP);
-        rating = rating.divide(sum, 8, RoundingMode.HALF_UP);
-
-        return new BigDecimal[]{price, preference, accessibility, rating};
+    private double calculateDistanceKm(double fromLatitude,
+                                     double fromLongitude,
+                                     double toLatitude,
+                                     double toLongitude) {
+        double earthRadius = 6371.0;
+        double latDelta = Math.toRadians(toLatitude - fromLatitude);
+        double lonDelta = Math.toRadians(toLongitude - fromLongitude);
+        double a = Math.sin(latDelta / 2) * Math.sin(latDelta / 2)
+                + Math.cos(Math.toRadians(fromLatitude)) * Math.cos(Math.toRadians(toLatitude))
+                * Math.sin(lonDelta / 2) * Math.sin(lonDelta / 2);
+        return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     private BigDecimal getSafe(BigDecimal value) {
-        return value == null ? ZERO : value;
-    }
-
-    private double calculateDistanceKm(double lat1, double lon1, double lat2, double lon2) {
-        double radius = 6371.0;
-        double toRadians = Math.toRadians(1);
-        double dLat = (lat2 - lat1) * toRadians;
-        double dLon = (lon2 - lon1) * toRadians;
-        double radLat1 = lat1 * toRadians;
-        double radLat2 = lat2 * toRadians;
-
-        double haversine = Math.pow(Math.sin(dLat / 2), 2)
-                + Math.cos(radLat1) * Math.cos(radLat2) * Math.pow(Math.sin(dLon / 2), 2);
-        double centralAngle = 2 * Math.asin(Math.min(1.0, Math.sqrt(haversine)));
-        return radius * centralAngle;
+        return value == null ? BigDecimal.valueOf(0) : value;
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        return value.trim().toUpperCase().replaceAll("\\s+", "");
+        return value == null ? null : value.trim().toUpperCase().replaceAll("\\s+", "");
     }
 }

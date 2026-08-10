@@ -1,8 +1,8 @@
 package com.workit.domain.recommendation.activities.dto.response;
 
-import com.workit.domain.recommendation.enums.ReferenceType;
 import com.workit.domain.recommendation.activities.vo.ActivityRecommendationResultVO;
-import com.workit.domain.recommendation.vo.RecommendationRequestVO;
+import com.workit.domain.recommendation.activities.vo.ReferenceType;
+import com.workit.domain.recommendation.activities.vo.RecommendationRequestVO;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

@@ -4,19 +4,18 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.recommendation.activities.dto.request.ActivityRecommendationCreateRequestDTO;
+import com.workit.domain.recommendation.activities.dto.request.RecommendationRecalculateRequestDTO;
 import com.workit.domain.recommendation.activities.dto.response.ActivityRecommendationResponseDTO;
-import com.workit.domain.recommendation.activities.vo.ActivityCandidateVO;
-import com.workit.domain.recommendation.activities.vo.ActivityConditionVO;
+import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.activities.exception.ActivityRecommendationErrorCode;
 import com.workit.domain.recommendation.activities.mapper.ActivityRecommendationMapper;
+import com.workit.domain.recommendation.activities.vo.ActivityCandidateVO;
+import com.workit.domain.recommendation.activities.vo.ActivityConditionVO;
 import com.workit.domain.recommendation.activities.vo.ActivityRecommendationResultVO;
-import com.workit.domain.recommendation.dto.request.RecommendationRecalculateRequestDTO;
-import com.workit.domain.recommendation.enums.RecommendationType;
-import com.workit.domain.recommendation.enums.ReferenceType;
-import com.workit.domain.recommendation.exception.RecommendationErrorCode;
-import com.workit.domain.recommendation.mapper.RecommendationMapper;
-import com.workit.domain.recommendation.vo.RecommendationMerchantVO;
-import com.workit.domain.recommendation.vo.RecommendationRequestVO;
+import com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO;
+import com.workit.domain.recommendation.activities.vo.RecommendationRequestVO;
+import com.workit.domain.recommendation.activities.vo.RecommendationType;
+import com.workit.domain.recommendation.activities.vo.ReferenceType;
 import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.domain.workation.vo.WorkationVO;
 import com.workit.exception.BusinessException;
@@ -46,39 +45,38 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
     private static final String ACTIVITY_CURSOR_ID_KEY = "id";
     private static final ObjectMapper ACTIVITY_CURSOR_OBJECT_MAPPER = new ObjectMapper();
 
-    private final RecommendationMapper recommendationMapper;
     private final ActivityRecommendationMapper activityRecommendationMapper;
     private final WorkationMapper workationMapper;
     private final ActivityScoreCalculator activityScoreCalculator;
 
     @Override
     @Transactional
-    public ActivityRecommendationResponseDTO addActivityRecommendation(Long userId,
+    public RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item> addActivityRecommendation(Long userId,
                                                                       ActivityRecommendationCreateRequestDTO request) {
         if (request == null || request.getWorkationId() == null) {
-            throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            throw new BusinessException(ActivityRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
         ActivityConditionVO condition = getReadyActivityCondition(userId, request.getWorkationId());
-        RecommendationMerchantVO reference = recommendationMapper.selectConfirmedAccommodation(
+        RecommendationMerchantVO reference = activityRecommendationMapper.selectConfirmedAccommodation(
                 userId, condition.getWorkationId());
-        return generateActivityRecommendation(
+        return toCommon(generateActivityRecommendation(
                 userId,
                 condition,
                 reference,
                 parseSelectedActivityCodes(condition),
                 normalizeSize(request.getSize() == null ? DEFAULT_SIZE : request.getSize())
-        );
+        ));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public ActivityRecommendationResponseDTO findActivityRecommendation(Long userId,
+    public RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item> findActivityRecommendation(Long userId,
                                                                        Long referenceMerchantId,
                                                                        String cursor,
                                                                        int size) {
         WorkationVO workation = workationMapper.selectActiveWorkation(userId);
         if (workation == null) {
-            throw new BusinessException(RecommendationErrorCode.WORKATION_NOT_FOUND);
+            throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
         }
 
         int safeSize = normalizeSize(size);
@@ -94,9 +92,9 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                     userId, workation.getId(), selected.getMerchantId());
             if (request != null && request.getReferenceType() == ReferenceType.USER_SELECTED
                     && request.getReferenceMerchantId() != null) {
-                return findActivityPage(request, cursor, safeSize);
+                return toCommon(findActivityPage(request, cursor, safeSize));
             }
-            return createActivityRecommendation(
+            return toCommon(createActivityRecommendation(
                     userId,
                     condition,
                     ReferenceType.USER_SELECTED,
@@ -105,19 +103,19 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                     selected,
                     parseSelectedActivityCodes(condition),
                     safeSize
-            );
+            ));
         }
 
-        RecommendationMerchantVO reference = recommendationMapper.selectConfirmedAccommodation(
+        RecommendationMerchantVO reference = activityRecommendationMapper.selectConfirmedAccommodation(
                 userId, condition.getWorkationId());
         if (reference != null) {
             RecommendationRequestVO request = activityRecommendationMapper.selectLatestActivityRequest(
                     userId, workation.getId(), reference.getMerchantId());
             if (request != null && request.getReferenceType() == ReferenceType.AUTO_MERCHANT
                     && reference.getMerchantId().equals(request.getReferenceMerchantId())) {
-                return findActivityPage(request, cursor, safeSize);
+                return toCommon(findActivityPage(request, cursor, safeSize));
             }
-            return createActivityRecommendation(
+            return toCommon(createActivityRecommendation(
                     userId,
                     condition,
                     ReferenceType.AUTO_MERCHANT,
@@ -126,39 +124,39 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                     reference,
                     parseSelectedActivityCodes(condition),
                     safeSize
-            );
+            ));
         }
 
         RecommendationRequestVO request = activityRecommendationMapper.selectLatestActivityRequest(
                 userId, workation.getId(), null);
         if (request != null && request.getReferenceMerchantId() == null
                 && request.getReferenceType() == ReferenceType.REGION_ONLY) {
-            return findActivityPage(request, cursor, safeSize);
+            return toCommon(findActivityPage(request, cursor, safeSize));
         }
-        return generateActivityRecommendation(
+        return toCommon(generateActivityRecommendation(
                 userId,
                 condition,
                 null,
                 parseSelectedActivityCodes(condition),
                 safeSize
-        );
+        ));
     }
 
     @Override
     @Transactional
-    public ActivityRecommendationResponseDTO recalculateActivityRecommendation(Long userId,
+    public RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item> recalculateActivityRecommendation(Long userId,
                                                                               Long recommendationRequestId,
                                                                               RecommendationRecalculateRequestDTO request) {
         if (recommendationRequestId == null || request == null || request.getReferenceMerchantId() == null) {
-            throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            throw new BusinessException(ActivityRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
-        RecommendationRequestVO previous = recommendationMapper.selectRecommendationRequest(
+        RecommendationRequestVO previous = activityRecommendationMapper.selectRecommendationRequest(
                 recommendationRequestId, userId);
         if (previous == null) {
-            throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            throw new BusinessException(ActivityRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
         if (previous.getRecommendationType() != RecommendationType.ACTIVITY) {
-            throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            throw new BusinessException(ActivityRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
         ActivityConditionVO condition = getReadyActivityCondition(userId, previous.getWorkationId());
         RecommendationMerchantVO selected = activityRecommendationMapper.selectActivityReferenceMerchant(
@@ -167,9 +165,40 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
         if (selected == null) {
             throw new BusinessException(ActivityRecommendationErrorCode.ACTIVITY_REFERENCE_MERCHANT_NOT_FOUND);
         }
-        return createActivityRecommendation(userId, condition, ReferenceType.USER_SELECTED,
+        return toCommon(createActivityRecommendation(userId, condition, ReferenceType.USER_SELECTED,
                 selected.getLatitude(), selected.getLongitude(), selected,
-                parseSelectedActivityCodes(condition), DEFAULT_SIZE);
+                parseSelectedActivityCodes(condition), DEFAULT_SIZE));
+    }
+
+    private RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item> toCommon(
+            ActivityRecommendationResponseDTO response) {
+        if (response == null) {
+            return RecommendationListResponseDTO.<ActivityRecommendationResponseDTO.Item>of(
+                    null, null, null, null, null, 0, false, null);
+        }
+
+        RecommendationListResponseDTO.RecommendationReference reference =
+                new RecommendationListResponseDTO.RecommendationReference(
+                        response.getReference().getReferenceType() == null ? null : response.getReference().getReferenceType().name(),
+                        response.getReference().getPrimaryMerchantId(),
+                        response.getReference().getPrimaryMerchantName(),
+                        response.getReference().getSecondaryMerchantId(),
+                        response.getReference().getSecondaryMerchantName(),
+                        response.getReference().getLatitude() == null ? null : response.getReference().getLatitude().toPlainString(),
+                        response.getReference().getLongitude() == null ? null : response.getReference().getLongitude().toPlainString(),
+                        null
+                );
+
+        return RecommendationListResponseDTO.of(
+                response.getRecommendationRequestId(),
+                response.getRecommendationType(),
+                null,
+                reference,
+                response.getContent(),
+                response.getPageInfo().getSize(),
+                response.getPageInfo().isHasNext(),
+                response.getPageInfo().getNextCursor()
+        );
     }
 
     private ActivityRecommendationResponseDTO generateActivityRecommendation(Long userId,
@@ -178,7 +207,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                                                                            Set<String> selectedActivities,
                                                                            int size) {
         if (condition == null) {
-            throw new BusinessException(RecommendationErrorCode.RECOMMENDATION_CONDITION_NOT_READY);
+            throw new BusinessException(ActivityRecommendationErrorCode.RECOMMENDATION_CONDITION_NOT_READY);
         }
         ReferenceType referenceType = reference == null ? ReferenceType.REGION_ONLY : ReferenceType.AUTO_MERCHANT;
         return createActivityRecommendation(
@@ -209,7 +238,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
         boolean hasPreference = hasPreference(selectedActivities);
         String priority = condition.getPriorityOptionCode() + " " + condition.getPriorityOptionName();
         List<ActivityRecommendationResultVO> results = activityScoreCalculator.calculate(
-                candidates.stream().map(candidate -> (RecommendationMerchantVO) candidate).collect(Collectors.toList()),
+                candidates.stream().map(candidate -> (com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO) candidate).collect(Collectors.toList()),
                 condition.getLeisureBudget(),
                 priority,
                 referenceType,
@@ -229,9 +258,9 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
         if (referenceMerchant != null) {
             request.setReferenceMerchantId(referenceMerchant.getMerchantId());
         }
-        recommendationMapper.insertRecommendationRequest(request);
+        activityRecommendationMapper.insertRecommendationRequest(request);
         activityRecommendationMapper.insertRecommendationResults(request.getId(), results);
-        RecommendationRequestVO saved = recommendationMapper.selectRecommendationRequest(request.getId(), userId);
+        RecommendationRequestVO saved = activityRecommendationMapper.selectRecommendationRequest(request.getId(), userId);
         return findActivityPage(saved, null, size);
     }
 
@@ -254,7 +283,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
         if (days <= 0 || condition.getLeisureBudget() == null
                 || condition.getLeisureBudget().compareTo(BigDecimal.ZERO) <= 0
                 || (condition.getPriorityOptionCode() == null && condition.getPriorityOptionName() == null)) {
-            throw new BusinessException(RecommendationErrorCode.RECOMMENDATION_CONDITION_NOT_READY);
+            throw new BusinessException(ActivityRecommendationErrorCode.RECOMMENDATION_CONDITION_NOT_READY);
         }
         return condition;
     }
@@ -262,7 +291,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
     private ActivityConditionVO getActivityCondition(Long userId, Long workationId) {
         ActivityConditionVO condition = activityRecommendationMapper.selectActivityCondition(userId, workationId);
         if (condition == null) {
-            throw new BusinessException(RecommendationErrorCode.WORKATION_NOT_FOUND);
+            throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
         }
         return condition;
     }
@@ -310,7 +339,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                     )
             );
         } catch (JsonProcessingException exception) {
-            throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            throw new BusinessException(ActivityRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
     }
 
@@ -341,7 +370,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                 return new Cursor(Integer.valueOf(values[0]), Long.valueOf(values[1]));
             }
         } catch (RuntimeException exception) {
-            throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            throw new BusinessException(ActivityRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
     }
 

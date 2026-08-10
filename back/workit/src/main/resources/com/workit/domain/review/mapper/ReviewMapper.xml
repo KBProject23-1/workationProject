@@ -6,12 +6,14 @@
 
     <resultMap id="merchantReviewMap" type="com.workit.domain.review.vo.MerchantReviewVO">
         <id property="reviewId" column="review_id"/>
+        <result property="userId" column="user_id"/>
         <result property="nickname" column="nickname"/>
         <result property="rating" column="rating"/>
         <result property="content" column="content"/>
         <result property="atmosphere" column="atmosphere"/>
         <result property="createdAt" column="created_at"/>
         <result property="imageUrl" column="image_url"/>
+        <result property="isMine" column="is_mine"/>
     </resultMap>
 
     <resultMap id="merchantReviewStatisticsMap"
@@ -115,6 +117,25 @@
             r.atmosphere,
             r.created_at,
             r.image_url
+        FROM reviews r
+        JOIN user_profile up ON up.user_id = r.user_id
+        WHERE r.merchant_id = #{merchantId}
+          AND r.status = 'ACTIVE'
+        ORDER BY r.created_at DESC, r.review_id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectMerchantReviewListWithMine" resultMap="merchantReviewMap">
+        SELECT
+            r.review_id,
+            r.user_id,
+            up.nickname,
+            r.rating,
+            r.content,
+            r.atmosphere,
+            r.created_at,
+            r.image_url,
+            CASE WHEN r.user_id = #{userId} THEN 1 ELSE 0 END AS is_mine
         FROM reviews r
         JOIN user_profile up ON up.user_id = r.user_id
         WHERE r.merchant_id = #{merchantId}

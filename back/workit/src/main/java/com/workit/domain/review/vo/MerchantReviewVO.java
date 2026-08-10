@@ -13,10 +13,12 @@ import java.time.LocalDateTime;
 public class MerchantReviewVO {
 
     private Long reviewId;
+    private Long userId;
     private String nickname;
     private Integer rating;
     private String content;
     private String atmosphere;
     private LocalDateTime createdAt;
     private String imageUrl;
+    private Boolean isMine;
 }

@@ -1,22 +1,47 @@
 package com.workit.domain.merchant.service;
 
-import com.workit.domain.merchant.dto.request.AccommodationListRequestDTO;
-import com.workit.domain.merchant.dto.request.RestaurantListRequestDTO;
-import com.workit.domain.merchant.dto.response.AccommodationListResponseDTO;
-import com.workit.domain.merchant.dto.response.AccommodationDetailResponseDTO;
-import com.workit.domain.merchant.dto.response.RestaurantListResponseDTO;
-import com.workit.domain.merchant.dto.response.RestaurantDetailResponseDTO;
-import com.workit.global.dto.PageResponseDTO;
+import com.workit.domain.merchant.dto.MerchantItemResponseDTO;
+import com.workit.domain.merchant.dto.MerchantListResponseDTO;
+import com.workit.domain.merchant.dto.MerchantDetailResponseDTO;
+import com.workit.domain.merchant.dto.MerchantDetailCommonResponseDTO;
+
+import com.workit.domain.merchant.vo.MerchantSortType;
+import java.time.LocalDate;
 
 public interface MerchantService {
 
-    PageResponseDTO<AccommodationListResponseDTO> findAccommodationList(
-            AccommodationListRequestDTO request
+    MerchantListResponseDTO<MerchantItemResponseDTO> findMerchants(
+            String category,
+            LocalDate checkInDate,
+            LocalDate checkOutDate,
+            Integer headcount,
+            Long minPrice,
+            Long maxPrice,
+            MerchantSortType sort,
+            String cursor,
+            int size,
+            Long regionId
     );
 
-    AccommodationDetailResponseDTO findAccommodationDetails(Long merchantId);
+    MerchantDetailResponseDTO findAccommodationProducts(
+            Long merchantId,
+            LocalDate checkInDate,
+            LocalDate checkOutDate,
+            Integer roomCount,
+            Integer guestCount
+    );
 
-    PageResponseDTO<RestaurantListResponseDTO> findRestaurantList(RestaurantListRequestDTO request);
+    MerchantDetailResponseDTO findOfficeProducts(
+            Long merchantId
+    );
 
-    RestaurantDetailResponseDTO findRestaurantDetails(Long merchantId);
+    MerchantDetailCommonResponseDTO findRestaurantProducts(
+            Long userId,
+            Long merchantId
+    );
+
+    MerchantDetailCommonResponseDTO findActivityProducts(
+            Long userId,
+            Long merchantId
+    );
 }

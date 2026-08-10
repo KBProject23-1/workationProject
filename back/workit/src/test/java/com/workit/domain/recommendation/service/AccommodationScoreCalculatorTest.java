@@ -1,8 +1,9 @@
 package com.workit.domain.recommendation.service;
 
-import com.workit.domain.recommendation.enums.ReferenceType;
-import com.workit.domain.recommendation.vo.RecommendationMerchantVO;
-import com.workit.domain.recommendation.vo.RecommendationResultVO;
+import com.workit.domain.recommendation.accommodation.service.AccommodationScoreCalculator;
+import com.workit.domain.recommendation.accommodation.vo.ReferenceType;
+import com.workit.domain.recommendation.accommodation.vo.RecommendationMerchantVO;
+import com.workit.domain.recommendation.accommodation.vo.RecommendationResultVO;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
