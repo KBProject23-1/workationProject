@@ -102,9 +102,9 @@ public class WalletServiceImpl implements WalletService {
             throw new BusinessException(WalletErrorCode.WALLET_NOT_FOUND);
         }
 
-        BankAccountVO primaryAccount = accountMapper.findPrimaryAccount(userId);
-        if (primaryAccount == null) {
-            throw new BusinessException(WalletErrorCode.WALLET_PRIMARY_ACCOUNT_NOT_FOUND);
+        BankAccountVO targetAccount = accountMapper.findAccountById(request.getAccountId(), userId);
+        if (targetAccount == null) {
+            throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_NOT_FOUND);
         }
 
         int walletUpdatedRows = walletMapper.decreaseBalance(userId, amount);
@@ -112,21 +112,21 @@ public class WalletServiceImpl implements WalletService {
             throw new BusinessException(WalletErrorCode.WALLET_INSUFFICIENT_BALANCE);
         }
 
-        int accountUpdatedRows = accountMapper.increaseBalance(primaryAccount.getId(), amount);
+        int accountUpdatedRows = accountMapper.increaseBalance(targetAccount.getId(), amount);
         if (accountUpdatedRows == 0) {
             throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_STATE_INVALID);
         }
 
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
-        TransactionVO refundTx = TransactionVO.forWalletRefund(userId, wallet, primaryAccount, amount, request.getIdempotencyKey());
+        TransactionVO refundTx = TransactionVO.forWalletRefund(userId, wallet, targetAccount, amount, request.getIdempotencyKey());
         try {
             transactionMapper.insertTransaction(refundTx);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(WalletErrorCode.WALLET_DUPLICATE_REQUEST);
         }
 
-        return RefundResponse.of(refundTx, updatedWallet.getBalance(), primaryAccount);
+        return RefundResponse.of(refundTx, updatedWallet.getBalance(), targetAccount);
     }
 
     private void validateChargeRequest(ChargeRequest request) {
@@ -156,6 +156,9 @@ public class WalletServiceImpl implements WalletService {
     }
 
     private void validateRefundRequest(RefundRequest request) {
+        if (request.getAccountId() == null) {
+            throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_ID_REQUIRED);
+        }
         if (request.getAmount() == null) {
             throw new BusinessException(WalletErrorCode.WALLET_REFUND_AMOUNT_REQUIRED);
         }
