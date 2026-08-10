@@ -4,6 +4,9 @@ import com.workit.domain.account.mapper.AccountMapper;
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.card.mapper.CardMapper;
 import com.workit.domain.card.vo.CardVO;
+import com.workit.domain.ledger.mapper.LedgerEntryMapper;
+import com.workit.domain.ledger.vo.LedgerEntryVO;
+import com.workit.domain.transaction.constant.TransactionStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.transaction.exception.TransactionErrorCode;
@@ -42,6 +45,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
     private final CardMapper cardMapper;
+    private final LedgerEntryMapper ledgerEntryMapper;
     private final PinValidator pinValidator;
 
     @Override
@@ -159,6 +163,15 @@ public class TransactionServiceImpl implements TransactionService {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_WALLET_NOT_FOUND);
         }
 
+        // 1) REQUESTED 결제 거래 생성 — 멱등키 중복이면 자동충전/차감 전에 먼저 거부(409)
+        TransactionVO paymentTx = TransactionVO.forWalletPayment(userId, wallet, request);
+        try {
+            transactionMapper.insertTransaction(paymentTx);
+        } catch (DuplicateKeyException e) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
+        }
+
+        // 2) 잔액 부족 시 자동충전 (주계좌 -> 지갑). 내부 서브거래로 별도 기록 + 원장 기입
         BigDecimal shortage = amount.subtract(wallet.getBalance());
         boolean isAutoCharged = shortage.compareTo(BigDecimal.ZERO) > 0;
         BigDecimal autoChargedAmount = null;
@@ -182,10 +195,18 @@ public class TransactionServiceImpl implements TransactionService {
             walletMapper.increaseBalance(userId, actualChargeAmount);
             autoChargedAmount = actualChargeAmount;
 
+            // 자동충전은 내부 원자 충전이라 PAID 로 즉시 생성(forAutoCharge). 단, 잔액이 움직였으므로 원장은 기입한다.
             TransactionVO depositTx = TransactionVO.forAutoCharge(userId, wallet, primaryAccount, actualChargeAmount);
             transactionMapper.insertTransaction(depositTx);
+            BigDecimal accBalanceAfter = primaryAccount.getBalance().subtract(actualChargeAmount);
+            BigDecimal walBalanceAfter = wallet.getBalance().add(actualChargeAmount);
+            ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
+                    depositTx.getId(), 1, LedgerEntryVO.ACCOUNT_BANK, primaryAccount.getId(), actualChargeAmount, accBalanceAfter));
+            ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
+                    depositTx.getId(), 2, LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), actualChargeAmount, walBalanceAfter));
         }
 
+        // 3) 지갑 차감
         int walletUpdatedRows = walletMapper.decreaseBalance(userId, amount);
         if (walletUpdatedRows == 0) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_WALLET_BALANCE);
@@ -193,12 +214,17 @@ public class TransactionServiceImpl implements TransactionService {
 
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
-        TransactionVO paymentTx = TransactionVO.forWalletPayment(userId, wallet, request);
-        try {
-            transactionMapper.insertTransaction(paymentTx);
-        } catch (DuplicateKeyException e) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
-        }
+        // 4) 결제 원장: WALLET DEBIT(나감) / MERCHANT CREDIT(들어옴). 가맹점 잔액은 미보유 -> balance_after null
+        ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
+                paymentTx.getId(), 1, LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, updatedWallet.getBalance()));
+        ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
+                paymentTx.getId(), 2, LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
+
+        // 5) PAID 로 전이
+        LocalDateTime approvedAt = LocalDateTime.now();
+        transactionMapper.updateStatus(paymentTx.getId(), TransactionStatus.PAID.name(), approvedAt);
+        paymentTx.setStatus(TransactionStatus.PAID.name());
+        paymentTx.setApprovedAt(approvedAt);
 
         return PaymentResponse.ofWallet(paymentTx, updatedWallet.getBalance(), isAutoCharged, autoChargedAmount);
     }
@@ -216,12 +242,26 @@ public class TransactionServiceImpl implements TransactionService {
         boolean isBusinessExpense = "WORK".equals(card.getCardType());
         String approvalNumber = TransactionNumberGenerator.generateApprovalNumber();
 
+        // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409)
         TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense, approvalNumber);
         try {
             transactionMapper.insertTransaction(paymentTx);
         } catch (DuplicateKeyException e) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
         }
+
+        // 2) 원장: CARD DEBIT / MERCHANT CREDIT. 카드는 외부 발급사 자금이라 내부 잔액 이동 없음 -> balance_after null
+        BigDecimal amount = request.getAmount();
+        ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
+                paymentTx.getId(), 1, LedgerEntryVO.ACCOUNT_CARD, card.getId(), amount, null));
+        ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
+                paymentTx.getId(), 2, LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
+
+        // 3) PAID 로 전이 (item 2 에서 REQUESTED -> AUTHORIZED -> PAID 로 확장 예정)
+        LocalDateTime approvedAt = LocalDateTime.now();
+        transactionMapper.updateStatus(paymentTx.getId(), TransactionStatus.PAID.name(), approvedAt);
+        paymentTx.setStatus(TransactionStatus.PAID.name());
+        paymentTx.setApprovedAt(approvedAt);
 
         return PaymentResponse.ofCard(paymentTx);
     }

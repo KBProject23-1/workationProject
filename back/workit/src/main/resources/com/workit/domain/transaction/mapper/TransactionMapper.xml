@@ -141,6 +141,15 @@
         )
     </insert>
 
+    <!-- 상태 전이. approved_at 은 전달된 값이 있을 때만 갱신(승인 성공 시점) -->
+    <update id="updateStatus">
+        UPDATE transactions
+        SET status = #{status},
+            updated_at = NOW()
+            <if test="approvedAt != null">, approved_at = #{approvedAt}</if>
+        WHERE id = #{transactionId}
+    </update>
+
     <select id="findTransactionForCancel" resultMap="TransactionResultMap">
         SELECT t.*, c.card_classification AS card_classification
         FROM transactions t

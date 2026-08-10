@@ -44,6 +44,11 @@ public interface TransactionMapper {
     // 거래 생성 (충전/환불/카드결제 공용)
     void insertTransaction(TransactionVO transaction);
 
+    // 상태 전이 (REQUESTED -> AUTHORIZED/PAID 등). approvedAt 은 승인 성공 시점에만 채운다(그 외 null 전달).
+    int updateStatus(@Param("transactionId") Long transactionId,
+                     @Param("status") String status,
+                     @Param("approvedAt") java.time.LocalDateTime approvedAt);
+
     // 취소 대상 조회
     TransactionVO findTransactionForCancel(@Param("transactionId") Long transactionId,
                                            @Param("userId") Long userId);
