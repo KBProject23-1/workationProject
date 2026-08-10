@@ -190,7 +190,7 @@ public class TransactionServiceImpl implements TransactionService {
                 throw new BusinessException(TransactionErrorCode.TRANSACTION_PRIMARY_ACCOUNT_NOT_FOUND_FOR_AUTO_CHARGE);
             }
 
-            int accountUpdatedRows = accountMapper.decreaseBalance(primaryAccount.getId(), actualChargeAmount);
+            int accountUpdatedRows = accountMapper.decreaseBalance(primaryAccount.getId(), userId, actualChargeAmount);
             if (accountUpdatedRows == 0) {
                 throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_ACCOUNT_BALANCE);
             }
@@ -225,7 +225,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         // 5) PAID 로 전이
         LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(paymentTx.getId(), TransactionStatus.PAID.name(), approvedAt);
+        transactionMapper.updateStatus(paymentTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
         paymentTx.setStatus(TransactionStatus.PAID.name());
         paymentTx.setApprovedAt(approvedAt);
 
@@ -260,7 +260,7 @@ public class TransactionServiceImpl implements TransactionService {
         } catch (PgException e) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_AUTH_FAILED);
         }
-        transactionMapper.applyPgAuthorization(paymentTx.getId(), auth.getPgTransactionId(), auth.getApprovalNumber());
+        transactionMapper.applyPgAuthorization(paymentTx.getId(), userId, auth.getPgTransactionId(), auth.getApprovalNumber());
         paymentTx.setPgTransactionId(auth.getPgTransactionId());
         paymentTx.setApprovedNumber(auth.getApprovalNumber());
         paymentTx.setStatus(TransactionStatus.AUTHORIZED.name());
@@ -281,7 +281,7 @@ public class TransactionServiceImpl implements TransactionService {
 
         // 5) PAID 로 전이 (매입 완료)
         LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(paymentTx.getId(), TransactionStatus.PAID.name(), approvedAt);
+        transactionMapper.updateStatus(paymentTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
         paymentTx.setStatus(TransactionStatus.PAID.name());
         paymentTx.setApprovedAt(approvedAt);
 
@@ -361,7 +361,7 @@ public class TransactionServiceImpl implements TransactionService {
             refundedTo = "WALLET";
         }
 
-        transactionMapper.cancelTransaction(transactionId);
+        transactionMapper.cancelTransaction(transactionId, userId);
 
         TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
 

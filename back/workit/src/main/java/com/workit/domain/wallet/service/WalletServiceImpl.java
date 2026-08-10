@@ -85,7 +85,7 @@ public class WalletServiceImpl implements WalletService {
         }
 
         // 2) 잔액 이동 (계좌 차감 -> 지갑 적립). 실패 시 예외로 트랜잭션 전체 롤백(REQUESTED insert 포함)
-        int accountUpdatedRows = accountMapper.decreaseBalance(request.getAccountId(), amount);
+        int accountUpdatedRows = accountMapper.decreaseBalance(request.getAccountId(), userId, amount);
         if (accountUpdatedRows == 0) {
             throw new BusinessException(WalletErrorCode.WALLET_INSUFFICIENT_ACCOUNT_BALANCE);
         }
@@ -102,7 +102,7 @@ public class WalletServiceImpl implements WalletService {
 
         // 4) PAID 로 전이 (승인 시각 기록)
         LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(chargeTx.getId(), TransactionStatus.PAID.name(), approvedAt);
+        transactionMapper.updateStatus(chargeTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
         chargeTx.setStatus(TransactionStatus.PAID.name());
         chargeTx.setApprovedAt(approvedAt);
 
@@ -141,7 +141,7 @@ public class WalletServiceImpl implements WalletService {
         if (walletUpdatedRows == 0) {
             throw new BusinessException(WalletErrorCode.WALLET_INSUFFICIENT_BALANCE);
         }
-        int accountUpdatedRows = accountMapper.increaseBalance(targetAccount.getId(), amount);
+        int accountUpdatedRows = accountMapper.increaseBalance(targetAccount.getId(), userId, amount);
         if (accountUpdatedRows == 0) {
             throw new BusinessException(WalletErrorCode.WALLET_ACCOUNT_STATE_INVALID);
         }
@@ -156,7 +156,7 @@ public class WalletServiceImpl implements WalletService {
 
         // 4) PAID 로 전이 (승인 시각 기록)
         LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(refundTx.getId(), TransactionStatus.PAID.name(), approvedAt);
+        transactionMapper.updateStatus(refundTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
         refundTx.setStatus(TransactionStatus.PAID.name());
         refundTx.setApprovedAt(approvedAt);
 

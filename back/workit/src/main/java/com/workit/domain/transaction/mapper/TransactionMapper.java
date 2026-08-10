@@ -45,12 +45,15 @@ public interface TransactionMapper {
     void insertTransaction(TransactionVO transaction);
 
     // 상태 전이 (REQUESTED -> AUTHORIZED/PAID 등). approvedAt 은 승인 성공 시점에만 채운다(그 외 null 전달).
+    // user_id 로 자가 스코프해, 사전 소유권 검증이 없는 경로에서도 남의 거래를 갱신하지 못하게 한다.
     int updateStatus(@Param("transactionId") Long transactionId,
+                     @Param("userId") Long userId,
                      @Param("status") String status,
                      @Param("approvedAt") java.time.LocalDateTime approvedAt);
 
     // PG 승인(authorize) 성공 반영: pg_transaction_id / approved_number 기록 + AUTHORIZED 로 전이
     int applyPgAuthorization(@Param("transactionId") Long transactionId,
+                             @Param("userId") Long userId,
                              @Param("pgTransactionId") String pgTransactionId,
                              @Param("approvedNumber") String approvedNumber);
 
@@ -58,6 +61,6 @@ public interface TransactionMapper {
     TransactionVO findTransactionForCancel(@Param("transactionId") Long transactionId,
                                            @Param("userId") Long userId);
 
-    // 거래 취소 처리
-    void cancelTransaction(@Param("transactionId") Long transactionId);
+    // 거래 취소 처리 (user_id 자가 스코프)
+    void cancelTransaction(@Param("transactionId") Long transactionId, @Param("userId") Long userId);
 }
