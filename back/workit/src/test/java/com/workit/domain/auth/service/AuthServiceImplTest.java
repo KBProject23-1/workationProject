@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
@@ -2077,6 +2078,226 @@ class AuthServiceImplTest {
         String text = request.toString();
 
         // Then
+        assertFalse(text.contains("NewPassword123!"));
+    }
+
+    // ---------- 비밀번호 변경 (로그인 사용자) ----------
+
+    /**
+     * 비밀번호 변경 테스트용 회원 등록 — findUserById(회원/상태) + 현재 비밀번호 hash 조회를 Stub 한다.
+     * - 현재 비밀번호는 BCrypt 해시로 저장 (Service 검증 대상)
+     */
+    private void registerPasswordChangeUser(Long userId, String currentPassword, String status) {
+        LoginUserVO user = new LoginUserVO();
+        user.setId(userId);
+        user.setStatus(status);
+        lenient().when(authMapper.findUserById(userId)).thenReturn(user);
+        lenient().when(authMapper.selectPasswordHashByUserId(userId))
+                .thenReturn(PasswordEncryptor.encode(currentPassword));
+    }
+
+    /** 비밀번호 변경 요청 DTO 생성 헬퍼 */
+    private ChangePasswordRequestDTO changePasswordRequest(String currentPassword, String newPassword) {
+        ChangePasswordRequestDTO request = new ChangePasswordRequestDTO();
+        request.setCurrentPassword(currentPassword);
+        request.setNewPassword(newPassword);
+        return request;
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 성공 - BCrypt 해시로 password_hash 갱신 + 기존 Refresh Token 전체 폐기")
+    void changePassword_success() {
+        // Given — ACTIVE 회원 + 기존 Refresh Token 세션 존재 + 갱신 성공
+        registerPasswordChangeUser(501L, "password123!", "ACTIVE");
+        savedRefreshTokens.put(501L, "stored-hash");
+        when(authMapper.updatePasswordHash(eq(501L), anyString())).thenReturn(1);
+
+        // When
+        authService.changePassword(501L, changePasswordRequest("password123!", "NewPassword123!"));
+
+        // Then — BCrypt 해시로 갱신 (원문과 다르고 matches 검증 통과 — 원문 저장 금지)
+        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+        verify(authMapper).updatePasswordHash(eq(501L), hashCaptor.capture());
+        assertNotEquals("NewPassword123!", hashCaptor.getValue());
+        assertTrue(PasswordEncryptor.matches("NewPassword123!", hashCaptor.getValue()));
+
+        // 기존 Refresh Token 전체 폐기 — 이후 재발급 불가
+        assertTrue(savedRefreshTokens.isEmpty());
+        verify(refreshTokenStore).delete(501L);
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 현재 비밀번호 불일치 → AUTH_INVALID_PASSWORD + 갱신/세션 폐기 없음")
+    void changePassword_wrongCurrentPassword_throws() {
+        // Given — ACTIVE 회원 (현재 비밀번호: password123!)
+        registerPasswordChangeUser(501L, "password123!", "ACTIVE");
+
+        // When — 잘못된 현재 비밀번호
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L,
+                        changePasswordRequest("wrong-password!", "NewPassword123!")));
+
+        // Then
+        assertEquals(AuthErrorCode.AUTH_INVALID_PASSWORD, ex.getErrorCode());
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+        verify(refreshTokenStore, never()).delete(anyLong());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 신규 비밀번호가 현재 비밀번호와 동일 → AUTH_SAME_PASSWORD")
+    void changePassword_samePassword_throws() {
+        // Given — ACTIVE 회원 (현재 비밀번호: password123!)
+        registerPasswordChangeUser(501L, "password123!", "ACTIVE");
+
+        // When — 신규 비밀번호도 동일
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L,
+                        changePasswordRequest("password123!", "password123!")));
+
+        // Then
+        assertEquals(AuthErrorCode.AUTH_SAME_PASSWORD, ex.getErrorCode());
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+        verify(refreshTokenStore, never()).delete(anyLong());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 약한 신규 비밀번호 → WEAK_PASSWORD (422) + 갱신 없음")
+    void changePassword_weakPassword_throws() {
+        // Given — ACTIVE 회원
+        registerPasswordChangeUser(501L, "password123!", "ACTIVE");
+
+        // When & Then — 특수문자 누락 (영문+숫자만) → 정책 미달
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L,
+                        changePasswordRequest("password123!", "password123")));
+
+        // Then
+        assertEquals(AuthErrorCode.WEAK_PASSWORD, ex.getErrorCode());
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - currentPassword/newPassword 누락 → INVALID_PASSWORD_CHANGE_REQUEST (400)")
+    void changePassword_missingFields_throws() {
+        // When & Then — null 요청
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L, null));
+        assertEquals(AuthErrorCode.INVALID_PASSWORD_CHANGE_REQUEST, nullEx.getErrorCode());
+
+        // currentPassword 누락
+        BusinessException currentEx = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L, changePasswordRequest("", "NewPassword123!")));
+        assertEquals(AuthErrorCode.INVALID_PASSWORD_CHANGE_REQUEST, currentEx.getErrorCode());
+
+        // newPassword 누락/빈 값
+        BusinessException newEx = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L, changePasswordRequest("password123!", "   ")));
+        assertEquals(AuthErrorCode.INVALID_PASSWORD_CHANGE_REQUEST, newEx.getErrorCode());
+
+        // 검증 실패 시 Mapper 조회/갱신이 발생하지 않아야 한다
+        verify(authMapper, never()).findUserById(anyLong());
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 회원 없음 → USER_NOT_FOUND (404)")
+    void changePassword_userNotFound_throws() {
+        // Given — findUserById 조회 결과 없음 (미존재 회원)
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L,
+                        changePasswordRequest("password123!", "NewPassword123!")));
+
+        // Then
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+        verify(authMapper, never()).selectPasswordHashByUserId(anyLong());
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 탈퇴(WITHDRAWN) 회원 → USER_NOT_FOUND (계정 존재 여부 노출 방지)")
+    void changePassword_withdrawnUser_throws() {
+        // Given — 탈퇴 상태 회원
+        registerPasswordChangeUser(501L, "password123!", "WITHDRAWN");
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.changePassword(501L,
+                        changePasswordRequest("password123!", "NewPassword123!")));
+
+        // Then — 탈퇴 회원도 USER_NOT_FOUND 로 통일
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+        verify(authMapper, never()).selectPasswordHashByUserId(anyLong());
+        verify(authMapper, never()).updatePasswordHash(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 후 - 새 비밀번호로 로그인 성공")
+    void changePassword_thenLoginWithNewPassword_success() {
+        // Given — 기존 비밀번호(password123!) 회원 + 변경 성공 Stub
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.selectPasswordHashByUserId(501L))
+                .thenReturn(PasswordEncryptor.encode("password123!"));
+        when(authMapper.updatePasswordHash(eq(501L), anyString())).thenReturn(1);
+
+        // When — 비밀번호 변경
+        authService.changePassword(501L, changePasswordRequest("password123!", "NewPassword123!"));
+
+        // Then — DB 에 저장된 신규 BCrypt 해시로 로그인 조회 경로를 교체하면 새 비밀번호로 로그인 성공
+        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+        verify(authMapper).updatePasswordHash(eq(501L), hashCaptor.capture());
+
+        LoginUserVO updated = new LoginUserVO();
+        updated.setId(501L);
+        updated.setStatus("ACTIVE");
+        updated.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
+        updated.setPasswordHash(hashCaptor.getValue());
+        lenient().when(authMapper.findUserByEmailHash(sha256("user@example.com"))).thenReturn(updated);
+
+        LoginResponseDTO result = authService.login(
+                loginRequest("PASSWORD", "user@example.com", "NewPassword123!", null, null));
+
+        assertNotNull(result);
+        assertEquals(501L, result.getUserId().longValue());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 후 - 기존 Refresh Token 으로 재발급 요청 실패 (INVALID_REFRESH_TOKEN)")
+    void changePassword_thenOldRefreshTokenCannotReissue() {
+        // Given — 로그인 세션 존재 (Refresh Token 발급 + Redis hash 저장)
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        String oldRefreshToken = issueRefreshTokenSession(501L);
+        assertFalse(savedRefreshTokens.isEmpty());
+
+        // 비밀번호 변경 성공 Stub
+        when(authMapper.selectPasswordHashByUserId(501L))
+                .thenReturn(PasswordEncryptor.encode("password123!"));
+        when(authMapper.updatePasswordHash(eq(501L), anyString())).thenReturn(1);
+
+        // When — 비밀번호 변경 → 기존 Refresh Token 세션 전체 폐기
+        authService.changePassword(501L, changePasswordRequest("password123!", "NewPassword123!"));
+
+        // Then — 세션이 폐기되어 기존 Refresh Token 으로는 재발급 불가
+        assertTrue(savedRefreshTokens.isEmpty());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.refreshAccessToken(oldRefreshToken));
+        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("보안 - ChangePasswordRequestDTO toString 에 비밀번호 원문 미노출")
+    void changePassword_requestToStringHidesSecret() {
+        // Given
+        ChangePasswordRequestDTO request = changePasswordRequest("CurrentPassword123!", "NewPassword123!");
+
+        // When
+        String text = request.toString();
+
+        // Then
+        assertFalse(text.contains("CurrentPassword123!"));
         assertFalse(text.contains("NewPassword123!"));
     }
 

@@ -225,6 +225,18 @@
     </select>
 
     <!--
+        비밀번호 변경 - 로그인 사용자의 현재 비밀번호 hash 조회.
+        - 현재 비밀번호 BCrypt 대조용 — password_hash(해시) 만 조회한다
+        - BCrypt 는 단방향 해시이므로 원문을 복호화하지 않고 해시 그대로 matches() 에 사용한다
+        - user_auth 행이 없으면 null 반환 (USER_NOT_FOUND 판단은 Service)
+    -->
+    <select id="selectPasswordHashByUserId" resultType="java.lang.String">
+        SELECT password_hash
+        FROM user_auth
+        WHERE user_id = #{userId}
+    </select>
+
+    <!--
         비밀번호 재설정 - user_auth.password_hash 갱신 (비밀번호 변경 완료).
         - password_hash(BCrypt) 는 Service Layer 에서 생성 후 전달 (Mapper 에서 암호화 금지)
         - updated_at 은 DB 기본값 정책과 동일하게 CURRENT_TIMESTAMP 로 갱신 (created_at 변경 없음)

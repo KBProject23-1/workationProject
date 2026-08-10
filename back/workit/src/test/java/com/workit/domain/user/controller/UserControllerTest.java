@@ -2,6 +2,9 @@ package com.workit.domain.user.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
+import com.workit.domain.auth.exception.AuthErrorCode;
+import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -52,11 +55,15 @@ class UserControllerTest {
     @Mock
     private UserService userService;
 
+    // 비밀번호 변경은 Auth 도메인 책임 — UserController 가 AuthService 로 위임하므로 Mock 으로 주입한다
+    @Mock
+    private AuthService authService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService, authService))
                 .setControllerAdvice(new CommonExceptionAdvice())
                 // @CurrentUser Long userId 파라미터 해석용 — 운영에서는 ServletConfig 가 등록한다
                 .setCustomArgumentResolvers(new CurrentUserArgumentResolver())
@@ -104,6 +111,12 @@ class UserControllerTest {
     private void stubUpdateProfileError(UserErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(userService).updateProfile(anyLong(), any(ProfileUpdateRequestDTO.class));
+    }
+
+    /** 비밀번호 변경 실패 Stub — AuthService 가 지정 에러를 던진다 */
+    private void stubChangePasswordError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(authService).changePassword(anyLong(), any(ChangePasswordRequestDTO.class));
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -427,6 +440,154 @@ class UserControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(userService, never()).onboardProfile(anyLong(), any(ProfileOnboardingRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 내 비밀번호 변경 ----------
+
+    @Test
+    @DisplayName("비밀번호 변경 성공 - 200 + SUCCESS + 변경 완료 메시지 + AuthService 위임")
+    void changePassword_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"CurrentPassword123!\",\"newPassword\":\"NewPassword123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: data null + 변경 완료 메시지
+        //   (CommonResponse 는 NON_NULL 직렬화 — data 가 null 이면 JSON 에서 제외됨)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("비밀번호가 성공적으로 변경되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+
+        // Controller 는 userId 와 요청을 AuthService 로 위임만 한다 (DB 접근/암호화 금지)
+        verify(authService).changePassword(eq(501L), any(ChangePasswordRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 현재 비밀번호 불일치 → 400 + AUTH_INVALID_PASSWORD")
+    void changePassword_invalidCurrentPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 현재 비밀번호 불일치를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePasswordError(AuthErrorCode.AUTH_INVALID_PASSWORD);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"WrongPassword123!\",\"newPassword\":\"NewPassword123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_INVALID_PASSWORD", json.get("errorCode").asText());
+        assertEquals("현재 비밀번호가 올바르지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 신규 비밀번호가 현재와 동일 → 400 + AUTH_SAME_PASSWORD")
+    void changePassword_samePassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 동일 비밀번호를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePasswordError(AuthErrorCode.AUTH_SAME_PASSWORD);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"CurrentPassword123!\",\"newPassword\":\"CurrentPassword123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_SAME_PASSWORD", json.get("errorCode").asText());
+        assertEquals("현재 비밀번호와 다른 비밀번호를 입력해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 약한 비밀번호 → 422 + WEAK_PASSWORD")
+    void changePassword_weakPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 비밀번호 정책 미달을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePasswordError(AuthErrorCode.WEAK_PASSWORD);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"CurrentPassword123!\",\"newPassword\":\"password\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("WEAK_PASSWORD", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 요청 값 누락 → 400 + INVALID_PASSWORD_CHANGE_REQUEST")
+    void changePassword_missingFields() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 필수 값 누락을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePasswordError(AuthErrorCode.INVALID_PASSWORD_CHANGE_REQUEST);
+
+        // When — newPassword 누락 본문
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"CurrentPassword123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PASSWORD_CHANGE_REQUEST", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 회원 없음 → 404 + USER_NOT_FOUND")
+    void changePassword_userNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 회원 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePasswordError(AuthErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"CurrentPassword123!\",\"newPassword\":\"NewPassword123!\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void changePassword_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"CurrentPassword123!\",\"newPassword\":\"NewPassword123!\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(authService, never()).changePassword(anyLong(), any(ChangePasswordRequestDTO.class));
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
