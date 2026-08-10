@@ -1,6 +1,7 @@
 package com.workit.domain.workation.service;
 
 import com.workit.domain.workation.vo.BudgetSpentVO;
+import com.workit.domain.workation.vo.WorkationReservationVO;
 import com.workit.domain.workation.vo.WorkationVO;
 import com.workit.domain.workation.dto.request.WorkationCreateRequestDTO;
 import com.workit.domain.workation.dto.request.WorkationUpdateRequestDTO;
@@ -16,8 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,6 +31,9 @@ public class WorkationServiceImpl implements WorkationService {
 
     private static final int DEFAULT_PAGE_SIZE = 10;
     private static final int MAX_PAGE_SIZE = 50;
+
+    // 숙박 상품만 "잘 곳이 없는 날" 계산에 쓴다
+    private static final String ROOM_PRODUCT_TYPE = "ROOM";
 
     private final WorkationMapper workationMapper;
     private final WorkationOwnershipValidator ownershipValidator;
@@ -153,13 +160,27 @@ public class WorkationServiceImpl implements WorkationService {
         //    지난 워케이션 기록 삭제를 지원하므로 정산 완료 건도 허용한다
         ownershipValidator.getOwned(userId, workationId);
 
-        // 2) 결제 원본은 보존하고 워케이션 연결만 해제
-        workationMapper.unlinkTransactions(workationId);
+        // 2) 아직 시작하지 않은 예약은 사용자가 직접 취소해야 한다
+        //    환불이 걸려 있어 워케이션을 지우면서 임의로 처리할 수 없다
+        int upcoming = workationMapper.countUpcomingReservations(workationId);
 
-        // 3) FK 제약 때문에 하위 데이터부터 삭제
+        if (upcoming > 0) {
+            throw new BusinessException(WorkationErrorCode.RESERVATION_EXISTS,
+                    String.format("아직 이용하지 않은 예약 %d건이 있습니다. 예약을 먼저 취소해 주세요.",
+                            upcoming));
+        }
+
+        // 3) 결제·예약 이력은 보존하고 워케이션 연결만 해제
+        //    이미 이용했거나 취소된 예약은 사용자가 손댈 수 없으므로 여기서 정리한다
+        workationMapper.unlinkTransactions(workationId);
+        workationMapper.unlinkReservations(workationId);
+
+        // 4) FK 제약 때문에 하위 데이터부터 삭제
+        //    추천 이력은 워케이션이 사라지면 의미가 없으므로 함께 지운다
         workationMapper.deleteExpensesByWorkationId(workationId);
         workationMapper.deleteBudgetsByWorkationId(workationId);
         workationMapper.deleteSurveysByWorkationId(workationId);
+        workationMapper.deleteRecommendationRequestsByWorkationId(workationId);
 
         workationMapper.deleteWorkation(workationId);
         log.info("워케이션 삭제 완료 - id: {}, userId: {}", workationId, userId);
@@ -178,6 +199,117 @@ public class WorkationServiceImpl implements WorkationService {
 
         // settled_at 은 DB 에서 채워지므로 재조회해서 응답한다
         return WorkationSettleResponseDTO.from(workationMapper.selectWorkationById(workationId));
+    }
+
+    // =====================================================================================
+    // 1.8 기간 변경 영향 조회
+    // =====================================================================================
+
+    // 기간을 바꾸기 전에 예약이 어떻게 어긋나는지 미리 알려준다.
+    // 예약을 고치지는 않는다. 취소·변경·환불은 전부 예약 파트 소관이다.
+    @Override
+    @Transactional(readOnly = true)
+    public ReservationCheckResponseDTO checkReservations(Long userId, Long workationId,
+                                                         LocalDate startDate, LocalDate endDate) {
+
+        WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
+
+        // 날짜를 주지 않으면 지금 기간 기준으로 본다. 홈 화면에서 현재 상태를 볼 때 쓴다
+        LocalDate from = (startDate != null) ? startDate : workation.getStartDate();
+        LocalDate to = (endDate != null) ? endDate : workation.getEndDate();
+
+        if (to.isBefore(from)) {
+            throw new IllegalArgumentException("종료일은 시작일 이후여야 합니다.");
+        }
+
+        List<WorkationReservationVO> reservations =
+                workationMapper.selectActiveReservations(workationId);
+
+        LocalDate today = LocalDate.now();
+
+        List<ReservationCheckResponseDTO.ReservationItem> outOfPeriod = reservations.stream()
+                .filter(vo -> isOutOfPeriod(vo, from, to))
+                .map(vo -> ReservationCheckResponseDTO.ReservationItem.from(vo, today))
+                .collect(Collectors.toList());
+
+        List<LocalDate> uncoveredDates = findUncoveredDates(reservations, from, to);
+
+        // 삭제 화면이 쓰는 요약.
+        // 아직 시작하지 않은 예약은 사용자가 취소할 수 있고, 시작한 예약은 손댈 수 없다
+        List<WorkationReservationVO> upcoming = reservations.stream()
+                .filter(vo -> today.isBefore(vo.getStartDate()))
+                .collect(Collectors.toList());
+
+        List<WorkationReservationVO> ongoing = reservations.stream()
+                .filter(vo -> !today.isBefore(vo.getStartDate()))
+                .collect(Collectors.toList());
+
+        return ReservationCheckResponseDTO.builder()
+                .startDate(from)
+                .endDate(to)
+                .outOfPeriod(outOfPeriod)
+                .uncoveredDates(uncoveredDates)
+                .needsAction(!outOfPeriod.isEmpty() || !uncoveredDates.isEmpty())
+                .upcoming(summarize(upcoming))
+                .ongoing(summarize(ongoing))
+                .build();
+    }
+
+    // 숙박과 공유오피스를 나눠 센다. 회의실은 오피스로 묶는다
+    private ReservationCheckResponseDTO.ReservationSummary summarize(
+            List<WorkationReservationVO> reservations) {
+
+        int room = 0;
+        int office = 0;
+
+        for (WorkationReservationVO vo : reservations) {
+            if (ROOM_PRODUCT_TYPE.equals(vo.getProductDetailType())) {
+                room++;
+            } else {
+                office++;
+            }
+        }
+
+        return ReservationCheckResponseDTO.ReservationSummary.builder()
+                .room(room)
+                .office(office)
+                .build();
+    }
+
+    // 예약 기간이 조금이라도 새 기간 밖으로 나가면 손봐야 한다
+    private boolean isOutOfPeriod(WorkationReservationVO vo, LocalDate from, LocalDate to) {
+        return vo.getStartDate().isBefore(from) || vo.getEndDate().isAfter(to);
+    }
+
+    // 숙소 예약이 없는 날을 찾는다.
+    // 공유오피스는 매일 쓰지 않아도 되지만 잘 곳은 하루도 비면 안 되므로 ROOM 만 본다.
+    private List<LocalDate> findUncoveredDates(List<WorkationReservationVO> reservations,
+                                               LocalDate from, LocalDate to) {
+
+        Set<LocalDate> covered = new HashSet<>();
+
+        reservations.stream()
+                .filter(vo -> ROOM_PRODUCT_TYPE.equals(vo.getProductDetailType()))
+                .forEach(vo -> {
+                    // 체크아웃 당일은 묵는 날이 아니므로 마지막 날은 제외한다
+                    LocalDate cursor = vo.getStartDate();
+                    while (cursor.isBefore(vo.getEndDate())) {
+                        covered.add(cursor);
+                        cursor = cursor.plusDays(1);
+                    }
+                });
+
+        List<LocalDate> uncovered = new ArrayList<>();
+
+        // 워케이션 마지막 날은 떠나는 날이라 숙박이 필요 없다
+        LocalDate cursor = from;
+        while (cursor.isBefore(to)) {
+            if (!covered.contains(cursor)) {
+                uncovered.add(cursor);
+            }
+            cursor = cursor.plusDays(1);
+        }
+        return uncovered;
     }
 
     // 등록 요청 검증

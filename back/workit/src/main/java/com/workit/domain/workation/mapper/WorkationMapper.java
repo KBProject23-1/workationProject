@@ -2,6 +2,7 @@ package com.workit.domain.workation.mapper;
 
 import com.workit.domain.workation.vo.BudgetSpentVO;
 import com.workit.domain.workation.vo.WorkationHistoryVO;
+import com.workit.domain.workation.vo.WorkationReservationVO;
 import com.workit.domain.workation.vo.WorkationVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -52,6 +53,18 @@ public interface WorkationMapper {
     int deleteExpensesOutOfPeriod(@Param("workationId") Long workationId,
                                   @Param("startDate") LocalDate startDate,
                                   @Param("endDate") LocalDate endDate);
+
+    // 워케이션에 묶인 살아 있는 예약. 기간 변경 영향을 판단하는 데 쓴다
+    List<WorkationReservationVO> selectActiveReservations(@Param("workationId") Long workationId);
+
+    // 추천 이력 삭제. recommendation_results 는 CASCADE 로 따라 삭제된다
+    int deleteRecommendationRequestsByWorkationId(@Param("workationId") Long workationId);
+
+    // 아직 시작하지 않은 예약 건수. 남아 있으면 사용자가 먼저 취소해야 한다
+    int countUpcomingReservations(@Param("workationId") Long workationId);
+
+    // 예약 이력은 남기고 워케이션 연결만 끊는다
+    int unlinkReservations(@Param("workationId") Long workationId);
 
     // 워케이션 삭제 (하위 데이터 정리 후 호출)
     int deleteWorkation(@Param("id") Long id);
