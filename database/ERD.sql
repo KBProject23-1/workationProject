@@ -438,8 +438,9 @@ CREATE TABLE `transactions`
     `is_business_expense` TINYINT(1)                                NULL DEFAULT 1 COMMENT '업무 경비 여부',
     `approved_number`     VARCHAR(50)                               NULL COMMENT '카드 승인 번호',
     `transaction_number`  VARCHAR(50)                               NULL COMMENT '우리 서비스 거래번호',
-    `status`              ENUM ('PAID', 'FAILED', 'CANCELED')       NULL COMMENT '결제 상태',
-    `approved_at`         TIMESTAMP                                 NOT NULL COMMENT '승인 시각',
+    `status`              ENUM ('REQUESTED', 'AUTHORIZED', 'PAID', 'FAILED', 'CANCELED', 'REFUNDED')
+                                                                    NOT NULL DEFAULT 'REQUESTED' COMMENT '거래 상태(상태머신). 전이 규칙은 서비스 계층에서 강제',
+    `approved_at`         TIMESTAMP                                 NULL COMMENT '승인 시각 (승인 전 REQUESTED 상태에서는 NULL)',
     `created_at`          TIMESTAMP                                 NULL COMMENT '생성일시',
     `updated_at`          TIMESTAMP                                 NULL COMMENT '수정 일시',
     `cancelled_at`        TIMESTAMP                                 NULL COMMENT '결제 취소 일시',
@@ -449,6 +450,27 @@ CREATE TABLE `transactions`
     CONSTRAINT `FK_merchants_TO_transactions` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`),
     UNIQUE KEY `ux_transactions_user_idempotency` (`user_id`, `idempotency_key`) -- 동일 유저의 중복 충전/환불/결제 요청 방지
 );
+
+-- 복식부기 원장(불변, append-only). 잔액의 진실 원천.
+-- 규칙: CREDIT=잔액 증가(들어옴), DEBIT=잔액 감소(나감). 한 거래의 SUM(DEBIT)==SUM(CREDIT).
+-- (마이그레이션: database/migration_transactions_status_ledger.sql)
+CREATE TABLE `ledger_entries`
+(
+    `id`             BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '원장 기입 고유 번호(PK)',
+    `transaction_id` BIGINT                          NOT NULL COMMENT '거래 고유 번호(FK, transactions.id)',
+    `entry_seq`      TINYINT                         NOT NULL COMMENT '한 거래 내 기입 순번(1,2,...)',
+    `account_type`   ENUM ('WALLET', 'BANK', 'MERCHANT', 'CARD', 'SYSTEM')
+                                                     NOT NULL COMMENT '기입 대상 계정 종류',
+    `account_ref_id` BIGINT                          NULL COMMENT '대상 식별자(wallet_id/bank_account_id/merchant_id/card_id). SYSTEM 은 NULL',
+    `direction`      ENUM ('DEBIT', 'CREDIT')        NOT NULL COMMENT 'DEBIT=잔액감소(나감), CREDIT=잔액증가(들어옴)',
+    `amount`         DECIMAL(15, 2)                  NOT NULL COMMENT '기입 금액(양수)',
+    `balance_after`  DECIMAL(15, 2)                  NULL COMMENT '기입 직후 해당 계정 잔액 스냅샷(대사 편의, 없으면 NULL)',
+    `created_at`     TIMESTAMP                       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '기입 일시',
+    CONSTRAINT `FK_transactions_TO_ledger_entries`
+        FOREIGN KEY (`transaction_id`) REFERENCES `transactions` (`id`),
+    UNIQUE KEY `ux_ledger_tx_seq` (`transaction_id`, `entry_seq`),
+    KEY `ix_ledger_account` (`account_type`, `account_ref_id`)
+) COMMENT '복식부기 원장(불변, append-only). 잔액의 진실 원천';
 
 -- 7. 연동 가능 계좌 테이블
 CREATE TABLE `linkable_accounts`
