@@ -437,6 +437,7 @@ CREATE TABLE `transactions`
     `category_assigned`   VARCHAR(150)                              NULL DEFAULT '기타' COMMENT '자동 분류된 지출 카테고리',
     `is_business_expense` TINYINT(1)                                NULL DEFAULT 1 COMMENT '업무 경비 여부',
     `approved_number`     VARCHAR(50)                               NULL COMMENT '카드 승인 번호',
+    `pg_transaction_id`   VARCHAR(100)                              NULL COMMENT '외부 PG 거래 식별자 (카드결제 승인 시 발급)',
     `transaction_number`  VARCHAR(50)                               NULL COMMENT '우리 서비스 거래번호',
     `status`              ENUM ('REQUESTED', 'AUTHORIZED', 'PAID', 'FAILED', 'CANCELED', 'REFUNDED')
                                                                     NOT NULL DEFAULT 'REQUESTED' COMMENT '거래 상태(상태머신). 전이 규칙은 서비스 계층에서 강제',
