@@ -1,6 +1,8 @@
 package com.workit.domain.expense.controller;
 
+import com.workit.domain.expense.dto.request.ExpenseConfirmRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCreateRequestDTO;
+import com.workit.domain.expense.dto.response.ExpenseConfirmResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseItemResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseListResponseDTO;
 import com.workit.domain.expense.service.WorkationExpenseService;
@@ -47,5 +49,17 @@ public class WorkationExpenseController {
             @RequestBody ExpenseCreateRequestDTO dto) {
 
         return GlobalResponseFactory.created(expenseService.addExpense(userId, workationId, dto));
+    }
+
+    // 5.8 지출 일괄 확정
+    // 자동분류 결과를 카테고리 변경 없이 승인한다
+    @PatchMapping("/confirm")
+    public ResponseEntity<CommonResponse<ExpenseConfirmResponseDTO>> expenseConfirm(
+            @CurrentUser Long userId,
+            @PathVariable("workationId") Long workationId,
+            @RequestBody ExpenseConfirmRequestDTO dto) {
+
+        return GlobalResponseFactory.success(
+                expenseService.confirmExpenses(userId, workationId, dto));
     }
 }

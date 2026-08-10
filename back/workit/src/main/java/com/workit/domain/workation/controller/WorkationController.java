@@ -53,9 +53,11 @@ public class WorkationController {
     public ResponseEntity<CommonResponse<WorkationResponseDTO>> workationModify(
             @CurrentUser Long userId,
             @PathVariable("workationId") Long workationId,
-            @RequestBody WorkationUpdateRequestDTO dto) {
+            @RequestBody WorkationUpdateRequestDTO dto,
+            @RequestParam(value = "force", defaultValue = "false") boolean force) {
 
-        return GlobalResponseFactory.success(workationService.modifyWorkation(userId, workationId, dto));
+        return GlobalResponseFactory.success(
+                workationService.modifyWorkation(userId, workationId, dto, force));
     }
 
     // 1.5 워케이션 삭제

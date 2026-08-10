@@ -1,5 +1,6 @@
 package com.workit.domain.settlement.service;
 
+import com.workit.domain.expense.service.ExpenseImportService;
 import com.workit.domain.expense.vo.WorkationExpenseVO;
 import com.workit.domain.settlement.dto.response.SettlementResponseDTO;
 import com.workit.domain.settlement.dto.response.SettlementSummaryDTO;
@@ -41,17 +42,22 @@ public class SettlementServiceImpl implements SettlementService {
     private final WorkationOwnershipValidator ownershipValidator;
     private final SettlementExcelWriter excelWriter;
     private final SettlementPdfWriter pdfWriter;
+    private final ExpenseImportService expenseImportService;
 
     // =====================================================================================
     // 6.1 정산 내역 조회
     // =====================================================================================
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public SettlementResponseDTO getSettlement(Long userId, Long workationId, BudgetType budgetType) {
 
         // 정산 완료된 워케이션도 조회는 가능해야 하므로 getOwned 를 쓴다
         WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
+
+        // 지출 목록을 거치지 않고 바로 정산으로 들어온 경우를 대비해 여기서도 유입시킨다
+        // 유입하지 않으면 앱 결제가 빠진 금액으로 정산 내역이 만들어진다
+        expenseImportService.importAppPayments(userId, workation);
 
         List<SettlementSummaryDTO> settlements = buildSummaries(workationId, userId, budgetType,
                 totalDays(workation.getStartDate(), workation.getEndDate()));
@@ -71,7 +77,7 @@ public class SettlementServiceImpl implements SettlementService {
     // =====================================================================================
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public byte[] exportExcel(Long userId, Long workationId) {
         SettlementDocumentVO doc = buildDocument(userId, workationId,
                 SettlementErrorCode.NO_EXPENSE_TO_SETTLE);
@@ -87,7 +93,7 @@ public class SettlementServiceImpl implements SettlementService {
     // =====================================================================================
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public byte[] exportPdf(Long userId, Long workationId) {
         SettlementDocumentVO doc = buildDocument(userId, workationId,
                 SettlementErrorCode.NO_EXPENSE_TO_EXPORT);
@@ -104,6 +110,10 @@ public class SettlementServiceImpl implements SettlementService {
                                                SettlementErrorCode emptyError) {
 
         WorkationVO workation = ownershipValidator.getOwned(userId, workationId);
+
+        // 건수를 세기 전에 유입시켜야 한다
+        // 순서가 바뀌면 앱 결제만 있는 워케이션이 "출력할 지출이 없다" 로 거부된다
+        expenseImportService.importAppPayments(userId, workation);
 
         if (settlementMapper.countExpenses(workationId, BudgetType.WORK) == 0) {
             throw new BusinessException(emptyError);

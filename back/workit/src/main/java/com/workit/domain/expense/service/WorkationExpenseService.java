@@ -2,10 +2,12 @@ package com.workit.domain.expense.service;
 
 import com.workit.domain.expense.dto.request.ExpenseBudgetTypeChangeRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCategoryChangeRequestDTO;
+import com.workit.domain.expense.dto.request.ExpenseConfirmRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCreateRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseUpdateRequestDTO;
 import com.workit.domain.expense.dto.response.ExpenseBudgetTypeChangeResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseCategoryChangeResponseDTO;
+import com.workit.domain.expense.dto.response.ExpenseConfirmResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseDetailResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseItemResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseListResponseDTO;
@@ -37,4 +39,8 @@ public interface WorkationExpenseService {
     // 5.7 경비/개인소비 구분 변경
     ExpenseBudgetTypeChangeResponseDTO modifyExpenseBudgetType(Long userId, Long expenseId,
                                                               ExpenseBudgetTypeChangeRequestDTO dto);
+
+    // 5.8 지출 일괄 확정. 자동분류 결과를 카테고리 변경 없이 승인한다
+    ExpenseConfirmResponseDTO confirmExpenses(Long userId, Long workationId,
+                                             ExpenseConfirmRequestDTO dto);
 }

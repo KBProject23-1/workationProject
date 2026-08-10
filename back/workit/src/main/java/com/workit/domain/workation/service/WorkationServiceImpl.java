@@ -95,7 +95,8 @@ public class WorkationServiceImpl implements WorkationService {
 
     @Override
     @Transactional
-    public WorkationResponseDTO modifyWorkation(Long userId, Long workationId, WorkationUpdateRequestDTO dto) {
+    public WorkationResponseDTO modifyWorkation(Long userId, Long workationId,
+                                                WorkationUpdateRequestDTO dto, boolean force) {
 
         // 1) 존재 여부 + 소유자 + 정산 완료 여부 검증
         ownershipValidator.getOwnedActive(userId, workationId, "수정");
@@ -105,18 +106,43 @@ public class WorkationServiceImpl implements WorkationService {
                 dto.getRegionId(), dto.getBusinessBudgetTotal(), dto.getPersonalBudgetTotal());
 
         // 3) 기간을 줄였을 때 기존 지출이 기간 밖으로 벗어나는지 확인
-        int outOfPeriod = workationMapper.countExpensesOutOfPeriod(
-                workationId, dto.getStartDate(), dto.getEndDate());
-
-        if (outOfPeriod > 0) {
-            throw new BusinessException(WorkationErrorCode.EXPENSE_OUT_OF_PERIOD,
-                    "이미 등록된 지출 " + outOfPeriod + "건이 변경한 기간을 벗어납니다.");
-        }
+        //    force 없이 그냥 막으면 앱 결제는 삭제도 안 되므로 기간을 영영 줄일 수 없다
+        handleExpensesOutOfPeriod(workationId, dto.getStartDate(), dto.getEndDate(), force);
 
         workationMapper.updateWorkation(dto.toVO(workationId));
-        log.info("워케이션 수정 완료 - id: {}, userId: {}", workationId, userId);
+        log.info("워케이션 수정 완료 - id: {}, userId: {}, force: {}", workationId, userId, force);
 
         return WorkationResponseDTO.from(workationMapper.selectWorkationById(workationId));
+    }
+
+    // 기간 밖으로 밀려나는 지출 처리
+    // force = false 면 무엇이 빠지는지 알려주고 멈춘다. 프론트가 확인 팝업을 띄운다
+    // force = true  면 워케이션에서 분리한다
+    private void handleExpensesOutOfPeriod(Long workationId, LocalDate startDate,
+                                           LocalDate endDate, boolean force) {
+
+        int outOfPeriod = workationMapper.countExpensesOutOfPeriod(workationId, startDate, endDate);
+
+        if (outOfPeriod == 0) {
+            return;
+        }
+
+        if (!force) {
+            int manualCount = workationMapper.countManualExpensesOutOfPeriod(
+                    workationId, startDate, endDate);
+
+            // 수기 등록 건은 삭제하면 복구할 수 없으므로 건수를 함께 알려준다
+            String detail = (manualCount > 0)
+                    ? String.format("이미 등록된 지출 %d건(직접 등록 %d건 포함)이 변경한 기간을 벗어납니다.",
+                            outOfPeriod, manualCount)
+                    : String.format("이미 등록된 지출 %d건이 변경한 기간을 벗어납니다.", outOfPeriod);
+
+            throw new BusinessException(WorkationErrorCode.EXPENSE_OUT_OF_PERIOD, detail);
+        }
+
+        // 앱 결제는 transactions 가 남아 있어 기간을 되돌리면 다시 유입된다
+        int detached = workationMapper.deleteExpensesOutOfPeriod(workationId, startDate, endDate);
+        log.info("기간 변경으로 지출 분리 - workationId: {}, {}건", workationId, detached);
     }
 
     @Override

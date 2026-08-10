@@ -149,79 +149,152 @@
     <!--
         앱 내 결제 유입 대상 조회 + 자동분류를 한 쿼리에서 처리한다.
 
-        transactions.workation_id 는 결제 시점에 채워지지 않으므로 사용하지 않고
-        사용자와 결제 일시로 후보를 찾는다.
+        결제는 두 종류이고 워케이션에 묶는 기준이 서로 다르다.
 
-        카테고리 우선순위 (COALESCE 순서)
-          1) user_category_rules  : 사용자가 그 가맹점을 정정한 이력
-          2) merchant_category_mappings : 가맹점 업종 기본 매핑
-          3) 기타 카테고리
-        정해진 카테고리가 예산에 배정돼 있지 않으면 기타로 떨어뜨린다.
+          ① 예약 결제 (transactions.reservation_id 있음)
+             숙소·공유오피스는 워케이션 시작 한참 전에 결제한다.
+             결제일로 거르면 유입되지 않으므로 reservations.workation_id 로 직접 묶고
+             결제일이 아니라 이용 시작일(reservations.start_date)을 지출일자로 쓴다.
 
+          ② 일반 결제 (reservation_id 없음)
+             식당·카페처럼 현장에서 쓴 건은 결제일 = 이용일이므로 기간으로 거른다.
+
+        카테고리
+          ① 예약 결제는 상품 유형으로 확정한다. 가맹점 업종 매핑을 타지 않는다.
+             ROOM -> 숙박비 / OFFICE_SEAT, MEETING_ROOM -> 임차료
+          ② 일반 결제는 user_category_rules -> merchant_category_mappings 순으로 찾는다.
+
+        어느 쪽이든 정해진 카테고리가 예산에 배정돼 있지 않으면 기타로 떨어뜨린다.
         예산 유형은 결제 카드의 card_type 으로 판정한다. 카드가 없는 지갑 결제는 개인 지출로 본다.
     -->
     <select id="selectImportTargets" resultType="com.workit.domain.expense.vo.WorkationExpenseVO">
         SELECT
             #{workationId}       AS workation_id,
-            tx.transaction_id,
-            tx.card_id,
-            tx.amount,
-            tx.merchant_name,
-            tx.spent_date,
-            tx.budget_type,
+            src.transaction_id,
+            src.card_id,
+            src.amount,
+            src.merchant_name,
+            src.spent_date,
+            src.budget_type,
             COALESCE(
-                CASE WHEN bud_ucr.id IS NOT NULL THEN ucr.expense_category_id END,
-                CASE WHEN bud_mcm.id IS NOT NULL THEN mcm.expense_category_id END,
+                CASE WHEN bud.id IS NOT NULL THEN src.expense_category_id END,
                 etc.id
             )                    AS expense_category_id,
             1                    AS is_auto_categorized
           FROM (
-              SELECT t.id                AS transaction_id,
+              <!--
+                  ① 예약 결제
+                  카테고리를 결정하는 CASE 는 컬럼과 비교되므로 컬럼 쪽 collation 이 적용된다.
+                  파생 컬럼끼리 비교하면 collation 이 충돌할 수 있어 조인 안에서 처리한다.
+              -->
+              SELECT t.id             AS transaction_id,
                      t.card_id,
-                     t.merchant_id,
                      t.amount,
                      t.merchant_name,
-                     DATE(t.approved_at) AS spent_date,
-                     CASE WHEN c.card_type = 'WORK' THEN 'WORK' ELSE 'PERSONAL' END AS budget_type
+                     r.start_date     AS spent_date,
+                     CASE WHEN c.card_type = 'WORK' THEN 'WORK' ELSE 'PERSONAL' END AS budget_type,
+                     rc.id            AS expense_category_id
                 FROM transactions t
+                JOIN reservations r
+                  ON r.id = t.reservation_id
+                JOIN reservation_products rp
+                  ON rp.id = r.product_id
                 LEFT JOIN cards c
                        ON c.id = t.card_id
+                <!--
+                    LEFT JOIN 이어야 한다.
+                    개인 예산에는 임차료(RENT)가 없어서, 개인카드로 공유오피스를 예약하면
+                    INNER JOIN 으로는 행이 통째로 사라져 결제가 유입되지 않는다.
+                    매칭되지 않으면 아래 COALESCE 가 기타로 떨어뜨린다.
+                -->
+                LEFT JOIN expense_categories rc
+                       ON rc.user_id IS NULL
+                      AND rc.budget_type = (CASE WHEN c.card_type = 'WORK'
+                                                 THEN 'WORK' ELSE 'PERSONAL' END)
+                      AND rc.code        = (CASE WHEN rp.product_detail_type = 'ROOM'
+                                                 THEN 'ACCOMMODATION' ELSE 'RENT' END)
                WHERE t.user_id          = #{userId}
                  AND t.status           = 'PAID'
                  AND t.transaction_type = 'PAYMENT'
-                 AND t.approved_at     &gt;= #{startDate}
-                 AND t.approved_at     &lt;  DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+                 AND r.workation_id     = #{workationId}
+                 AND r.status          &lt;&gt; 'CANCELED'
                  AND NOT EXISTS (
                      SELECT 1 FROM workation_expenses we WHERE we.transaction_id = t.id
                  )
-          ) tx
-          LEFT JOIN merchants m
-                 ON m.id = tx.merchant_id
-          LEFT JOIN user_category_rules ucr
-                 ON ucr.merchant_id = m.id
-                AND ucr.user_id     = #{userId}
-                AND ucr.budget_type = tx.budget_type
-          <!--
-              merchants 는 charset 을 지정하지 않아 서버 기본값(utf8mb4_0900_ai_ci)을 쓰고
-              merchant_category_mappings 는 utf8mb4_unicode_ci 로 만들어져 있다.
-              그대로 비교하면 collation 충돌로 실행이 거부되므로 비교 시점에 맞춘다.
-          -->
-          LEFT JOIN merchant_category_mappings mcm
-                 ON mcm.merchant_category = m.category COLLATE utf8mb4_unicode_ci
-                AND mcm.budget_type       = tx.budget_type
-          LEFT JOIN budgets bud_ucr
-                 ON bud_ucr.workation_id        = #{workationId}
-                AND bud_ucr.budget_type         = tx.budget_type
-                AND bud_ucr.expense_category_id = ucr.expense_category_id
-          LEFT JOIN budgets bud_mcm
-                 ON bud_mcm.workation_id        = #{workationId}
-                AND bud_mcm.budget_type         = tx.budget_type
-                AND bud_mcm.expense_category_id = mcm.expense_category_id
+
+              UNION ALL
+
+              <!-- ② 일반 결제 -->
+              SELECT tx.transaction_id,
+                     tx.card_id,
+                     tx.amount,
+                     tx.merchant_name,
+                     tx.spent_date,
+                     tx.budget_type,
+                     COALESCE(ucr.expense_category_id, mcm.expense_category_id) AS expense_category_id
+                FROM (
+                    SELECT t.id                AS transaction_id,
+                           t.card_id,
+                           t.merchant_id,
+                           t.amount,
+                           t.merchant_name,
+                           DATE(t.approved_at) AS spent_date,
+                           CASE WHEN c.card_type = 'WORK' THEN 'WORK' ELSE 'PERSONAL' END AS budget_type
+                      FROM transactions t
+                      LEFT JOIN cards c
+                             ON c.id = t.card_id
+                     WHERE t.user_id          = #{userId}
+                       AND t.reservation_id IS NULL
+                       AND t.status           = 'PAID'
+                       AND t.transaction_type = 'PAYMENT'
+                       AND t.approved_at     &gt;= #{startDate}
+                       AND t.approved_at     &lt;  DATE_ADD(#{endDate}, INTERVAL 1 DAY)
+                       AND NOT EXISTS (
+                           SELECT 1 FROM workation_expenses we WHERE we.transaction_id = t.id
+                       )
+                ) tx
+                LEFT JOIN merchants m
+                       ON m.id = tx.merchant_id
+                LEFT JOIN user_category_rules ucr
+                       ON ucr.merchant_id = m.id
+                      AND ucr.user_id     = #{userId}
+                      AND ucr.budget_type = tx.budget_type
+                <!--
+                    merchants 는 charset 을 지정하지 않아 서버 기본값(utf8mb4_0900_ai_ci)을 쓰고
+                    merchant_category_mappings 는 utf8mb4_unicode_ci 로 만들어져 있다.
+                    그대로 비교하면 collation 충돌로 실행이 거부되므로 비교 시점에 맞춘다.
+                -->
+                LEFT JOIN merchant_category_mappings mcm
+                       ON mcm.merchant_category = m.category COLLATE utf8mb4_unicode_ci
+                      AND mcm.budget_type       = tx.budget_type
+          ) src
+          LEFT JOIN budgets bud
+                 ON bud.workation_id        = #{workationId}
+                AND bud.budget_type         = src.budget_type
+                AND bud.expense_category_id = src.expense_category_id
           JOIN expense_categories etc
-                 ON etc.budget_type = tx.budget_type
+                 ON etc.budget_type = src.budget_type
                 AND etc.code        = 'ETC'
                 AND etc.user_id IS NULL
-</select>
+    </select>
+
+    <!--
+        일괄 확정. 카테고리는 그대로 두고 자동분류 표시만 내린다.
+        소유자 조건을 조인에 넣어 남의 지출 id 가 섞여 들어와도 갱신되지 않는다.
+    -->
+    <update id="confirmExpenses">
+        UPDATE workation_expenses we
+          JOIN workations w
+            ON w.id = we.workation_id
+           AND w.user_id = #{userId}
+           SET we.is_auto_categorized = 0
+         WHERE we.workation_id        = #{workationId}
+           AND we.is_auto_categorized = 1
+           AND we.id IN
+        <foreach collection="expenseIds" item="expenseId" open="(" separator="," close=")">
+            #{expenseId}
+        </foreach>
+    </update>
 
     <!-- 여러 건을 한 번의 INSERT 로 저장한다. UNIQUE(transaction_id) 로 중복 유입이 차단된다 -->
     <insert id="insertImportedExpenses">

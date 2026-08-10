@@ -4,16 +4,19 @@ import com.workit.domain.category.mapper.CategoryMapper;
 import com.workit.domain.category.vo.ExpenseCategoryVO;
 import com.workit.domain.expense.dto.request.ExpenseBudgetTypeChangeRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCategoryChangeRequestDTO;
+import com.workit.domain.expense.dto.request.ExpenseConfirmRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCreateRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseUpdateRequestDTO;
 import com.workit.domain.expense.dto.response.ExpenseBudgetTypeChangeResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseCategoryChangeResponseDTO;
+import com.workit.domain.expense.dto.response.ExpenseConfirmResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseDetailResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseItemResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseListResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseSummaryResponseDTO;
 import com.workit.domain.expense.exception.ExpenseErrorCode;
 import com.workit.domain.expense.mapper.WorkationExpenseMapper;
+import com.workit.domain.expense.vo.ExpenseSummaryVO;
 import com.workit.domain.expense.vo.WorkationExpenseVO;
 import com.workit.domain.workation.service.WorkationOwnershipValidator;
 import com.workit.domain.workation.vo.BudgetType;
@@ -43,6 +46,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     private final WorkationExpenseMapper expenseMapper;
     private final CategoryMapper categoryMapper;
     private final WorkationOwnershipValidator ownershipValidator;
+    private final ExpenseImportService expenseImportService;
 
     // =====================================================================================
     // 5.1 지출 목록 조회
@@ -58,7 +62,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
 
         // 1) 앱 내 결제를 지출로 유입시킨다
         //    조회 시점에 처리하므로 결제 파트가 워케이션을 알 필요가 없다
-        importAppPayments(userId, workation);
+        //    정산 완료 건은 서비스 내부에서 건너뛴다
+        expenseImportService.importAppPayments(userId, workation);
 
         // 2) 잘못된 페이징 값이 들어와도 목록이 깨지지 않도록 보정
         int safePage = Math.max(page, 0);
@@ -299,22 +304,34 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     }
 
     // =====================================================================================
-    // 앱 내 결제 유입
+    // 5.8 지출 일괄 확정
     // =====================================================================================
 
-    // 워케이션 기간에 발생한 앱 결제를 지출로 옮긴다
-    // transactions 는 결제 파트의 원본이므로 읽기만 하고 수정하지 않는다
-    private void importAppPayments(Long userId, WorkationVO workation) {
+    // 자동분류 결과를 그대로 승인한다. 카테고리는 바꾸지 않는다.
+    // 5.6(카테고리 변경)은 applyToMerchant 기본값이 true 라 같은 카테고리로 가맹점 규칙을
+    // 계속 덮어쓰므로 확정 용도로 재사용할 수 없다.
+    @Override
+    @Transactional
+    public ExpenseConfirmResponseDTO confirmExpenses(Long userId, Long workationId,
+                                                     ExpenseConfirmRequestDTO dto) {
 
-        List<WorkationExpenseVO> targets = expenseMapper.selectImportTargets(
-                workation.getId(), userId, workation.getStartDate(), workation.getEndDate());
+        ownershipValidator.getOwnedActive(userId, workationId, "지출을 확정");
 
-        if (targets.isEmpty()) {
-            return;
+        List<Long> expenseIds = dto.getExpenseIds();
+
+        // 아무것도 고르지 않은 것은 오류가 아니라 할 일이 없는 상태다
+        if (expenseIds == null || expenseIds.isEmpty()) {
+            return ExpenseConfirmResponseDTO.of(0, uncheckedCount(workationId));
         }
 
-        expenseMapper.insertImportedExpenses(targets);
-        log.info("앱 결제 유입 완료 - workationId: {}, {}건", workation.getId(), targets.size());
+        // 남의 지출이나 이미 확정된 건이 섞여 있으면 SQL 에서 걸러진다
+        int confirmedCount = expenseMapper.confirmExpenses(workationId, userId, expenseIds);
+        int remainingUnchecked = uncheckedCount(workationId);
+
+        log.info("지출 일괄 확정 - workationId: {}, 요청 {}건, 확정 {}건, 남은 미확인 {}건",
+                workationId, expenseIds.size(), confirmedCount, remainingUnchecked);
+
+        return ExpenseConfirmResponseDTO.of(confirmedCount, remainingUnchecked);
     }
 
     // =====================================================================================
@@ -336,6 +353,17 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     // 예산에 배정되지 않은 카테고리로는 변경할 수 없으므로 배정된 것만 내려준다
     private List<ExpenseCategoryVO> availableCategories(Long userId, Long workationId, BudgetType budgetType) {
         return categoryMapper.selectBudgetedCategoryList(userId, workationId, budgetType);
+    }
+
+    // 목록 상단 "확인 필요" 배지에 쓰는 값
+    private int uncheckedCount(Long workationId) {
+
+        ExpenseSummaryVO summary = expenseMapper.selectExpenseSummary(workationId);
+
+        if (summary == null || summary.getUncheckedCount() == null) {
+            return 0;
+        }
+        return summary.getUncheckedCount();
     }
 
     private BudgetType requireBudgetType(BudgetType budgetType) {
