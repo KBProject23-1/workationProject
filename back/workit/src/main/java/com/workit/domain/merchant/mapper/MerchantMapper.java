@@ -11,6 +11,7 @@ import java.util.List;
 public interface MerchantMapper {
 
     List<MerchantVO> selectReservationMerchantsByCursor(
+            @Param("userId") Long userId,
             @Param("category") String category,
             @Param("cursorValue") Object cursorValue,
             @Param("cursorMerchantId") Long cursorMerchantId,
@@ -25,7 +26,10 @@ public interface MerchantMapper {
             @Param("sort") String sort
     );
 
-    MerchantDetailVO selectMerchantAccommodationDetails(@Param("merchantId") Long merchantId);
+    MerchantDetailVO selectMerchantAccommodationDetails(
+            @Param("userId") Long userId,
+            @Param("merchantId") Long merchantId
+    );
 
     List<MerchantProductVO> selectMerchantAccommodationReservationProducts(
             @Param("merchantId") Long merchantId
@@ -48,9 +52,27 @@ public interface MerchantMapper {
             @Param("merchantId") Long merchantId
     );
 
-    MerchantDetailVO selectMerchantOfficeDetails(@Param("merchantId") Long merchantId);
+    List<MerchantProductVO> selectMerchantOfficeProductsByPeriod(
+            @Param("merchantId") Long merchantId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("requiredDateCount") Integer requiredDateCount,
+            @Param("requiredQuantity") Integer requiredQuantity,
+            @Param("guestCount") Integer guestCount
+    );
 
-    MerchantDetailVO selectMerchantRestaurantDetails(@Param("merchantId") Long merchantId);
+    MerchantDetailVO selectMerchantOfficeDetails(
+            @Param("userId") Long userId,
+            @Param("merchantId") Long merchantId
+    );
 
-    MerchantDetailVO selectMerchantActivityDetails(@Param("merchantId") Long merchantId);
+    MerchantDetailVO selectMerchantRestaurantDetails(
+            @Param("userId") Long userId,
+            @Param("merchantId") Long merchantId
+    );
+
+    MerchantDetailVO selectMerchantActivityDetails(
+            @Param("userId") Long userId,
+            @Param("merchantId") Long merchantId
+    );
 }

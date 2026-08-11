@@ -13,7 +13,13 @@
                m.price,
                m.rating,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
-               0 AS bookmarked
+               EXISTS (
+               SELECT 1
+               FROM bookmarks b
+               WHERE b.users_id = #{userId}
+                 AND b.merchants_id = m.id
+                 AND b.is_deleted IS NULL
+               ) AS bookmarked
         FROM merchants m
         LEFT JOIN accommodations a
                ON a.merchant_id = m.id
@@ -224,7 +230,14 @@
             a.check_out_time,
             m.rating,
             m.thumbnail_url,
-            m.price
+            m.price,
+            EXISTS (
+               SELECT 1
+               FROM bookmarks b
+               WHERE b.users_id = #{userId}
+                 AND b.merchants_id = m.id
+                 AND b.is_deleted IS NULL
+               ) AS bookmarked
         FROM merchants m
         JOIN accommodations a ON a.merchant_id = m.id
         WHERE m.id = #{merchantId}
@@ -311,6 +324,49 @@
         ORDER BY rp.id ASC
     </select>
 
+    <select id="selectMerchantOfficeProductsByPeriod" resultMap="merchantReservationProductMap">
+        SELECT
+            rp.id AS product_id,
+            rp.product_name,
+            rp.description,
+            rp.product_detail_type,
+            rp.max_headcount,
+            rp.unit_price,
+            rp.thumbnail_url
+        FROM reservation_products rp
+        INNER JOIN offices o ON o.merchant_id = #{merchantId}
+        <if test="startDate != null and endDate != null">
+            INNER JOIN product_daily_inventories pdi
+                ON pdi.product_id = rp.id
+        </if>
+        WHERE rp.merchant_id = o.merchant_id
+          AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM', 'PRIVATE_OFFICE')
+          <if test="guestCount != null">
+            AND rp.max_headcount >= #{guestCount}
+          </if>
+        <if test="startDate != null and endDate != null">
+            AND pdi.inventory_date &gt;= #{startDate}
+            AND pdi.inventory_date &lt;= #{endDate}
+        </if>
+        <if test="startDate != null and endDate != null">
+        GROUP BY rp.id,
+                 rp.product_name,
+                 rp.description,
+                 rp.product_detail_type,
+                 rp.max_headcount,
+                 rp.unit_price,
+                 rp.thumbnail_url
+        HAVING COUNT(DISTINCT pdi.inventory_date) = #{requiredDateCount}
+           AND MIN(CASE WHEN pdi.is_available = 1
+                AND pdi.remaining_capacity &gt; 0
+                <if test="requiredQuantity != null">
+                AND pdi.remaining_capacity &gt;= #{requiredQuantity}
+                </if>
+           THEN 1 ELSE 0 END) = 1
+        </if>
+        ORDER BY rp.id ASC
+    </select>
+
     <select id="selectMerchantOfficeDetails" resultMap="merchantDetailMap">
         SELECT m.id AS merchant_id,
                m.name,
@@ -323,7 +379,13 @@
                m.rating,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
                o.description,
-               0 AS bookmarked
+               EXISTS (
+               SELECT 1
+               FROM bookmarks b
+               WHERE b.users_id = #{userId}
+                 AND b.merchants_id = m.id
+                 AND b.is_deleted IS NULL
+               ) AS bookmarked
         FROM merchants m
                  INNER JOIN offices o ON o.merchant_id = m.id
                  LEFT JOIN reviews r ON r.merchant_id = m.id
@@ -345,7 +407,14 @@
                m.thumbnail_url,
                m.price,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
-               0 AS bookmarked
+               r2.description,
+               EXISTS (
+               SELECT 1
+               FROM bookmarks b
+               WHERE b.users_id = #{userId}
+                 AND b.merchants_id = m.id
+                 AND b.is_deleted IS NULL
+               ) AS bookmarked
         FROM merchants m
         INNER JOIN restaurants r2 ON r2.merchant_id = m.id
         LEFT JOIN reviews r ON r.merchant_id = m.id
@@ -353,7 +422,7 @@
         WHERE m.id = #{merchantId}
           AND m.category = 'RESTAURANT'
         GROUP BY m.id, m.region_id, m.name, m.address, m.latitude, m.longitude, m.phone_number, m.rating,
-                 m.thumbnail_url, m.price
+                 m.thumbnail_url, m.price, r2.description
     </select>
 
     <select id="selectMerchantActivityDetails" resultMap="merchantDetailMap">
@@ -368,7 +437,14 @@
                m.thumbnail_url,
                m.price,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
-               0 AS bookmarked
+               a.description,
+               EXISTS (
+               SELECT 1
+               FROM bookmarks b
+               WHERE b.users_id = #{userId}
+                 AND b.merchants_id = m.id
+                 AND b.is_deleted IS NULL
+               ) AS bookmarked
         FROM merchants m
         INNER JOIN activities a ON a.merchant_id = m.id
         LEFT JOIN reviews r ON r.merchant_id = m.id
@@ -376,6 +452,6 @@
         WHERE m.id = #{merchantId}
           AND m.category = 'ACTIVITY'
         GROUP BY m.id, m.region_id, m.name, m.address, m.latitude, m.longitude, m.phone_number, m.rating,
-                 m.thumbnail_url, m.price
+                 m.thumbnail_url, m.price, a.description
     </select>
 </mapper>

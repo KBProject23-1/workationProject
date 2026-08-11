@@ -18,8 +18,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
-import java.util.List;
-
 @RestController
 @RequestMapping("/api/v1/merchants")
 public class MerchantController {
@@ -34,9 +32,10 @@ public class MerchantController {
 
     @GetMapping
     public ResponseEntity<CommonResponse<MerchantListResponseDTO<MerchantItemResponseDTO>>> findMerchants(
+            @CurrentUser Long userId,
             @RequestParam(value = "category", required = false) String category,
-            @RequestParam(value = "checkInDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate checkInDate,
-            @RequestParam(value = "checkOutDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate checkOutDate,
+            @RequestParam(value = "startDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
+            @RequestParam(value = "endDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
             @RequestParam(value = "headcount", required = false) Integer headcount,
             @RequestParam(value = "minPrice", required = false) Long minPrice,
             @RequestParam(value = "maxPrice", required = false) Long maxPrice,
@@ -47,9 +46,10 @@ public class MerchantController {
     ) {
         return GlobalResponseFactory.success(
                 merchantService.findMerchants(
+                        userId,
                         category,
-                        checkInDate,
-                        checkOutDate,
+                        startDate,
+                        endDate,
                         headcount,
                         minPrice,
                         maxPrice,
@@ -63,17 +63,19 @@ public class MerchantController {
 
     @GetMapping("/{merchantId}/accommodations")
     public ResponseEntity<CommonResponse<MerchantDetailResponseDTO>> findAccommodationProducts(
+            @CurrentUser Long userId,
             @PathVariable("merchantId") Long merchantId,
-            @RequestParam(value = "checkInDate", required = false) LocalDate checkInDate,
-            @RequestParam(value = "checkOutDate", required = false) LocalDate checkOutDate,
+            @RequestParam(value = "startDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
+            @RequestParam(value = "endDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
             @RequestParam(value = "roomCount", required = false) Integer roomCount,
             @RequestParam(value = "guestCount", required = false) Integer guestCount
     ) {
         return GlobalResponseFactory.success(
                 merchantService.findAccommodationProducts(
+                        userId,
                         merchantId,
-                        checkInDate,
-                        checkOutDate,
+                        startDate,
+                        endDate,
                         roomCount,
                         guestCount
                 )
@@ -82,10 +84,20 @@ public class MerchantController {
 
     @GetMapping("/{merchantId}/offices")
     public ResponseEntity<CommonResponse<MerchantDetailResponseDTO>> findOfficeProducts(
-            @PathVariable("merchantId") Long merchantId
+            @CurrentUser Long userId,
+            @PathVariable("merchantId") Long merchantId,
+            @RequestParam(value = "startDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
+            @RequestParam(value = "endDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
+            @RequestParam(value = "guestCount", required = false) Integer guestCount
     ) {
         return GlobalResponseFactory.success(
-                merchantService.findOfficeProducts(merchantId)
+                merchantService.findOfficeProducts(
+                        userId,
+                        merchantId,
+                        startDate,
+                        endDate,
+                        guestCount
+                )
         );
     }
 
