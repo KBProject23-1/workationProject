@@ -14,8 +14,9 @@ public enum ExpenseErrorCode implements ErrorCode {
     /* 400 */
     SPENT_DATE_OUT_OF_PERIOD (HttpStatus.BAD_REQUEST, "지출 일시가 워케이션 기간을 벗어났습니다."),
     CATEGORY_TYPE_MISMATCH   (HttpStatus.BAD_REQUEST, "선택한 카테고리가 해당 예산 유형에 없습니다."),
-    CARD_REQUIRED            (HttpStatus.BAD_REQUEST, "법인 지출은 사용한 법인카드를 선택해야 합니다."),
+    CARD_REQUIRED            (HttpStatus.BAD_REQUEST, "업무 지출은 사용한 카드를 선택해야 합니다."),
     CARD_TYPE_MISMATCH       (HttpStatus.BAD_REQUEST, "선택한 카드가 법인카드가 아닙니다."),
+    CORPORATE_CARD_REQUIRED  (HttpStatus.BAD_REQUEST, "기업업무추진비는 법인카드로 결제해야 비용으로 인정됩니다."),
     AMOUNT_INVALID           (HttpStatus.BAD_REQUEST, "지출 금액은 0원보다 커야 합니다."),
 
     /* 403 */

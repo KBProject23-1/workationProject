@@ -2,11 +2,13 @@ package com.workit.domain.expense.service;
 
 import com.workit.domain.category.mapper.CategoryMapper;
 import com.workit.domain.category.vo.ExpenseCategoryVO;
+import com.workit.domain.expense.dto.request.ExpenseBudgetTypeBulkRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseBudgetTypeChangeRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCategoryChangeRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseConfirmRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCreateRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseUpdateRequestDTO;
+import com.workit.domain.expense.dto.response.ExpenseBudgetTypeBulkResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseBudgetTypeChangeResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseCategoryChangeResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseConfirmResponseDTO;
@@ -31,6 +33,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -70,7 +73,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         int safeSize = (size < 1 || size > MAX_PAGE_SIZE) ? DEFAULT_PAGE_SIZE : size;
 
         ExpenseSummaryResponseDTO summary = ExpenseSummaryResponseDTO
-                .from(expenseMapper.selectExpenseSummary(workationId));
+                .from(expenseMapper.selectExpenseSummary(
+                        workationId, budgetType, expenseCategoryId, uncheckedOnly));
 
         long totalElements = expenseMapper.countExpenseList(
                 workationId, budgetType, expenseCategoryId, uncheckedOnly);
@@ -109,7 +113,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         validateMemo(dto.getMemo());
         validateSpentDate(dto.getSpentDate(), workation);
         validateCategory(userId, budgetType, dto.getExpenseCategoryId());
-        validateCard(userId, budgetType, dto.getCardId());
+        validateCard(userId, budgetType, dto.getCardId(), dto.getExpenseCategoryId());
 
         WorkationExpenseVO vo = new WorkationExpenseVO();
         vo.setWorkationId(workationId);
@@ -170,7 +174,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         validateSpentDate(dto.getSpentDate(), workation);
 
         // 예산 유형은 5.7 에서만 바꾸므로 기존 유형 기준으로 카드를 검증한다
-        validateCard(userId, target.getBudgetType(), dto.getCardId());
+        validateCard(userId, target.getBudgetType(), dto.getCardId(),
+                target.getExpenseCategoryId());
 
         expenseMapper.updateExpense(expenseId, dto.getMerchantName().trim(), dto.getCardId(),
                 dto.getAmount(), dto.getSpentDate(), normalize(dto.getMemo()));
@@ -284,9 +289,9 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
                     "변경할 예산 유형에 해당 카테고리가 없습니다.");
         }
 
-        // 법인으로 바꾸는 경우 기존 카드가 개인카드면 증빙이 성립하지 않는다
+        // 업무로 바꿀 때 카드가 남아 있는지, 기업업무추진비가 아닌지 확인한다
         if (budgetType == BudgetType.WORK && target.getTransactionId() == null) {
-            validateCard(userId, budgetType, target.getCardId());
+            validateCard(userId, budgetType, target.getCardId(), categoryId);
         }
 
         expenseMapper.updateExpenseBudgetType(expenseId, budgetType, categoryId);
@@ -335,6 +340,36 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     }
 
     // =====================================================================================
+    // 5.9 지출 예산유형 일괄 변경
+    // =====================================================================================
+
+    // 법인카드가 없으면 미선택 결제가 전부 개인으로 유입되므로, 업무로 옮기는 작업이 반복된다.
+    // 건별 호출(5.7)로는 20건이면 20번이라 한 번에 처리한다.
+    @Override
+    @Transactional
+    public ExpenseBudgetTypeBulkResponseDTO modifyExpensesBudgetType(
+            Long userId, Long workationId, ExpenseBudgetTypeBulkRequestDTO dto) {
+
+        ownershipValidator.getOwnedActive(userId, workationId, "지출을 수정");
+
+        BudgetType budgetType = requireBudgetType(dto.getBudgetType());
+        List<Long> expenseIds = dto.getExpenseIds();
+
+        // 아무것도 고르지 않은 것은 오류가 아니라 할 일이 없는 상태다
+        if (expenseIds == null || expenseIds.isEmpty()) {
+            return ExpenseBudgetTypeBulkResponseDTO.of(0, uncheckedCount(workationId));
+        }
+
+        int changedCount = expenseMapper
+                .updateExpensesBudgetType(workationId, userId, budgetType, expenseIds);
+
+        log.info("지출 예산유형 일괄 변경 - workationId: {}, type: {}, 요청 {}건, 변경 {}건",
+                workationId, budgetType, expenseIds.size(), changedCount);
+
+        return ExpenseBudgetTypeBulkResponseDTO.of(changedCount, uncheckedCount(workationId));
+    }
+
+    // =====================================================================================
     // 공통
     // =====================================================================================
 
@@ -358,7 +393,9 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     // 목록 상단 "확인 필요" 배지에 쓰는 값
     private int uncheckedCount(Long workationId) {
 
-        ExpenseSummaryVO summary = expenseMapper.selectExpenseSummary(workationId);
+        // 확인 필요 건수만 필요하므로 필터를 걸지 않는다
+        ExpenseSummaryVO summary = expenseMapper
+                .selectExpenseSummary(workationId, null, null, null);
 
         if (summary == null || summary.getUncheckedCount() == null) {
             return 0;
@@ -418,9 +455,12 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         }
     }
 
-    // 법인 지출은 사용 카드를 남겨야 증빙이 성립한다
-    // 개인 지출은 카드를 지정해도 되고 현금이면 비워도 된다
-    private void validateCard(Long userId, BudgetType budgetType, Long cardId) {
+    // 법인카드가 없어도 개인카드로 결제하고 회사에 청구할 수 있으므로
+    // 업무 지출에 개인카드를 허용한다. 카드 자체는 증빙 때문에 반드시 남긴다.
+    //
+    // 기업업무추진비만 예외다. 법인세법이 이 항목에 법인카드 결제를 요구해서,
+    // 개인카드로 결제하면 금액과 무관하게 회사가 비용 처리를 할 수 없다.
+    private void validateCard(Long userId, BudgetType budgetType, Long cardId, Long expenseCategoryId) {
 
         if (budgetType == BudgetType.WORK && cardId == null) {
             throw new BusinessException(ExpenseErrorCode.CARD_REQUIRED);
@@ -434,9 +474,28 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         if (cardType == null) {
             throw new BusinessException(ExpenseErrorCode.CARD_NOT_FOUND);
         }
-        if (budgetType == BudgetType.WORK && !BudgetType.WORK.name().equals(cardType)) {
-            throw new BusinessException(ExpenseErrorCode.CARD_TYPE_MISMATCH);
+
+        boolean corporateCard = BudgetType.WORK.name().equals(cardType);
+
+        if (budgetType == BudgetType.WORK && !corporateCard
+                && isCorporateCardOnly(expenseCategoryId)) {
+            throw new BusinessException(ExpenseErrorCode.CORPORATE_CARD_REQUIRED);
         }
+    }
+
+    // 법인카드 결제만 비용으로 인정되는 계정과목
+    // 회의비는 내부 회의와 외부 거래처 미팅을 구분할 수 없어 보수적으로 막는다.
+    // CategoryMapper.xml 의 corporateCardOnlyFilter 와 같은 목록을 유지해야 한다
+    private static final Set<String> CORPORATE_CARD_ONLY_CODES =
+            Set.of("ENTERTAINMENT", "MEETING");
+
+    private boolean isCorporateCardOnly(Long expenseCategoryId) {
+
+        if (expenseCategoryId == null) {
+            return false;
+        }
+        String code = expenseMapper.selectCategoryCode(expenseCategoryId);
+        return code != null && CORPORATE_CARD_ONLY_CODES.contains(code);
     }
 
     // 빈 문자열은 null 로 저장해 화면에서 값 없음 판정을 단순하게 한다

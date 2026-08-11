@@ -84,16 +84,24 @@
     </select>
 
     <!--
-        요약은 필터와 무관하게 워케이션 전체를 집계한다.
-        건수마다 쿼리를 따로 날리지 않고 CASE WHEN 으로 한 번에 센다.
+        건수와 금액은 목록과 같은 필터를 쓴다. 화면의 목록과 합계가 달라지면 안 된다.
+
+        확인 필요 건수는 필터를 걸지 않는다.
+        이 값으로 "확인 필요" 칩과 일괄 처리 버튼 노출을 결정하는데,
+        필터마다 사라지면 확인이 남았다는 사실 자체를 알 수 없다.
     -->
     <select id="selectExpenseSummary" resultType="com.workit.domain.expense.vo.ExpenseSummaryVO">
         SELECT
-            COUNT(*)                 AS total_count,
-            COALESCE(SUM(amount), 0) AS total_amount,
-            COALESCE(SUM(CASE WHEN is_auto_categorized = 1 THEN 1 ELSE 0 END), 0) AS unchecked_count
-          FROM workation_expenses
-         WHERE workation_id = #{workationId}
+            COUNT(*)                    AS total_count,
+            COALESCE(SUM(we.amount), 0) AS total_amount,
+            (
+                SELECT COALESCE(SUM(CASE WHEN is_auto_categorized = 1 THEN 1 ELSE 0 END), 0)
+                  FROM workation_expenses
+                 WHERE workation_id = #{workationId}
+            )                           AS unchecked_count
+          FROM workation_expenses we
+         WHERE we.workation_id = #{workationId}
+        <include refid="expenseFilters"/>
     </select>
 
     <!-- 워케이션 소유자 검증을 SQL 에서 함께 수행해 남의 지출 조회를 막는다 -->
@@ -167,6 +175,27 @@
         어느 쪽이든 정해진 카테고리가 예산에 배정돼 있지 않으면 기타로 떨어뜨린다.
         예산 유형은 결제 카드의 card_type 으로 판정한다. 카드가 없는 지갑 결제는 개인 지출로 본다.
     -->
+    <!--
+        업무 / 개인 구분.
+
+        결제 시점에 사용자가 고른 값(transactions.is_business_expense)이 있으면 그것을 따르고,
+        없으면 결제한 카드 종류로 판단한다.
+
+        법인카드가 없는 사용자는 개인카드로 업무 결제를 하기 때문에
+        카드 종류만으로는 업무인지 개인인지 알 수 없다.
+
+        is_business_expense 는 DEFAULT 1 이라, 결제 파트가 값을 채우지 않으면
+        전부 업무로 들어온다. 미선택 건은 NULL 로 두는 것을 전제로 한다.
+    -->
+    <sql id="importBudgetType">
+        CASE
+            WHEN t.is_business_expense = 1 THEN 'WORK'
+            WHEN t.is_business_expense = 0 THEN 'PERSONAL'
+            WHEN c.card_type = 'WORK'      THEN 'WORK'
+            ELSE 'PERSONAL'
+        END
+    </sql>
+
     <select id="selectImportTargets" resultType="com.workit.domain.expense.vo.WorkationExpenseVO">
         SELECT
             #{workationId}       AS workation_id,
@@ -180,7 +209,12 @@
                 CASE WHEN bud.id IS NOT NULL THEN src.expense_category_id END,
                 etc.id
             )                    AS expense_category_id,
-            1                    AS is_auto_categorized
+            <!--
+                확인이 필요한 건은 계정과목을 확정하지 못해 기타로 떨어진 건뿐이다.
+                예약 상품 유형·사용자 규칙·업종 매핑으로 정해졌고 예산 배정까지 있으면
+                사용자가 다시 볼 이유가 없다.
+            -->
+            CASE WHEN bud.id IS NOT NULL THEN 0 ELSE 1 END AS is_auto_categorized
           FROM (
               <!--
                   ① 예약 결제
@@ -192,7 +226,7 @@
                      t.amount,
                      t.merchant_name,
                      r.start_date     AS spent_date,
-                     CASE WHEN c.card_type = 'WORK' THEN 'WORK' ELSE 'PERSONAL' END AS budget_type,
+                     <include refid="importBudgetType"/> AS budget_type,
                      rc.id            AS expense_category_id
                 FROM transactions t
                 JOIN reservations r
@@ -209,8 +243,7 @@
                 -->
                 LEFT JOIN expense_categories rc
                        ON rc.user_id IS NULL
-                      AND rc.budget_type = (CASE WHEN c.card_type = 'WORK'
-                                                 THEN 'WORK' ELSE 'PERSONAL' END)
+                      AND rc.budget_type = (<include refid="importBudgetType"/>)
                       AND rc.code        = (CASE WHEN rp.product_detail_type = 'ROOM'
                                                  THEN 'ACCOMMODATION' ELSE 'RENT' END)
                WHERE t.user_id          = #{userId}
@@ -239,7 +272,7 @@
                            t.amount,
                            t.merchant_name,
                            DATE(t.approved_at) AS spent_date,
-                           CASE WHEN c.card_type = 'WORK' THEN 'WORK' ELSE 'PERSONAL' END AS budget_type
+                           <include refid="importBudgetType"/> AS budget_type
                       FROM transactions t
                       LEFT JOIN cards c
                              ON c.id = t.card_id
@@ -296,6 +329,50 @@
         </foreach>
     </update>
 
+    <!--
+        예산 유형 일괄 변경.
+
+        계정과목은 코드를 맞춰 옮긴다. 개인 숙박비 -> 업무 숙박비 처럼 같은 코드가 있고
+        그 계정과목이 예산에 배정돼 있으면 그대로 옮기고, 없으면 기타로 보낸다.
+        개인 예산에는 임차료가 없는 것처럼 유형별로 계정과목이 다르기 때문이다.
+
+        기타로 밀려난 건은 사용자가 계정과목을 다시 골라야 하므로 확인 필요로 되돌린다.
+        소유자 조건을 조인에 넣어 남의 지출 id 가 섞여도 갱신되지 않는다.
+    -->
+    <update id="updateExpensesBudgetType">
+        UPDATE workation_expenses we
+          JOIN workations w
+            ON w.id      = we.workation_id
+           AND w.user_id = #{userId}
+          JOIN expense_categories cur
+            ON cur.id = we.expense_category_id
+          JOIN expense_categories etc
+            ON etc.budget_type = #{budgetType}
+           AND etc.code        = 'ETC'
+           AND etc.user_id IS NULL
+          LEFT JOIN expense_categories tgt
+                 ON tgt.budget_type = #{budgetType}
+                AND tgt.code        = cur.code
+                AND tgt.user_id IS NULL
+          LEFT JOIN budgets bud
+                 ON bud.workation_id        = we.workation_id
+                AND bud.budget_type         = #{budgetType}
+                AND bud.expense_category_id = tgt.id
+           SET we.budget_type         = #{budgetType},
+               we.expense_category_id = COALESCE(
+                                            CASE WHEN bud.id IS NOT NULL THEN tgt.id END,
+                                            etc.id
+                                        ),
+               we.is_auto_categorized = CASE WHEN bud.id IS NOT NULL
+                                             THEN we.is_auto_categorized ELSE 1 END
+         WHERE we.workation_id = #{workationId}
+           AND we.budget_type &lt;&gt; #{budgetType}
+           AND we.id IN
+        <foreach collection="expenseIds" item="expenseId" open="(" separator="," close=")">
+            #{expenseId}
+        </foreach>
+    </update>
+
     <!-- 여러 건을 한 번의 INSERT 로 저장한다. UNIQUE(transaction_id) 로 중복 유입이 차단된다 -->
     <insert id="insertImportedExpenses">
         INSERT INTO workation_expenses
@@ -304,7 +381,8 @@
         VALUES
         <foreach collection="items" item="item" separator=",">
             (#{item.workationId}, #{item.transactionId}, #{item.expenseCategoryId}, #{item.cardId},
-             #{item.budgetType}, #{item.amount}, #{item.merchantName}, #{item.spentDate}, 1)
+             #{item.budgetType}, #{item.amount}, #{item.merchantName}, #{item.spentDate},
+             #{item.isAutoCategorized})
         </foreach>
         ON DUPLICATE KEY UPDATE transaction_id = VALUES(transaction_id)
     </insert>
@@ -316,6 +394,13 @@
          WHERE id          = #{expenseCategoryId}
            AND budget_type = #{budgetType}
            AND (user_id IS NULL OR user_id = #{userId})
+    </select>
+
+    <!-- 계정과목 코드. 법인카드만 허용하는 항목인지 판단하는 데 쓴다 -->
+    <select id="selectCategoryCode" resultType="string">
+        SELECT code
+          FROM expense_categories
+         WHERE id = #{expenseCategoryId}
     </select>
 
     <select id="selectEtcCategoryId" resultType="long">

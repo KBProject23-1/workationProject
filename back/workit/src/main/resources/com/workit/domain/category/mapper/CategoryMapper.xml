@@ -30,8 +30,34 @@
               AND ucl.user_id = #{userId}
         WHERE ec.budget_type = #{budgetType}
         AND (ec.user_id IS NULL OR ec.user_id = #{userId})
+        <include refid="corporateCardOnlyFilter"/>
         ORDER BY ec.sort_order
     </select>
+
+    <!--
+        법인카드 결제만 비용으로 인정되는 계정과목은, 법인카드가 없으면 목록에서 뺀다.
+        예산에 배정하지 못하게 하면 지출 등록에서도 자연히 선택할 수 없다.
+        저장 버튼을 누른 뒤에 거절하는 것보다 처음부터 안 보이는 편이 낫다.
+
+          ENTERTAINMENT  접대비. 법인세법이 법인카드 결제를 요구한다
+          MEETING        회의비. 내부 회의와 외부 거래처 미팅을 구분할 수 없어 보수적으로 막는다
+
+        이미 예산에 배정된 카테고리에는 적용하지 않는다.
+        법인카드를 나중에 삭제한 사용자의 기존 예산이 사라지면 안 된다.
+    -->
+    <sql id="corporateCardOnlyFilter">
+        AND (
+            ec.budget_type &lt;&gt; 'WORK'
+            OR ec.code NOT IN ('ENTERTAINMENT', 'MEETING')
+            OR EXISTS (
+                SELECT 1
+                  FROM cards c
+                 WHERE c.user_id   = #{userId}
+                   AND c.card_type = 'WORK'
+                   AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            )
+        )
+    </sql>
 
     <!-- 해당 워케이션 예산에 배정된 카테고리만 조회한다 -->
     <select id="selectBudgetedCategoryList"

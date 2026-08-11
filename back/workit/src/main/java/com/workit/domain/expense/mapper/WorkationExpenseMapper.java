@@ -26,8 +26,14 @@ public interface WorkationExpenseMapper {
                           @Param("expenseCategoryId") Long expenseCategoryId,
                           @Param("uncheckedOnly") Boolean uncheckedOnly);
 
-    // 상단 요약. 필터와 무관하게 워케이션 전체를 집계한다
-    ExpenseSummaryVO selectExpenseSummary(@Param("workationId") Long workationId);
+    // 계정과목 코드. 없으면 null
+    String selectCategoryCode(@Param("expenseCategoryId") Long expenseCategoryId);
+
+    // 상단 요약. 건수·금액은 목록과 같은 필터를 쓰고, 확인 필요 건수만 전체 기준이다
+    ExpenseSummaryVO selectExpenseSummary(@Param("workationId") Long workationId,
+                                         @Param("budgetType") BudgetType budgetType,
+                                         @Param("expenseCategoryId") Long expenseCategoryId,
+                                         @Param("uncheckedOnly") Boolean uncheckedOnly);
 
     // 지출 단건. 없으면 null
     WorkationExpenseVO selectExpenseById(@Param("expenseId") Long expenseId,
@@ -63,6 +69,12 @@ public interface WorkationExpenseMapper {
     int confirmExpenses(@Param("workationId") Long workationId,
                         @Param("userId") Long userId,
                         @Param("expenseIds") List<Long> expenseIds);
+
+    // 예산 유형 일괄 변경. 계정과목은 코드를 맞춰 옮기고, 대응이 없으면 기타로 보낸다
+    int updateExpensesBudgetType(@Param("workationId") Long workationId,
+                                 @Param("userId") Long userId,
+                                 @Param("budgetType") BudgetType budgetType,
+                                 @Param("expenseIds") List<Long> expenseIds);
 
     // 유입 대상 일괄 저장. UNIQUE(transaction_id) 로 중복 유입을 막는다
     int insertImportedExpenses(@Param("items") List<WorkationExpenseVO> items);

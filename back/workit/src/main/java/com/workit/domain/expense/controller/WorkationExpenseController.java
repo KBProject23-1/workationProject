@@ -1,7 +1,9 @@
 package com.workit.domain.expense.controller;
 
+import com.workit.domain.expense.dto.request.ExpenseBudgetTypeBulkRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseConfirmRequestDTO;
 import com.workit.domain.expense.dto.request.ExpenseCreateRequestDTO;
+import com.workit.domain.expense.dto.response.ExpenseBudgetTypeBulkResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseConfirmResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseItemResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseListResponseDTO;
@@ -49,6 +51,18 @@ public class WorkationExpenseController {
             @RequestBody ExpenseCreateRequestDTO dto) {
 
         return GlobalResponseFactory.created(expenseService.addExpense(userId, workationId, dto));
+    }
+
+    // 5.9 지출 예산유형 일괄 변경
+    // 계정과목은 코드를 맞춰 옮기고, 대응이 없으면 기타로 보낸다
+    @PatchMapping("/budget-type")
+    public ResponseEntity<CommonResponse<ExpenseBudgetTypeBulkResponseDTO>> expenseBudgetTypeBulkChange(
+            @CurrentUser Long userId,
+            @PathVariable("workationId") Long workationId,
+            @RequestBody ExpenseBudgetTypeBulkRequestDTO dto) {
+
+        return GlobalResponseFactory.success(
+                expenseService.modifyExpensesBudgetType(userId, workationId, dto));
     }
 
     // 5.8 지출 일괄 확정
