@@ -4,7 +4,7 @@ import com.workit.domain.recommendation.restaurant.dto.request.RecommendationRec
 import com.workit.domain.recommendation.restaurant.dto.request.RestaurantRecommendationCreateRequestDTO;
 import com.workit.domain.recommendation.restaurant.dto.response.RecommendationCandidateListResponseDTO;
 import com.workit.domain.recommendation.restaurant.dto.response.RestaurantReferenceResponseDTO;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.restaurant.dto.response.RestaurantRecommendationResponseDTO;
 import com.workit.domain.recommendation.restaurant.service.RestaurantRecommendationService;
 import com.workit.domain.recommendation.restaurant.vo.MealType;

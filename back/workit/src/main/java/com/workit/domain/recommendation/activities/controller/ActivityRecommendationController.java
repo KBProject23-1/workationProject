@@ -3,7 +3,9 @@ package com.workit.domain.recommendation.activities.controller;
 import com.workit.domain.recommendation.activities.dto.request.ActivityRecommendationCreateRequestDTO;
 import com.workit.domain.recommendation.activities.dto.request.RecommendationRecalculateRequestDTO;
 import com.workit.domain.recommendation.activities.dto.response.ActivityRecommendationResponseDTO;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.activities.dto.response.RecommendationCandidateListResponseDTO;
+import com.workit.domain.recommendation.activities.dto.response.RecommendationReferenceResponseDTO;
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.activities.service.ActivityRecommendationService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.security.CurrentUser;
@@ -23,6 +25,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class ActivityRecommendationController {
 
     private final ActivityRecommendationService activityRecommendationService;
+
+    @GetMapping("/reference-place")
+    public ResponseEntity<CommonResponse<RecommendationReferenceResponseDTO>> getActivityReferencePlace(
+            @CurrentUser Long userId) {
+        return com.workit.global.response.GlobalResponseFactory.success(
+                activityRecommendationService.findActivityReferencePlace(userId));
+    }
+
+    @GetMapping("/reference-place-candidates")
+    public ResponseEntity<CommonResponse<RecommendationCandidateListResponseDTO>> getActivityReferencePlaceCandidates(
+            @CurrentUser Long userId) {
+        return com.workit.global.response.GlobalResponseFactory.success(
+                activityRecommendationService.findActivityReferencePlaceCandidates(userId));
+    }
 
     @PostMapping
     public ResponseEntity<CommonResponse<RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item>>> activityRecommendationAdd(

@@ -1,7 +1,7 @@
 package com.workit.domain.recommendation.accommodation.service;
 
 import com.workit.domain.recommendation.accommodation.dto.request.RecommendationRecalculateRequestDTO;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.accommodation.dto.response.AccommodationRecommendationResponseDTO;
 import com.workit.domain.recommendation.accommodation.dto.response.RecommendationCandidateListResponseDTO;
 import com.workit.domain.recommendation.accommodation.dto.response.RecommendationCandidateResponseDTO;

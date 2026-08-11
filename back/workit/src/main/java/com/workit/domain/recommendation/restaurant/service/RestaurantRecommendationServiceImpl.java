@@ -2,7 +2,7 @@ package com.workit.domain.recommendation.restaurant.service;
 
 import com.workit.domain.recommendation.restaurant.dto.request.RecommendationRecalculateRequestDTO;
 import com.workit.domain.recommendation.restaurant.dto.request.RestaurantRecommendationCreateRequestDTO;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.restaurant.dto.response.RestaurantRecommendationResponseDTO;
 import com.workit.domain.recommendation.restaurant.dto.response.RecommendationCandidateListResponseDTO;
 import com.workit.domain.recommendation.restaurant.dto.response.RecommendationCandidateResponseDTO;
