@@ -2,7 +2,7 @@ package com.workit.domain.wallet.service;
 
 import com.workit.domain.account.mapper.AccountMapper;
 import com.workit.domain.account.vo.BankAccountVO;
-import com.workit.domain.ledger.mapper.LedgerEntryMapper;
+import com.workit.domain.ledger.service.LedgerService;
 import com.workit.domain.ledger.vo.LedgerEntryVO;
 import com.workit.domain.transaction.constant.TransactionStatus;
 import com.workit.domain.transaction.mapper.TransactionMapper;
@@ -36,7 +36,7 @@ public class WalletServiceImpl implements WalletService {
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
     private final TransactionMapper transactionMapper;
-    private final LedgerEntryMapper ledgerEntryMapper;
+    private final LedgerService ledgerService;
     private final PinValidator pinValidator;
 
     @Override
@@ -95,10 +95,9 @@ public class WalletServiceImpl implements WalletService {
         //    balance_after 는 참고용 스냅샷(권위값은 계좌/지갑 row, 대사는 원장 금액 합으로 수행)
         BigDecimal accountBalanceAfter = account.getBalance().subtract(amount);
         BigDecimal walletBalanceAfter = wallet.getBalance().add(amount);
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
-                chargeTx.getId(), 1, LedgerEntryVO.ACCOUNT_BANK, account.getId(), amount, accountBalanceAfter));
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
-                chargeTx.getId(), 2, LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter));
+        ledgerService.post(chargeTx.getId(),
+                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, account.getId(), amount, accountBalanceAfter),
+                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter));
 
         // 4) PAID 로 전이 (승인 시각 기록)
         LocalDateTime approvedAt = LocalDateTime.now();
@@ -149,10 +148,9 @@ public class WalletServiceImpl implements WalletService {
         // 3) 복식부기 원장 기입: WALLET DEBIT(나감) / BANK CREDIT(들어옴), SUM(DEBIT)==SUM(CREDIT)
         BigDecimal walletBalanceAfter = wallet.getBalance().subtract(amount);
         BigDecimal accountBalanceAfter = targetAccount.getBalance().add(amount);
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
-                refundTx.getId(), 1, LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter));
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
-                refundTx.getId(), 2, LedgerEntryVO.ACCOUNT_BANK, targetAccount.getId(), amount, accountBalanceAfter));
+        ledgerService.post(refundTx.getId(),
+                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter),
+                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_BANK, targetAccount.getId(), amount, accountBalanceAfter));
 
         // 4) PAID 로 전이 (승인 시각 기록)
         LocalDateTime approvedAt = LocalDateTime.now();

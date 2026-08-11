@@ -4,7 +4,7 @@ import com.workit.domain.account.mapper.AccountMapper;
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.card.mapper.CardMapper;
 import com.workit.domain.card.vo.CardVO;
-import com.workit.domain.ledger.mapper.LedgerEntryMapper;
+import com.workit.domain.ledger.service.LedgerService;
 import com.workit.domain.ledger.vo.LedgerEntryVO;
 import com.workit.domain.transaction.constant.TransactionStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
@@ -47,7 +47,7 @@ public class TransactionServiceImpl implements TransactionService {
     private final WalletMapper walletMapper;
     private final AccountMapper accountMapper;
     private final CardMapper cardMapper;
-    private final LedgerEntryMapper ledgerEntryMapper;
+    private final LedgerService ledgerService;
     private final PaymentGatewayClient paymentGatewayClient;
     private final PinValidator pinValidator;
 
@@ -203,10 +203,9 @@ public class TransactionServiceImpl implements TransactionService {
             transactionMapper.insertTransaction(depositTx);
             BigDecimal accBalanceAfter = primaryAccount.getBalance().subtract(actualChargeAmount);
             BigDecimal walBalanceAfter = wallet.getBalance().add(actualChargeAmount);
-            ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
-                    depositTx.getId(), 1, LedgerEntryVO.ACCOUNT_BANK, primaryAccount.getId(), actualChargeAmount, accBalanceAfter));
-            ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
-                    depositTx.getId(), 2, LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), actualChargeAmount, walBalanceAfter));
+            ledgerService.post(depositTx.getId(),
+                    LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, primaryAccount.getId(), actualChargeAmount, accBalanceAfter),
+                    LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), actualChargeAmount, walBalanceAfter));
         }
 
         // 3) 지갑 차감
@@ -218,10 +217,9 @@ public class TransactionServiceImpl implements TransactionService {
         WalletVO updatedWallet = walletMapper.findByUserId(userId);
 
         // 4) 결제 원장: WALLET DEBIT(나감) / MERCHANT CREDIT(들어옴). 가맹점 잔액은 미보유 -> balance_after null
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
-                paymentTx.getId(), 1, LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, updatedWallet.getBalance()));
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
-                paymentTx.getId(), 2, LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
+        ledgerService.post(paymentTx.getId(),
+                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, updatedWallet.getBalance()),
+                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
 
         // 5) PAID 로 전이
         LocalDateTime approvedAt = LocalDateTime.now();
@@ -274,10 +272,9 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         // 4) 원장: CARD DEBIT / MERCHANT CREDIT. 카드는 외부 발급사 자금이라 내부 잔액 이동 없음 -> balance_after null
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.debit(
-                paymentTx.getId(), 1, LedgerEntryVO.ACCOUNT_CARD, card.getId(), amount, null));
-        ledgerEntryMapper.insertEntry(LedgerEntryVO.credit(
-                paymentTx.getId(), 2, LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
+        ledgerService.post(paymentTx.getId(),
+                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_CARD, card.getId(), amount, null),
+                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
 
         // 5) PAID 로 전이 (매입 완료)
         LocalDateTime approvedAt = LocalDateTime.now();

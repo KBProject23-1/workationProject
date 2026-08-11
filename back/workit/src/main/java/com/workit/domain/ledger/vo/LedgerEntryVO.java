@@ -35,23 +35,21 @@ public class LedgerEntryVO {
     private BigDecimal balanceAfter;
     private LocalDateTime createdAt;
 
-    /** 잔액 감소(나감) 기입. */
-    public static LedgerEntryVO debit(Long transactionId, int seq, String accountType,
-                                      Long accountRefId, BigDecimal amount, BigDecimal balanceAfter) {
-        return of(transactionId, seq, accountType, accountRefId, DEBIT, amount, balanceAfter);
+    /** 잔액 감소(나감) leg. transactionId/entrySeq 는 LedgerService.post 가 부여한다. */
+    public static LedgerEntryVO debit(String accountType, Long accountRefId,
+                                      BigDecimal amount, BigDecimal balanceAfter) {
+        return of(accountType, accountRefId, DEBIT, amount, balanceAfter);
     }
 
-    /** 잔액 증가(들어옴) 기입. */
-    public static LedgerEntryVO credit(Long transactionId, int seq, String accountType,
-                                       Long accountRefId, BigDecimal amount, BigDecimal balanceAfter) {
-        return of(transactionId, seq, accountType, accountRefId, CREDIT, amount, balanceAfter);
+    /** 잔액 증가(들어옴) leg. transactionId/entrySeq 는 LedgerService.post 가 부여한다. */
+    public static LedgerEntryVO credit(String accountType, Long accountRefId,
+                                       BigDecimal amount, BigDecimal balanceAfter) {
+        return of(accountType, accountRefId, CREDIT, amount, balanceAfter);
     }
 
-    private static LedgerEntryVO of(Long transactionId, int seq, String accountType, Long accountRefId,
+    private static LedgerEntryVO of(String accountType, Long accountRefId,
                                     String direction, BigDecimal amount, BigDecimal balanceAfter) {
         LedgerEntryVO e = new LedgerEntryVO();
-        e.setTransactionId(transactionId);
-        e.setEntrySeq(seq);
         e.setAccountType(accountType);
         e.setAccountRefId(accountRefId);
         e.setDirection(direction);
