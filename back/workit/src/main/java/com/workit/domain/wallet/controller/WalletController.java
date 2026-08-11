@@ -5,6 +5,7 @@ import com.workit.domain.wallet.dto.request.RefundRequest;
 import com.workit.domain.wallet.dto.response.ChargeResponse;
 import com.workit.domain.wallet.dto.response.RefundResponse;
 import com.workit.domain.wallet.dto.response.WalletResponse;
+import com.workit.domain.payment.service.PaymentService;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 public class WalletController {
 
     private final WalletService walletService;
+    private final PaymentService paymentService;
 
     /** 지갑 조회 */
     @GetMapping("/me")
@@ -34,7 +36,7 @@ public class WalletController {
             @RequestBody ChargeRequest requestBody,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.success(walletService.charge(userId, requestBody));
+        return GlobalResponseFactory.success(paymentService.charge(userId, requestBody));
     }
 
     /** 지갑 환불 */
@@ -43,6 +45,6 @@ public class WalletController {
             @RequestBody RefundRequest requestBody,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.success(walletService.refund(userId, requestBody));
+        return GlobalResponseFactory.success(paymentService.refund(userId, requestBody));
     }
 }

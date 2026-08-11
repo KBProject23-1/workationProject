@@ -2,7 +2,7 @@ package com.workit.domain.transaction.vo;
 
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.card.vo.CardVO;
-import com.workit.domain.transaction.constant.TransactionStatus;
+import com.workit.domain.payment.TransactionStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.util.TransactionNumberGenerator;
 import com.workit.domain.wallet.vo.WalletVO;
