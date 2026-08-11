@@ -3,6 +3,7 @@ package com.workit.domain.transaction.controller;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.payment.service.PaymentService;
+import com.workit.domain.support.DeadlockRetrier;
 import com.workit.domain.transaction.service.TransactionService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.dto.PageResponseDTO;
@@ -20,6 +21,7 @@ public class TransactionController {
 
     private final TransactionService transactionService;
     private final PaymentService paymentService;
+    private final DeadlockRetrier deadlockRetrier;
 
     /** 거래 내역 전체 목록 조회 (필터링, 페이징) */
     @GetMapping("/api/v1/transactions")
@@ -76,7 +78,7 @@ public class TransactionController {
             @RequestBody PaymentRequest requestBody,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.created(paymentService.pay(userId, requestBody));
+        return GlobalResponseFactory.created(deadlockRetrier.execute(() -> paymentService.pay(userId, requestBody)));
     }
 
     /** 거래 내역 취소(환불) */
@@ -85,6 +87,6 @@ public class TransactionController {
             @PathVariable Long transactionId,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.success(paymentService.cancelPayment(userId, transactionId));
+        return GlobalResponseFactory.success(deadlockRetrier.execute(() -> paymentService.cancelPayment(userId, transactionId)));
     }
 }
