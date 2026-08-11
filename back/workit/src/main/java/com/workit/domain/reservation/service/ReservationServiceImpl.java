@@ -24,7 +24,6 @@ import com.workit.domain.reservation.vo.ReservationStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.CancelResponse;
 import com.workit.domain.payment.service.PaymentService;
-import com.workit.domain.transaction.service.TransactionService;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
@@ -59,7 +58,6 @@ public class ReservationServiceImpl implements ReservationService {
             DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private final ReservationMapper reservationMapper;
-    private final TransactionService transactionService;
     private final PaymentService paymentService;
 
 
@@ -198,7 +196,7 @@ public class ReservationServiceImpl implements ReservationService {
 
         validateCancellationTarget(target);
 
-        CancelResponse cancelResponse = transactionService.cancelTransaction(
+        CancelResponse cancelResponse = paymentService.cancelPayment(
                 userId,
                 target.getPaymentTransactionId()
         );

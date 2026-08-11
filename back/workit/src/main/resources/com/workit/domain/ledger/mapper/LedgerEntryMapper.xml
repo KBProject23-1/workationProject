@@ -29,6 +29,10 @@
         ORDER BY entry_seq
     </select>
 
+    <select id="countByTransactionId" resultType="int">
+        SELECT COUNT(*) FROM ledger_entries WHERE transaction_id = #{transactionId}
+    </select>
+
     <!-- 대사: 원장상 잔액 = 들어온 것(CREDIT) - 나간 것(DEBIT) -->
     <select id="computeAccountBalance" resultType="java.math.BigDecimal">
         SELECT COALESCE(SUM(CASE WHEN direction = 'CREDIT' THEN amount ELSE -amount END), 0)

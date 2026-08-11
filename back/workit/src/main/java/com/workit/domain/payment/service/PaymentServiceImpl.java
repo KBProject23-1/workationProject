@@ -13,6 +13,7 @@ import com.workit.domain.payment.gateway.PgException;
 import com.workit.domain.security.service.PinValidationResult;
 import com.workit.domain.security.service.PinValidator;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
+import com.workit.domain.transaction.dto.response.CancelResponse;
 import com.workit.domain.transaction.dto.response.PaymentResponse;
 import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
@@ -301,6 +302,51 @@ public class PaymentServiceImpl implements PaymentService {
         paymentTx.setApprovedAt(approvedAt);
 
         return PaymentResponse.ofCard(paymentTx);
+    }
+
+    // ===== 결제 취소 =====
+    @Override
+    @Transactional
+    public CancelResponse cancelPayment(Long userId, Long transactionId) {
+
+        TransactionVO tx = transactionMapper.findTransactionForCancel(transactionId, userId);
+        if (tx == null) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
+        }
+        if (!"PAYMENT".equals(tx.getTransactionType())) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_CANCEL_NOT_ALLOWED);
+        }
+
+        // 1) 동시 이중취소 차단: PAID 일 때만 CANCELED 로 원자적 전이. rows==0 이면 이미 취소됨(경합 패자) → 환불 안 함.
+        int claimed = transactionMapper.cancelTransaction(transactionId, userId);
+        if (claimed == 0) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_ALREADY_CANCELED);
+        }
+
+        // 2) 환불 + 원장 역기입 (돈은 온 곳으로). 원거래에 seq 를 이어붙여 zero-sum 유지.
+        BigDecimal amount = tx.getAmount();
+        String refundedTo;
+        if ("WALLET".equals(tx.getPaymentSourceType())) {
+            // 지갑결제 취소 → 지갑 환불 + 역기입(MERCHANT DEBIT / WALLET CREDIT)
+            walletMapper.increaseBalance(userId, amount);
+            WalletVO wallet = walletMapper.findByUserId(userId);
+            ledgerService.post(transactionId,
+                    LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_MERCHANT, tx.getMerchantId(), amount, null),
+                    LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, wallet.getBalance()));
+            refundedTo = "WALLET";
+        } else {
+            // 카드결제 취소 → PG 취소(카드로 환불) + 역기입(MERCHANT DEBIT / CARD CREDIT). 내부 잔액 이동 없음.
+            if (tx.getPgTransactionId() != null) {
+                paymentGatewayClient.cancel(tx.getPgTransactionId());
+            }
+            ledgerService.post(transactionId,
+                    LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_MERCHANT, tx.getMerchantId(), amount, null),
+                    LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_CARD, tx.getCardId(), amount, null));
+            refundedTo = "CARD";
+        }
+
+        TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
+        return CancelResponse.of(cancelled, amount, refundedTo);
     }
 
     // ===== 검증 (에러코드 계약 보존) =====

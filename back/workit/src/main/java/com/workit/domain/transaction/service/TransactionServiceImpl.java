@@ -5,22 +5,19 @@ import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.transaction.vo.TransactionReviewAction;
-import com.workit.domain.wallet.mapper.WalletMapper;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * 거래 기록·조회 담당(내역/집계/상세/영수증) + 결제 취소.
- * 충전/환불/결제 오케스트레이션은 payment 도메인(PaymentService)으로 이관됨.
+ * 거래 기록·조회 담당(내역/집계/상세/영수증).
+ * 결제/취소 오케스트레이션은 payment 도메인(PaymentService)으로 이관됨.
  */
 @Service
 @RequiredArgsConstructor
@@ -30,7 +27,6 @@ public class TransactionServiceImpl implements TransactionService {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final TransactionMapper transactionMapper;
-    private final WalletMapper walletMapper;
 
     @Override
     public PageResponseDTO<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
@@ -123,40 +119,5 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         return ReceiptResponse.from(transaction);
-    }
-
-    @Override
-    @Transactional
-    public CancelResponse cancelTransaction(Long userId, Long transactionId) {
-
-        TransactionVO transaction = transactionMapper.findTransactionForCancel(transactionId, userId);
-        if (transaction == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_NOT_FOUND);
-        }
-        if ("CANCELED".equals(transaction.getStatus())) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_ALREADY_CANCELED);
-        }
-        if (!"PAYMENT".equals(transaction.getTransactionType())) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_CANCEL_NOT_ALLOWED);
-        }
-
-        BigDecimal refundedAmount = BigDecimal.ZERO;
-        String refundedTo = null;
-
-        boolean isWallet = "WALLET".equals(transaction.getPaymentSourceType());
-        boolean isDebitCard = "CARD".equals(transaction.getPaymentSourceType())
-                && "DEBIT".equals(transaction.getCardClassification());
-
-        if (isWallet || isDebitCard) {
-            walletMapper.increaseBalance(userId, transaction.getAmount());
-            refundedAmount = transaction.getAmount();
-            refundedTo = "WALLET";
-        }
-
-        transactionMapper.cancelTransaction(transactionId, userId);
-
-        TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
-
-        return CancelResponse.of(cancelled, refundedAmount, refundedTo);
     }
 }

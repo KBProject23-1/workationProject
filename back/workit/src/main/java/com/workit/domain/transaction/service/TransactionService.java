@@ -16,6 +16,4 @@ public interface TransactionService {
 
     ReceiptResponse getReceipt(Long userId, Long transactionId);
 
-    CancelResponse cancelTransaction(Long userId, Long transactionId);
-
 }

@@ -168,9 +168,10 @@
         WHERE t.id = #{transactionId} AND t.user_id = #{userId}
     </select>
 
+    <!-- PAID 일 때만 CANCELED 로 원자적 전이. 동시 이중취소 시 승자만 rows==1, 나머지는 0(이미 취소) -->
     <update id="cancelTransaction">
         UPDATE transactions
         SET status = 'CANCELED', cancelled_at = NOW()
-        WHERE id = #{transactionId} AND user_id = #{userId}
+        WHERE id = #{transactionId} AND user_id = #{userId} AND status = 'PAID'
     </update>
 </mapper>

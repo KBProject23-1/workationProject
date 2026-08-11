@@ -17,10 +17,12 @@ public class LedgerServiceImpl implements LedgerService {
     public void post(Long transactionId, LedgerEntryVO debit, LedgerEntryVO credit) {
         validate(debit, credit);
 
+        // 이미 기입된 건수 다음부터 seq 부여 — 최초 기입은 1,2 / 취소 역기입은 3,4 로 이어붙어 zero-sum 유지
+        int base = ledgerEntryMapper.countByTransactionId(transactionId);
         debit.setTransactionId(transactionId);
-        debit.setEntrySeq(1);
+        debit.setEntrySeq(base + 1);
         credit.setTransactionId(transactionId);
-        credit.setEntrySeq(2);
+        credit.setEntrySeq(base + 2);
 
         ledgerEntryMapper.insertEntry(debit);
         ledgerEntryMapper.insertEntry(credit);

@@ -61,6 +61,6 @@ public interface TransactionMapper {
     TransactionVO findTransactionForCancel(@Param("transactionId") Long transactionId,
                                            @Param("userId") Long userId);
 
-    // 거래 취소 처리 (user_id 자가 스코프)
-    void cancelTransaction(@Param("transactionId") Long transactionId, @Param("userId") Long userId);
+    // 거래 취소 처리 (user_id 자가 스코프 + PAID 일 때만 원자적 전이). 반환 rows==1 이면 취소 권한 획득(경합 승자).
+    int cancelTransaction(@Param("transactionId") Long transactionId, @Param("userId") Long userId);
 }

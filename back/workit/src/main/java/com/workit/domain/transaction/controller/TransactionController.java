@@ -85,6 +85,6 @@ public class TransactionController {
             @PathVariable Long transactionId,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.success(transactionService.cancelTransaction(userId, transactionId));
+        return GlobalResponseFactory.success(paymentService.cancelPayment(userId, transactionId));
     }
 }
