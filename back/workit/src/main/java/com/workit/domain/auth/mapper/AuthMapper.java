@@ -60,13 +60,6 @@ public interface AuthMapper {
     int countByEmailHash(String emailHash);
 
     /**
-     * 닉네임 중복 가입 조회
-     * - user_profile.nickname (UNIQUE) 대상
-     * - 반환값이 0 초과면 이미 사용 중인 닉네임
-     */
-    int countByNickname(String nickname);
-
-    /**
      * users 테이블 insert (회원가입 완료)
      * - 자동 생성 PK 는 UserVO.id 로 채워진다 (useGeneratedKeys)
      * - Mapper 는 저장만 담당 (암호화/해시는 Service)
@@ -82,7 +75,7 @@ public interface AuthMapper {
     int insertUserAuth(UserAuthVO userAuth);
 
     /**
-     * user_profile 테이블 insert (회원가입 완료 — nickname 저장)
+     * user_profile 테이블 insert (회원가입 완료 — 서버가 생성한 기본 닉네임 저장)
      */
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertUserProfile(UserProfileVO userProfile);

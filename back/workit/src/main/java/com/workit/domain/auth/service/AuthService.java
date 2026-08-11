@@ -35,19 +35,25 @@ public interface AuthService {
     EmailAvailabilityResponseDTO checkEmailAvailability(String email);
 
     /**
-     * 최종 회원가입 완료
+     * 최종 회원가입 완료 + 자동 로그인 (Access/Refresh Token 발급)
      *
      * 흐름:
      *   1. identityToken(회원가입 전용 JWT) 검증 — 서명/만료(sub == signup-verification)
      *   2. JWT 에서 temporaryUserKey 추출 → Redis(signup:verification:{key}) 임시 인증 데이터 조회
-     *   3. CI / 이메일 / 닉네임 중복 재검증 (Race Condition 방지)
+     *   3. CI / 이메일 중복 재검증 (Race Condition 방지)
      *   4. users → user_auth → user_profile insert (동일 트랜잭션)
-     *   5. 회원가입 완료 후 Redis 임시 데이터 삭제
-     *   6. 전자지갑 생성
+     *      - user_profile.nickname 은 서버가 기본값(워케이너{userId}) 자동 생성 (닉네임 입력 기능 제거)
+     *   5. 전자지갑 생성
+     *   6. 회원가입 완료 후 Redis 임시 데이터 삭제
+     *   7. 자동 로그인 — Access Token / Refresh Token 발급, Refresh Session Redis 저장
      *
-     * @param request 회원가입 요청 (identityToken, email, password, nickname)
+     * (knowledge.md Signup Flow: 회원가입 완료 시 Access Token/Refresh Token 발급 후
+     *  HttpOnly Cookie 로 설정 — 별도 로그인 API 를 다시 호출하지 않는다)
+     *
+     * @param request 회원가입 요청 (identityToken, email, password, agreedTermsIds)
+     * @return 회원가입 완료 응답 (userId, name, token_info) + 쿠키용 refreshToken
      */
-    void signup(SignupRequestDTO request);
+    LoginResponseDTO signup(SignupRequestDTO request);
 
     /**
      * 통합 로그인 (PASSWORD / PIN)

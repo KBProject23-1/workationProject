@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 
 // user_profile 테이블 매핑 VO (회원가입 완료 시 insert 용도)
 // ERD 기준 컬럼: id, user_id, nickname, company_name, created_at, updated_at
-// - nickname: UNIQUE — 회원가입 완료 시 중복 체크 후 저장
+// - nickname: UNIQUE — 회원가입 시 서버가 기본값(워케이너{userId})으로 자동 생성 (닉네임 입력 기능 제거)
 // - company_name: 선택 입력 — 회원가입 시점에는 저장하지 않는다
 @Getter
 @Setter

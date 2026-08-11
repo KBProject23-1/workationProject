@@ -19,7 +19,6 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
-import com.workit.domain.auth.provider.MockIdentityVerificationProvider;
 import com.workit.domain.auth.util.JwtTokenProvider;
 import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
@@ -394,12 +393,12 @@ class AuthServiceImplTest {
     @DisplayName("본인인증 실패 - 유효하지 않은 인증 ID는 예외 발생")
     void verifyIdentity_invalidId_throws() {
         // Given — Provider 는 유효하지 않은 인증 ID 를 거부한다
-        when(identityVerificationProvider.verify(MockIdentityVerificationProvider.INVALID_IDENTIFIER))
+        when(identityVerificationProvider.verify("invalid"))
                 .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
 
         // When & Then
         assertThrows(BusinessException.class,
-                () -> authService.verifyIdentity(MockIdentityVerificationProvider.INVALID_IDENTIFIER));
+                () -> authService.verifyIdentity("invalid"));
         assertThrows(BusinessException.class,
                 () -> authService.verifyIdentity(""));
         assertThrows(BusinessException.class,
@@ -490,12 +489,12 @@ class AuthServiceImplTest {
     @DisplayName("아이디 찾기 - PASS 인증 실패 → INVALID_VERIFICATION_ID")
     void findId_invalidVerification_throws() {
         // Given — Provider 가 인증 실패를 던진다
-        when(identityVerificationProvider.verify(MockIdentityVerificationProvider.INVALID_IDENTIFIER))
+        when(identityVerificationProvider.verify("invalid"))
                 .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.findId(MockIdentityVerificationProvider.INVALID_IDENTIFIER));
+                () -> authService.findId("invalid"));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
@@ -653,18 +652,17 @@ class AuthServiceImplTest {
     // ---------- 최종 회원가입 완료 ----------
 
     /** 회원가입 요청 DTO 생성 헬퍼 — 기본값으로 필수 약관(1, 2) 전체 동의 상태를 만든다 */
-    private SignupRequestDTO signupRequest(String identityToken, String email, String nickname) {
-        return signupRequest(identityToken, email, nickname, Arrays.asList(1L, 2L));
+    private SignupRequestDTO signupRequest(String identityToken, String email) {
+        return signupRequest(identityToken, email, Arrays.asList(1L, 2L));
     }
 
     /** 회원가입 요청 DTO 생성 헬퍼 — 동의 약관 ID 목록 지정 */
-    private SignupRequestDTO signupRequest(String identityToken, String email, String nickname,
+    private SignupRequestDTO signupRequest(String identityToken, String email,
                                            List<Long> agreedTermsIds) {
         SignupRequestDTO request = new SignupRequestDTO();
         request.setIdentityToken(identityToken);
         request.setEmail(email);
         request.setPassword("password123!");
-        request.setNickname(nickname);
         request.setAgreedTermsIds(agreedTermsIds);
         return request;
     }
@@ -689,20 +687,19 @@ class AuthServiceImplTest {
      */
     private void stubSignupSuccessPath(String emailHash) {
         when(authMapper.countByEmailHash(emailHash)).thenReturn(0);
-        when(authMapper.countByNickname("tester")).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
     }
 
     @Test
-    @DisplayName("정상 회원가입 - users/user_auth/user_profile insert + 지갑 생성 + Redis 삭제 + 암호화 저장")
+    @DisplayName("정상 회원가입 - users/user_auth/user_profile insert + 지갑 생성 + Redis 삭제 + 자동 로그인 토큰 발급")
     void signup_success() {
         // Given — 유효한 인증 토큰 + 중복 없음 + 약관 마스터 정상
         String token = issueValidIdentityToken();
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
-        // When
-        authService.signup(signupRequest(token, "test@example.com", "tester"));
+        // When — 자동 로그인으로 LoginResponseDTO 반환
+        LoginResponseDTO result = authService.signup(signupRequest(token, "test@example.com"));
 
         // Then — users insert 검증
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
@@ -732,12 +729,12 @@ class AuthServiceImplTest {
         assertEquals("MOCK-CI-imp_ver_1234567890",
                 PersonalDataCipher.decrypt(userAuth.getIdentityCiEncrypt()));
 
-        // user_profile insert 검증
+        // user_profile insert 검증 — 닉네임 입력 기능 제거로 서버가 기본 닉네임(워케이너{userId}) 자동 생성
         ArgumentCaptor<UserProfileVO> profileCaptor = ArgumentCaptor.forClass(UserProfileVO.class);
         verify(authMapper).insertUserProfile(profileCaptor.capture());
         UserProfileVO profile = profileCaptor.getValue();
         assertEquals(user.getId(), profile.getUserId());
-        assertEquals("tester", profile.getNickname());
+        assertEquals("워케이너1", profile.getNickname());
 
         // user_terms_agreements insert 검증 (약관 동의 저장 — 필수 약관 1, 2)
         verify(authMapper).insertUserTerms(eq(user.getId()), eq(Arrays.asList(1L, 2L)));
@@ -747,6 +744,22 @@ class AuthServiceImplTest {
 
         // 회원가입 완료 후 Redis 임시 데이터 삭제 검증
         assertTrue(savedSignupData.isEmpty());
+
+        // 자동 로그인 검증 (knowledge.md Signup Flow — 별도 로그인 API 호출 없이 토큰 발급)
+        assertNotNull(result);
+        assertEquals(user.getId(), result.getUserId());
+        assertEquals("홍길동", result.getName());
+        assertNotNull(result.getTokenInfo().getAccessToken());
+        assertEquals("Bearer", result.getTokenInfo().getGrantType());
+        assertEquals(900, result.getTokenInfo().getAccessTokenExpiresIn());
+        assertNotNull(result.getRefreshToken());
+        assertEquals(1209600, result.getRefreshTokenMaxAgeSeconds());
+
+        // Refresh Session Redis 저장 검증 (login 과 동일 — TTL = refresh 만료(20160분))
+        verify(refreshTokenStore).save(eq(user.getId()), anyString(), eq(1209600L));
+        // Redis 에는 원문이 아닌 SHA-256 hash 가 저장된다 (knowledge.md Refresh Token Security)
+        assertNotNull(savedRefreshTokens.get(user.getId()));
+        assertNotEquals(result.getRefreshToken(), savedRefreshTokens.get(user.getId()));
     }
 
     @Test
@@ -759,7 +772,7 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+                () -> authService.signup(signupRequest(token, "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.DUPLICATE_USER, ex.getErrorCode());
@@ -781,26 +794,10 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+                () -> authService.signup(signupRequest(token, "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.DUPLICATE_EMAIL, ex.getErrorCode());
-        verify(authMapper, never()).insertUser(any(UserVO.class));
-    }
-
-    @Test
-    @DisplayName("닉네임 중복 실패 - 동일 nickname 이 있으면 DUPLICATE_NICKNAME")
-    void signup_duplicateNickname_throws() {
-        // Given — 동일 nickname 이 이미 가입된 상태
-        String token = issueValidIdentityToken();
-        when(authMapper.countByNickname("tester")).thenReturn(1);
-
-        // When
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
-
-        // Then
-        assertEquals(AuthErrorCode.DUPLICATE_NICKNAME, ex.getErrorCode());
         verify(authMapper, never()).insertUser(any(UserVO.class));
     }
 
@@ -822,7 +819,7 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(expiredToken, "test@example.com", "tester")));
+                () -> authService.signup(signupRequest(expiredToken, "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.EXPIRED_SIGNUP_TOKEN, ex.getErrorCode());
@@ -842,7 +839,7 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(tampered, "test@example.com", "tester")));
+                () -> authService.signup(signupRequest(tampered, "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_SIGNUP_TOKEN, ex.getErrorCode());
@@ -862,7 +859,7 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(otherToken, "test@example.com", "tester")));
+                () -> authService.signup(signupRequest(otherToken, "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_SIGNUP_TOKEN, ex.getErrorCode());
@@ -876,7 +873,7 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester")));
+                () -> authService.signup(signupRequest(token, "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND, ex.getErrorCode());
@@ -884,20 +881,16 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("필수 값 누락 - identityToken/email/password/nickname 누락은 INVALID_SIGNUP_REQUEST")
+    @DisplayName("필수 값 누락 - identityToken/email/password 누락은 INVALID_SIGNUP_REQUEST")
     void signup_missingRequired_throws() {
         // When & Then — identityToken 누락
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest("", "test@example.com", "tester")));
+                () -> authService.signup(signupRequest("", "test@example.com")));
         assertEquals(AuthErrorCode.INVALID_SIGNUP_REQUEST, ex.getErrorCode());
 
         // email 누락
         assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest("some-token", "", "tester")));
-
-        // nickname 누락
-        assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest("some-token", "test@example.com", "")));
+                () -> authService.signup(signupRequest("some-token", "")));
 
         // null 요청
         assertThrows(BusinessException.class, () -> authService.signup(null));
@@ -911,7 +904,7 @@ class AuthServiceImplTest {
 
         // When — 잘못된 이메일 형식은 hash/DB 조회 전에 차단된다
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "not-an-email", "tester")));
+                () -> authService.signup(signupRequest(token, "not-an-email")));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
@@ -923,12 +916,11 @@ class AuthServiceImplTest {
         // Given — 유효한 인증 토큰 + 필수(1, 2) + 선택(3) 전부 동의 상태
         String token = issueValidIdentityToken();
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
-        when(authMapper.countByNickname("tester")).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L, 3L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
 
         // When
-        authService.signup(signupRequest(token, "test@example.com", "tester",
+        authService.signup(signupRequest(token, "test@example.com",
                 Arrays.asList(1L, 2L, 3L)));
 
         // Then — 동의한 약관이 그대로 저장된다
@@ -944,13 +936,12 @@ class AuthServiceImplTest {
         // Given — 유효한 인증 토큰 + 필수 약관 2 번을 누락하고 1 번만 동의
         String token = issueValidIdentityToken();
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
-        when(authMapper.countByNickname("tester")).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Collections.singletonList(1L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                () -> authService.signup(signupRequest(token, "test@example.com",
                         Collections.singletonList(1L))));
 
         // Then
@@ -969,13 +960,12 @@ class AuthServiceImplTest {
         // Given — 유효한 인증 토큰 + 필수(1, 2)는 동의했지만 terms 에 존재하지 않는 99 번이 섞여 있음
         String token = issueValidIdentityToken();
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
-        when(authMapper.countByNickname("tester")).thenReturn(0);
         // 존재하는 약관은 1, 2 만 조회되므로 입력([1, 2, 99])과 크기가 달라진다
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                () -> authService.signup(signupRequest(token, "test@example.com",
                         Arrays.asList(1L, 2L, 99L))));
 
         // Then
@@ -992,14 +982,13 @@ class AuthServiceImplTest {
         // Given — 유효한 인증 토큰 + [1, 2, null] — null 요소는 terms 에 존재할 수 없다
         String token = issueValidIdentityToken();
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
-        when(authMapper.countByNickname("tester")).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
 
         List<Long> agreedWithNull = new ArrayList<>(Arrays.asList(1L, 2L, null));
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                () -> authService.signup(signupRequest(token, "test@example.com",
                         agreedWithNull)));
 
         // Then
@@ -1015,7 +1004,7 @@ class AuthServiceImplTest {
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When
-        authService.signup(signupRequest(token, "test@example.com", "tester",
+        authService.signup(signupRequest(token, "test@example.com",
                 Arrays.asList(1L, 2L)));
 
         // Then
@@ -1033,12 +1022,12 @@ class AuthServiceImplTest {
 
         // When & Then — null
         BusinessException nullEx = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester", null)));
+                () -> authService.signup(signupRequest(token, "test@example.com", null)));
         assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, nullEx.getErrorCode());
 
         // 빈 배열
         BusinessException emptyEx = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", "tester",
+                () -> authService.signup(signupRequest(token, "test@example.com",
                         Collections.emptyList())));
         assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, emptyEx.getErrorCode());
 
@@ -1054,7 +1043,7 @@ class AuthServiceImplTest {
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When
-        authService.signup(signupRequest(token, "test@example.com", "tester",
+        authService.signup(signupRequest(token, "test@example.com",
                 Arrays.asList(1L, 1L, 2L, 2L)));
 
         // Then — 중복이 제거된 [1, 2] 만 저장된다
@@ -1072,7 +1061,7 @@ class AuthServiceImplTest {
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When — 대문자 이메일로 가입
-        authService.signup(signupRequest(token, "TEST@EXAMPLE.COM", "tester"));
+        authService.signup(signupRequest(token, "TEST@EXAMPLE.COM"));
 
         // Then — SHA-256("test@example.com") 과 동일해야 한다 (소문자 정규화)
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
@@ -1089,12 +1078,11 @@ class AuthServiceImplTest {
         String token = issueValidIdentityToken();
         String maxLengthEmail = buildLongEmail(254);
         when(authMapper.countByEmailHash(anyString())).thenReturn(0);
-        when(authMapper.countByNickname("tester")).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
 
         // When
-        authService.signup(signupRequest(token, maxLengthEmail, "tester"));
+        authService.signup(signupRequest(token, maxLengthEmail));
 
         // Then
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
@@ -1116,7 +1104,7 @@ class AuthServiceImplTest {
 
         // When — 255자 이상 이메일은 검증 단계에서 차단된다
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, buildLongEmail(255), "tester")));
+                () -> authService.signup(signupRequest(token, buildLongEmail(255))));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());

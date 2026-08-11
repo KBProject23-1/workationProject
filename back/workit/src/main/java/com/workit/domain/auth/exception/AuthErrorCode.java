@@ -11,13 +11,17 @@ public enum AuthErrorCode implements ErrorCode {
     // docs: 본인인증 검증 및 회원 중복 체크 → 400
     INVALID_VERIFICATION_ID(HttpStatus.BAD_REQUEST, "PASS 인증이 유효하지 않습니다. 다시 시도해주세요."),
 
+    // Mock PASS 본인인증 - 완료 등록 요청 값 오류 (name/phoneNumber 누락·빈 값, 형식 오류) → 400
+    // (signup/login 의 INVALID_*_REQUEST 규약과 동일 — 필수 값 누락은 Service Layer 에서 차단)
+    INVALID_PASS_REQUEST(HttpStatus.BAD_REQUEST, "본인인증 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),
+
     // 본인인증 통과 후 CI 기준 중복 가입 감지 → 409 (docs errorCode: DUPLICATE_USER)
     DUPLICATE_USER(HttpStatus.CONFLICT, "이미 가입된 회원입니다. 로그인을 진행해주세요."),
 
     // 회원가입 이메일 중복 확인 - 이메일 미입력/형식 오류 → 400 (docs errorCode: INVALID_EMAIL_FORMAT)
     INVALID_EMAIL_FORMAT(HttpStatus.BAD_REQUEST, "올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요."),
 
-    // 회원가입 완료 - 요청 값 검증 실패 (identityToken/email/password/nickname 누락 등) → 400
+    // 회원가입 완료 - 요청 값 검증 실패 (identityToken/email/password 누락 등) → 400
     INVALID_SIGNUP_REQUEST(HttpStatus.BAD_REQUEST, "회원가입 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),
 
     // 회원가입 완료 - 회원가입 전용 JWT 서명/형식/용도(sub) 오류 → 400
@@ -33,7 +37,6 @@ public enum AuthErrorCode implements ErrorCode {
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
 
     // 회원가입 완료 - 닉네임 중복 → 409
-    DUPLICATE_NICKNAME(HttpStatus.CONFLICT, "이미 사용 중인 닉네임입니다."),
 
     // 회원가입 완료 - 필수 약관 미동의 / agreedTermsIds 누락·빈 배열 → 400
     // (docs: 최종 회원가입 완료 → MISSING_REQUIRED_TERMS)
