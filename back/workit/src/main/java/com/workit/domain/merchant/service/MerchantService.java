@@ -11,6 +11,7 @@ import java.time.LocalDate;
 public interface MerchantService {
 
     MerchantListResponseDTO<MerchantItemResponseDTO> findMerchants(
+            Long userId,
             String category,
             LocalDate checkInDate,
             LocalDate checkOutDate,
@@ -24,6 +25,7 @@ public interface MerchantService {
     );
 
     MerchantDetailResponseDTO findAccommodationProducts(
+            Long userId,
             Long merchantId,
             LocalDate checkInDate,
             LocalDate checkOutDate,
@@ -32,7 +34,11 @@ public interface MerchantService {
     );
 
     MerchantDetailResponseDTO findOfficeProducts(
-            Long merchantId
+            Long userId,
+            Long merchantId,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer guestCount
     );
 
     MerchantDetailCommonResponseDTO findRestaurantProducts(

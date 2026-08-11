@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
 public class MerchantServiceImpl implements MerchantService {
 
     private static final int MAX_SIZE = 50;
-    private static final int DETAIL_REVIEW_SIZE = 20;
+    private static final int DETAIL_REVIEW_PREVIEW_SIZE = 5;
     private static final String CURSOR_SORT_KEY = "sort";
     private static final String CURSOR_MERCHANT_ID_KEY = "merchantId";
     private static final String CURSOR_RATING_KEY = "rating";
@@ -58,9 +58,10 @@ public class MerchantServiceImpl implements MerchantService {
     @Override
     @Transactional(readOnly = true)
     public MerchantListResponseDTO<MerchantItemResponseDTO> findMerchants(
+            Long userId,
             String category,
-            LocalDate checkInDate,
-            LocalDate checkOutDate,
+            LocalDate startDate,
+            LocalDate endDate,
             Integer headcount,
             Long minPrice,
             Long maxPrice,
@@ -74,7 +75,7 @@ public class MerchantServiceImpl implements MerchantService {
         int safeSize = normalizeSize(size);
         validatePriceRange(minPrice, maxPrice);
         validateHeadcount(headcount);
-        validatePeriod(parsedCategory, checkInDate, checkOutDate);
+        validatePeriod(startDate, endDate);
 
         MerchantSortType safeSort = sort == null ? MerchantSortType.RATING_DESC : sort;
         int querySize = safeSize + 1;
@@ -83,18 +84,19 @@ public class MerchantServiceImpl implements MerchantService {
             ReservationMerchantCursor decodedCursor = decodeCursor(cursor, safeSort);
 
             Integer requiredDateCount = null;
-            if (checkInDate != null && checkOutDate != null) {
-                requiredDateCount = (int) ChronoUnit.DAYS.between(checkInDate, checkOutDate);
+            if (startDate != null && endDate != null) {
+                requiredDateCount = (int) ChronoUnit.DAYS.between(startDate, endDate);
             }
 
             List<MerchantVO> merchants = merchantMapper.selectReservationMerchantsByCursor(
+                    userId,
                     parsedCategory == null ? null : parsedCategory.name(),
                     decodedCursor.cursorValue,
                     decodedCursor.cursorMerchantId,
                     querySize,
                     regionId,
-                    checkInDate,
-                    checkOutDate,
+                    startDate,
+                    endDate,
                     requiredDateCount,
                     headcount,
                     minPrice,
@@ -132,9 +134,10 @@ public class MerchantServiceImpl implements MerchantService {
     @Override
     @Transactional(readOnly = true)
     public MerchantDetailResponseDTO findAccommodationProducts(
+            Long userId,
             Long merchantId,
-            LocalDate checkInDate,
-            LocalDate checkOutDate,
+            LocalDate startDate,
+            LocalDate endDate,
             Integer roomCount,
             Integer guestCount
     ) {
@@ -143,29 +146,29 @@ public class MerchantServiceImpl implements MerchantService {
                 throw new IllegalArgumentException("가맹점 번호는 1 이상이어야 합니다.");
             }
 
-            MerchantDetailVO accommodation = merchantMapper.selectMerchantAccommodationDetails(merchantId);
+            MerchantDetailVO accommodation = merchantMapper.selectMerchantAccommodationDetails(userId, merchantId);
             if (accommodation == null) {
                 throw new BusinessException(MerchantErrorCode.ACCOMMODATION_NOT_FOUND);
             }
 
-            validateAccommodationPeriod(checkInDate, checkOutDate);
+            validatePeriod(startDate, endDate);
             validateRoomCount(roomCount);
             validateGuestCount(guestCount);
 
             Integer requiredDateCount = null;
             Integer requiredQuantity = null;
-            if (checkInDate != null && checkOutDate != null) {
-                requiredDateCount = (int) ChronoUnit.DAYS.between(checkInDate, checkOutDate);
+            if (startDate != null && endDate != null) {
+                requiredDateCount = (int) ChronoUnit.DAYS.between(startDate, endDate);
                 requiredQuantity = roomCount == null ? 1 : roomCount;
             }
 
             List<MerchantProductVO> reservationProducts =
-                    (checkInDate == null || checkOutDate == null)
+                    (startDate == null || endDate == null)
                             ? merchantMapper.selectMerchantAccommodationReservationProducts(merchantId)
                             : merchantMapper.selectMerchantAccommodationReservationProductsByPeriod(
                                     merchantId,
-                                    checkInDate,
-                                    checkOutDate,
+                                    startDate,
+                                    endDate,
                                     guestCount,
                                     roomCount,
                                     requiredDateCount,
@@ -193,7 +196,7 @@ public class MerchantServiceImpl implements MerchantService {
                     accommodation.getRating(),
                     reviewCount == null ? 0 : reviewCount,
                     accommodation.getThumbnailUrl(),
-                    false,
+                    accommodation.getBookmarked(),
                     productList.getContent()
             );
         } catch (BusinessException e) {
@@ -209,18 +212,43 @@ public class MerchantServiceImpl implements MerchantService {
 
     @Override
     @Transactional(readOnly = true)
-    public MerchantDetailResponseDTO findOfficeProducts(Long merchantId) {
+    public MerchantDetailResponseDTO findOfficeProducts(
+            Long userId,
+            Long merchantId,
+            LocalDate startDate,
+            LocalDate endDate,
+            Integer guestCount
+    ) {
         try {
             if (merchantId == null || merchantId < 1) {
                 throw new BusinessException(MerchantErrorCode.INVALID_MERCHANT_ID);
             }
 
-            MerchantDetailVO office = merchantMapper.selectMerchantOfficeDetails(merchantId);
+            if ((startDate == null && endDate != null) || (startDate != null && endDate == null)) {
+                throw new BusinessException(MerchantErrorCode.INVALID_PERIOD);
+            }
+            validatePeriod(startDate, endDate);
+            validateGuestCount(guestCount);
+
+            Integer requiredDateCount = null;
+            Integer requiredQuantity = guestCount;
+            if (startDate != null && endDate != null) {
+                requiredDateCount = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
+            }
+
+            MerchantDetailVO office = merchantMapper.selectMerchantOfficeDetails(userId, merchantId);
             if (office == null) {
                 throw new BusinessException(MerchantErrorCode.OFFICE_NOT_FOUND);
             }
 
-            List<MerchantProductVO> officeProducts = merchantMapper.selectMerchantOfficeProducts(merchantId);
+            List<MerchantProductVO> officeProducts = merchantMapper.selectMerchantOfficeProductsByPeriod(
+                    merchantId,
+                    startDate,
+                    endDate,
+                    requiredDateCount,
+                    requiredQuantity,
+                    guestCount
+            );
             List<MerchantItemResponseDTO> productItems = officeProducts == null
                     ? Collections.emptyList()
                     : officeProducts.stream()
@@ -261,7 +289,10 @@ public class MerchantServiceImpl implements MerchantService {
                 throw new BusinessException(MerchantErrorCode.INVALID_MERCHANT_ID);
             }
 
-            MerchantDetailVO restaurant = merchantMapper.selectMerchantRestaurantDetails(merchantId);
+            MerchantDetailVO restaurant = merchantMapper.selectMerchantRestaurantDetails(
+                    userId,
+                    merchantId
+            );
             if (restaurant == null) {
                 throw new BusinessException(MerchantErrorCode.RESTAURANT_NOT_FOUND);
             }
@@ -276,7 +307,7 @@ public class MerchantServiceImpl implements MerchantService {
                     restaurant.getRating(),
                     restaurant.getReviewCount(),
                     restaurant.getBookmarked(),
-                    findMerchantReviews(merchantId, userId, DETAIL_REVIEW_SIZE)
+                    findMerchantReviews(merchantId, userId, DETAIL_REVIEW_PREVIEW_SIZE)
             );
         } catch (BusinessException e) {
             throw e;
@@ -297,7 +328,10 @@ public class MerchantServiceImpl implements MerchantService {
                 throw new BusinessException(MerchantErrorCode.INVALID_MERCHANT_ID);
             }
 
-            MerchantDetailVO activity = merchantMapper.selectMerchantActivityDetails(merchantId);
+            MerchantDetailVO activity = merchantMapper.selectMerchantActivityDetails(
+                    userId,
+                    merchantId
+            );
             if (activity == null) {
                 throw new BusinessException(MerchantErrorCode.ACTIVITY_NOT_FOUND);
             }
@@ -312,7 +346,7 @@ public class MerchantServiceImpl implements MerchantService {
                     activity.getRating(),
                     activity.getReviewCount(),
                     activity.getBookmarked(),
-                    findMerchantReviews(merchantId, userId, DETAIL_REVIEW_SIZE)
+                    findMerchantReviews(merchantId, userId, DETAIL_REVIEW_PREVIEW_SIZE)
             );
         } catch (BusinessException e) {
             throw e;
@@ -364,40 +398,14 @@ public class MerchantServiceImpl implements MerchantService {
         }
     }
 
-    private void validatePeriod(ReservationCategory category, LocalDate checkInDate, LocalDate checkOutDate) {
-        if (checkInDate == null || checkOutDate == null) {
-            return;
-        }
 
-        if (category == ReservationCategory.ACCOMMODATION) {
-            if (!checkInDate.isBefore(checkOutDate)) {
-                throw new IllegalArgumentException("체크인 날짜는 체크아웃 날짜보다 이전이어야 합니다.");
-            }
-            return;
-        }
-
-        if (checkInDate.isAfter(checkOutDate)) {
-            throw new IllegalArgumentException("시작일은 종료일보다 빠를 수 없습니다.");
-        }
-    }
-
-    private void validateAccommodationPeriod(LocalDate checkInDate, LocalDate checkOutDate) {
-        if (checkInDate == null || checkOutDate == null) {
-            return;
-        }
-
-        if (!checkInDate.isBefore(checkOutDate)) {
-            throw new IllegalArgumentException("체크인 날짜는 체크아웃 날짜보다 이전이어야 합니다.");
-        }
-    }
-
-    private void validateOfficeProductPeriod(LocalDate startDate, LocalDate endDate) {
+    private void validatePeriod(LocalDate startDate, LocalDate endDate) {
         if (startDate == null || endDate == null) {
-            return;
+            throw new BusinessException(MerchantErrorCode.INVALID_PERIOD);
         }
 
         if (startDate.isAfter(endDate)) {
-            throw new IllegalArgumentException("시작일은 종료일보다 이전이어야 합니다.");
+            throw new BusinessException(MerchantErrorCode.INVALID_PERIOD);
         }
     }
 
@@ -418,7 +426,7 @@ public class MerchantServiceImpl implements MerchantService {
             return Collections.emptyList();
         }
 
-        int safeSize = Math.max(1, Math.min(size, MAX_SIZE));
+        int safeSize = Math.max(1, Math.min(size, DETAIL_REVIEW_PREVIEW_SIZE));
         List<MerchantReviewVO> reviewVOS = reviewMapper.selectMerchantReviewListWithMine(
                 merchantId,
                 userId,

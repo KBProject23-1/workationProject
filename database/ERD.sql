@@ -1178,4 +1178,10 @@ FROM `expense_categories`
 WHERE `budget_type` = 'PERSONAL'
   AND `code` = 'LEISURE';
 
+ALTER TABLE activities
+    ADD COLUMN description VARCHAR(500) NULL COMMENT '여가 활동 설명'
+        AFTER activity_type;
 
+ALTER TABLE restaurants
+    ADD COLUMN description VARCHAR(500) NULL COMMENT '여가 활동 설명'
+        AFTER price_level;
