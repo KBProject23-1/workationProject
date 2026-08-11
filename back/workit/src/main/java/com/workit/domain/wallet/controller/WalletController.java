@@ -6,6 +6,7 @@ import com.workit.domain.wallet.dto.response.ChargeResponse;
 import com.workit.domain.wallet.dto.response.RefundResponse;
 import com.workit.domain.wallet.dto.response.WalletResponse;
 import com.workit.domain.payment.service.PaymentService;
+import com.workit.domain.support.DeadlockRetrier;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
@@ -21,6 +22,7 @@ public class WalletController {
 
     private final WalletService walletService;
     private final PaymentService paymentService;
+    private final DeadlockRetrier deadlockRetrier;
 
     /** 지갑 조회 */
     @GetMapping("/me")
@@ -36,7 +38,7 @@ public class WalletController {
             @RequestBody ChargeRequest requestBody,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.success(paymentService.charge(userId, requestBody));
+        return GlobalResponseFactory.success(deadlockRetrier.execute(() -> paymentService.charge(userId, requestBody)));
     }
 
     /** 지갑 환불 */
@@ -45,6 +47,6 @@ public class WalletController {
             @RequestBody RefundRequest requestBody,
             @CurrentUser Long userId
     ) {
-        return GlobalResponseFactory.success(paymentService.refund(userId, requestBody));
+        return GlobalResponseFactory.success(deadlockRetrier.execute(() -> paymentService.refund(userId, requestBody)));
     }
 }
