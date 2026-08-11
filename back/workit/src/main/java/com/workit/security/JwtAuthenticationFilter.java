@@ -40,6 +40,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String CLAIM_ROLE = "role";
 
+    /**
+     * Access Token Cookie 명 (AuthController 발급 — 회원가입 자동 로그인용)
+     * - knowledge.md Cookie Security: ACCESS_TOKEN / HttpOnly / Path=/
+     * - Authorization 헤더가 없을 때 이 Cookie 로 인증한다 (Cookie 기반 인증 지원)
+     */
+    public static final String ACCESS_TOKEN_COOKIE_NAME = "ACCESS_TOKEN";
+
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -52,21 +59,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-        String authorization = request.getHeader(AUTHORIZATION_HEADER);
+        // 1. Access Token 추출 — Authorization: Bearer 헤더 우선, 없으면 ACCESS_TOKEN Cookie 폴백
+        //    (회원가입 자동 로그인 등 Cookie 기반 인증 지원 — knowledge.md Cookie Security)
+        String token = extractAccessToken(request);
 
-        // 1. 인증 헤더 없음 → 인증 없이 진행 (보호 경로는 이후 진입점이 401 처리)
-        if (authorization == null || !authorization.startsWith(BEARER_PREFIX)) {
+        // 2. 토큰 없음 → 인증 없이 진행 (보호 경로는 이후 진입점이 401 처리)
+        if (token == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // 2. 공개 인증 API → 토큰이 있어도 검증하지 않고 통과 (로그인/재발급 흐름 보호)
+        // 3. 공개 인증 API → 토큰이 있어도 검증하지 않고 통과 (로그인/재발급 흐름 보호)
         if (isPublicPath(request)) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        String token = authorization.substring(BEARER_PREFIX.length()).trim();
         if (token.isEmpty()) {
             writeError(response, AuthErrorCode.INVALID_TOKEN);
             return;
@@ -90,6 +98,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Access Token 추출
+     * - Authorization: Bearer {token} 헤더가 있으면 그 값을 사용한다 (기존 클라이언트 호환)
+     * - 헤더가 없으면 HttpOnly ACCESS_TOKEN Cookie 값을 사용한다 (Cookie 기반 인증)
+     * - 둘 다 없으면 null 반환 → 인증 없이 진행
+     */
+    private String extractAccessToken(HttpServletRequest request) {
+        String authorization = request.getHeader(AUTHORIZATION_HEADER);
+        if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
+            // 헤더에 Bearer 가 붙어 있으면 빈 값이어도 "토큰 있음"으로 처리해 400 검증으로 보낸다
+            // (기존 동작 유지 — "Bearer   " 는 INVALID_TOKEN)
+            return authorization.substring(BEARER_PREFIX.length()).trim();
+        }
+        javax.servlet.http.Cookie[] cookies = request.getCookies();
+        if (cookies != null) {
+            for (javax.servlet.http.Cookie cookie : cookies) {
+                if (ACCESS_TOKEN_COOKIE_NAME.equals(cookie.getName())) {
+                    String value = cookie.getValue();
+                    return value == null ? null : value.trim();
+                }
+            }
+        }
+        return null;
     }
 
     /** sub(userId) 추출 — 누락/빈 값/비숫자 형식은 위변조로 간주 */

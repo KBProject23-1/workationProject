@@ -91,12 +91,6 @@
         - user_profile.nickname (UNIQUE) 대상 조회
         - Mapper 는 조회만 담당 (비즈니스 판단은 Service)
     -->
-    <select id="countByNickname" resultType="int">
-        SELECT COUNT(*)
-        FROM user_profile
-        WHERE nickname = #{nickname}
-    </select>
-
     <!--
         회원가입 완료 - users insert.
         - useGeneratedKeys: 자동 생성 PK 를 UserVO.id 로 채운다

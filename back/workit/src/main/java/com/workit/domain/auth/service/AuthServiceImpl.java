@@ -74,8 +74,12 @@ public class AuthServiceImpl implements AuthService {
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
 
-    /** user_profile.nickname VARCHAR(50) — 초과 시 DB 오류(500) 대신 400 으로 처리 */
-    private static final int NICKNAME_MAX_LENGTH = 50;
+    /**
+     * 회원가입 시 자동 생성되는 기본 닉네임 접두어
+     * - 닉네임 입력 기능 제거로 서버가 "워케이너{userId}" 형식으로 생성한다.
+     * - user_profile.nickname 은 NOT NULL + UNIQUE — userId 기반 생성이라 중복 불가
+     */
+    private static final String DEFAULT_NICKNAME_PREFIX = "워케이너";
 
     /** 아이디 찾기 응답 가입일 포맷 (docs: createdAt "2026-07-24") */
     private static final DateTimeFormatter CREATED_AT_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -187,7 +191,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    public void signup(SignupRequestDTO request) {
+    public LoginResponseDTO signup(SignupRequestDTO request) {
 
         // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
         validateSignupRequest(request);
@@ -225,16 +229,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
         }
 
-        // 6. 닉네임 검증 + 중복 검증 (user_profile.nickname UNIQUE, VARCHAR(50))
-        String nickname = request.getNickname().trim();
-        if (nickname.length() > NICKNAME_MAX_LENGTH) {
-            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_REQUEST);
-        }
-        if (authMapper.countByNickname(nickname) > 0) {
-            throw new BusinessException(AuthErrorCode.DUPLICATE_NICKNAME);
-        }
-
-        // 7. 약관 동의 검증 (DB terms 마스터 기준)
+        // 6. 약관 동의 검증 (DB terms 마스터 기준)
         //    - agreedTermsIds 가 null/빈 배열이면 필수 약관 동의 자체가 없으므로 실패
         //    - DB 의 필수 약관(required = 1) ID 가 모두 포함되어야 가입 가능
         //    - 선택 약관은 포함하지 않아도 가입 가능
@@ -245,7 +240,7 @@ public class AuthServiceImpl implements AuthService {
         }
         List<Long> distinctAgreedTermIds = new ArrayList<>(new LinkedHashSet<>(agreedTermsIds));
 
-        // 7-1. 존재하지 않는 약관 ID 검증
+        // 6-1. 존재하지 않는 약관 ID 검증
         //    - terms 마스터에 없는 ID 가 섞여 있으면 user_terms_agreements FK 위반으로
         //      500 이 발생하므로 insert 전에 INVALID_TERM_ID(400) 로 사전 차단한다
         //    - null 요소가 포함된 경우에도 IN 쿼리가 매칭되지 않아 크기 비교로 걸러진다
@@ -254,45 +249,104 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.INVALID_TERM_ID);
         }
 
-        // 7-2. 필수 약관 누락 검증
+        // 6-2. 필수 약관 누락 검증
         List<Long> requiredTermIds = authMapper.selectRequiredTermsIds();
         if (requiredTermIds == null || !distinctAgreedTermIds.containsAll(requiredTermIds)) {
             throw new BusinessException(AuthErrorCode.MISSING_REQUIRED_TERMS);
         }
 
-        // 8. 저장 데이터 준비 (Service Layer 에서만 암호화/해시 수행 — Controller/Mapper 금지)
+        // 7. 저장 데이터 준비 (Service Layer 에서만 암호화/해시 수행 — Controller/Mapper 금지)
         //    - password: BCrypt 단방향 해시 (원문 저장/AES 사용 금지)
         //    - email/name/phone: AES-256 양방향 암호화 + 검색용 SHA-256 hash
         //    - CI: AES-256 암호화 + SHA-256 hash (Redis 에서 복원)
         String passwordHash = PasswordEncryptor.encode(request.getPassword());
 
-        // 9. 회원 정보 DB 저장 (users → user_auth → user_profile → user_terms_agreements) + 전자지갑 생성
+        // 8. 회원 정보 DB 저장 (users → user_auth → user_profile → user_terms_agreements) + 전자지갑 생성
         //    - 사전 중복 체크(SELECT)와 실제 insert 사이의 Race Condition 은
         //      DB UNIQUE 제약(email_hash, identity_ci_hash, nickname)이 최종 방어선이 된다.
         //    - SELECT 체크를 통과했지만 동시 요청에 의해 UNIQUE 위반이 발생하면
         //      DuplicateKeyException → 409 로 변환해 깔끔한 응답을 반환한다.
+        Long userId;
         try {
-            insertUserWithAuthAndProfile(verificationData, normalizedEmail, emailHash, passwordHash,
-                    nickname, distinctAgreedTermIds);
+            userId = insertUserWithAuthAndProfile(verificationData, normalizedEmail, emailHash, passwordHash,
+                    distinctAgreedTermIds);
         } catch (DuplicateKeyException e) {
             throw mapDuplicateKeyException(e);
         }
 
-        // 10. 회원가입 완료 후 Redis 임시 데이터 삭제 (1회성 — 재사용 방지)
+        // 9. 회원가입 완료 후 Redis 임시 데이터 삭제 (1회성 — 재사용 방지)
         //    - Redis 는 DB 트랜잭션의 일부가 아니므로, DB 커밋이 확정된 후(afterCommit)에만 삭제한다.
         //    - 트랜잭션 롤백 시 Redis 데이터가 그대로 남아 사용자가 동일 인증으로 재시도할 수 있다.
         deleteVerificationDataAfterCommit(temporaryUserKey);
+
+        // 10. 자동 로그인 — Access Token / Refresh Token 발급 (knowledge.md Signup Flow: 회원가입 완료 후 자동 로그인)
+        //    - login() 과 동일한 응답 구조 — Refresh Token 원문이 아닌 SHA-256 hash 를 Redis 에 저장한다
+        LoginResponseDTO response = createLoginResponse(userId, verificationData.getEncryptedName());
+
+        // 11. Refresh Session 은 DB 커밋 확정 후(afterCommit)에만 Redis 저장한다
+        //    - knowledge.md: "회원가입 DB Transaction이 성공한 이후 인증 Session 및 Cookie 발급"
+        //      / "DB Transaction과 Redis 작업은 동일한 Transaction으로 간주하지 않는다"
+        //    - DB 커밋 전에 저장하면 롤백 시 고아 Refresh Session 이 남고, Redis 장애가 DB 롤백을 유발한다
+        saveRefreshSessionAfterCommit(userId, response.getRefreshToken(),
+                response.getRefreshTokenMaxAgeSeconds());
+
+        // 12. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지 — knowledge.md)
+        log.info("회원가입 완료 + 자동 로그인 - userId={}", userId);
+
+        return response;
+    }
+
+    /**
+     * 로그인/회원가입(자동 로그인) 공통 — Access/Refresh Token 발급 + LoginResponseDTO 생성
+     * - Payload: sub(userId), role, tokenType, iat, exp — 개인정보 없음 (knowledge.md JWT Rules)
+     * - name 은 Service Layer 에서만 복호화 (Controller/Mapper 금지)
+     * - refreshToken 은 JSON 본문에 포함하지 않고 Controller 가 HttpOnly Cookie 로만 내려준다
+     */
+    private LoginResponseDTO createLoginResponse(Long userId, String nameEncrypt) {
+        String accessToken = jwtTokenProvider.createAccessToken(userId);
+        String refreshToken = jwtTokenProvider.createRefreshToken(userId);
+        long refreshTtlSeconds = jwtTokenProvider.getRefreshTokenExpirationSeconds();
+        return LoginResponseDTO.builder()
+                .userId(userId)
+                .name(PersonalDataCipher.decrypt(nameEncrypt))
+                .tokenInfo(LoginResponseDTO.TokenInfo.of(
+                        GRANT_TYPE_BEARER,
+                        accessToken,
+                        jwtTokenProvider.getAccessTokenExpirationSeconds()))
+                .refreshToken(refreshToken)
+                .refreshTokenMaxAgeSeconds(refreshTtlSeconds)
+                .build();
+    }
+
+    /**
+     * DB 트랜잭션이 커밋된 후(afterCommit)에만 Refresh Session 을 Redis 저장한다.
+     * - 회원가입 DB 커밋 실패 시 고아 Refresh Session 이 남지 않도록 보장한다
+     *   (deleteVerificationDataAfterCommit 패턴과 동일 — knowledge.md: Redis 는 DB Transaction 과 분리)
+     * - 실제 트랜잭션 밖(단위 테스트 등)에서는 즉시 저장한다.
+     */
+    private void saveRefreshSessionAfterCommit(Long userId, String refreshToken, long ttlSeconds) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refreshTokenStore.save(userId, sha256Hex(refreshToken), ttlSeconds);
+                }
+            });
+        } else {
+            refreshTokenStore.save(userId, sha256Hex(refreshToken), ttlSeconds);
+        }
     }
 
     /**
      * users → user_auth → user_profile → user_terms_agreements insert + 전자지갑 생성 (동일 트랜잭션)
      * - 회원가입 전체 과정이 하나의 트랜잭션 — 하나라도 실패하면 전부 롤백된다
+     *
+     * @return 생성된 userId (자동 로그인 토큰 발급에 사용)
      */
-    private void insertUserWithAuthAndProfile(SignupVerificationData verificationData,
+    private Long insertUserWithAuthAndProfile(SignupVerificationData verificationData,
                                               String normalizedEmail,
                                               String emailHash,
                                               String passwordHash,
-                                              String nickname,
                                               List<Long> agreedTermIds) {
         // users insert (회원 기본 정보)
         // - phone 은 Redis 의 AES 암호화본을 그대로 사용 (원문 재암호화 불필요)
@@ -315,10 +369,11 @@ public class AuthServiceImpl implements AuthService {
         userAuth.setIdentityCiEncrypt(verificationData.getEncryptedCi());
         authMapper.insertUserAuth(userAuth);
 
-        // user_profile insert (닉네임)
+        // user_profile insert (기본 닉네임 — 닉네임 입력 기능 제거, 서버가 자동 생성)
+        // - user_profile.nickname NOT NULL + UNIQUE — userId 기반 생성이라 중복 불가
         UserProfileVO userProfile = new UserProfileVO();
         userProfile.setUserId(user.getId());
-        userProfile.setNickname(nickname);
+        userProfile.setNickname(DEFAULT_NICKNAME_PREFIX + user.getId());
         authMapper.insertUserProfile(userProfile);
 
         // user_terms_agreements insert (약관 동의 저장 — 동의한 약관 ID 목록 전체)
@@ -327,6 +382,8 @@ public class AuthServiceImpl implements AuthService {
         // 전자지갑 생성 (knowledge.md Signup Flow: 8. Create wallet)
         // 같은 트랜잭션 내에서 생성 — 지갑 생성 실패 시 DB insert 전체가 롤백된다
         walletService.createWallet(user.getId());
+
+        return user.getId();
     }
 
     /**
@@ -340,9 +397,6 @@ public class AuthServiceImpl implements AuthService {
         }
         if (message.contains("ux_users_pass_ci") || message.contains("user_auth.identity_ci_hash")) {
             return new BusinessException(AuthErrorCode.DUPLICATE_USER);
-        }
-        if (message.contains("ux_user_profile_nickname") || message.contains("user_profile.nickname")) {
-            return new BusinessException(AuthErrorCode.DUPLICATE_NICKNAME);
         }
         if (message.contains("ux_users_phone") || message.contains("users.phone_number_hash")) {
             // 동일 휴대폰으로 이미 가입된 회원 — 1인 1계정 정책상 CI 중복과 동일하게 처리
@@ -392,28 +446,17 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
         }
 
-        // 4. JWT 발급 (기존 JwtTokenProvider 재사용)
-        //    - Payload: sub(userId), role, tokenType, iat, exp — 개인정보 없음
-        String accessToken = jwtTokenProvider.createAccessToken(loginUser.getId());
-        String refreshToken = jwtTokenProvider.createRefreshToken(loginUser.getId());
+        // 4. JWT 발급 + 응답 생성 (JwtTokenProvider 재사용 — Payload: sub(userId), role, tokenType, iat, exp)
+        LoginResponseDTO response = createLoginResponse(loginUser.getId(), loginUser.getNameEncrypt());
 
         // 5. Refresh Token Redis 저장 (knowledge.md Refresh Token Security)
         //    - 원문이 아닌 SHA-256 hash 저장 — key: refresh:token:{userId}, TTL: refresh 만료와 동일
-        long refreshTtlSeconds = jwtTokenProvider.getRefreshTokenExpirationSeconds();
-        refreshTokenStore.save(loginUser.getId(), sha256Hex(refreshToken), refreshTtlSeconds);
+        //    - login 은 DB 쓰기가 없으므로 트랜잭션 없이 즉시 저장한다
+        refreshTokenStore.save(loginUser.getId(),
+                sha256Hex(response.getRefreshToken()),
+                response.getRefreshTokenMaxAgeSeconds());
 
-        // 6. 응답 생성 — name 은 Service Layer 에서만 복호화 (Controller/Mapper 금지)
-        //    - refreshToken 은 JSON 본문에 포함하지 않고 Controller 가 HttpOnly Cookie 로만 내려준다
-        return LoginResponseDTO.builder()
-                .userId(loginUser.getId())
-                .name(PersonalDataCipher.decrypt(loginUser.getNameEncrypt()))
-                .tokenInfo(LoginResponseDTO.TokenInfo.of(
-                        GRANT_TYPE_BEARER,
-                        accessToken,
-                        jwtTokenProvider.getAccessTokenExpirationSeconds()))
-                .refreshToken(refreshToken)
-                .refreshTokenMaxAgeSeconds(refreshTtlSeconds)
-                .build();
+        return response;
     }
 
     @Override
@@ -872,7 +915,7 @@ public class AuthServiceImpl implements AuthService {
      * - javax.validation 미사용 환경 → Service Layer 에서 수행 (signup/login 과 동일)
      * - pinNumber 가 비어 있으면 형식 검증(6자리) 이전에 차단된다
      * - deviceId/deviceName 은 ERD VARCHAR(100) 초과 시 DB 오류(500) 대신 400 으로 사전 차단
-     *   (signup 의 nickname 최대 길이 검증과 동일 패턴)
+     *   (DB VARCHAR 컬럼 길이 초과 사전 차단 공통 패턴)
      */
     private void validatePinSetupRequest(PinSetupRequestDTO request) {
         if (request == null
@@ -1079,15 +1122,14 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 회원가입 요청 값 검증
-     * - identityToken/email/password/nickname 누락 → INVALID_SIGNUP_REQUEST
+     * - identityToken/email/password 누락 → INVALID_SIGNUP_REQUEST
      * - pin 은 이번 API 범위 제외 (별도 PIN 등록 API 에서 처리) — 검증/저장하지 않는다
      */
     private void validateSignupRequest(SignupRequestDTO request) {
         if (request == null
                 || isBlank(request.getIdentityToken())
                 || isBlank(request.getEmail())
-                || isBlank(request.getPassword())
-                || isBlank(request.getNickname())) {
+                || isBlank(request.getPassword())) {
             throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_REQUEST);
         }
     }

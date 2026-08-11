@@ -115,6 +115,18 @@ class AuthControllerTest {
         doThrow(new BusinessException(errorCode)).when(authService).signup(any(SignupRequestDTO.class));
     }
 
+    /** 회원가입 성공 Stub — Service 가 자동 로그인 결과(userId/name/token_info/refreshToken)를 반환한다 */
+    private void stubSignupSuccess() {
+        when(authService.signup(any(SignupRequestDTO.class)))
+                .thenReturn(LoginResponseDTO.builder()
+                        .userId(501L)
+                        .name("홍길동")
+                        .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
+                        .refreshToken("refresh-token-jwt")
+                        .refreshTokenMaxAgeSeconds(1209600)
+                        .build());
+    }
+
     /** 로그인 성공 Stub — Service 가 userId/name/token_info/refreshToken 을 반환한다 */
     private void stubLoginSuccess() {
         when(authService.login(any(LoginRequestDTO.class)))
@@ -449,29 +461,29 @@ class AuthControllerTest {
     // ---------- 최종 회원가입 완료 ----------
 
     /** 필수 약관(1, 2) 전체 동의 기본 본문 생성 */
-    private String signupBody(String identityToken, String email, String nickname) {
-        return signupBody(identityToken, email, nickname, ",\"agreedTermsIds\":[1,2]");
+    private String signupBody(String identityToken, String email) {
+        return signupBody(identityToken, email, ",\"agreedTermsIds\":[1,2]");
     }
 
     /** agreedTermsIds JSON 조각(빈 문자열이면 누락)을 지정하는 본문 생성 */
-    private String signupBody(String identityToken, String email, String nickname,
+    private String signupBody(String identityToken, String email,
                               String agreedTermsIdsJson) {
         return "{\"identityToken\":\"" + identityToken
                 + "\",\"email\":\"" + email
                 + "\",\"password\":\"password123!\""
-                + ",\"nickname\":\"" + nickname + "\""
                 + agreedTermsIdsJson + "}";
     }
 
     @Test
-    @DisplayName("회원가입 완료 성공 - 200 + SUCCESS + 회원가입이 완료되었습니다.")
+    @DisplayName("회원가입 완료 성공 - 200 + SUCCESS + userId/name/token_info + Access/Refresh Cookie 발급")
     void signup_success() throws Exception {
-        // Given — Service 는 정상 가입을 허용한다 (void — 별도 Stub 불필요)
+        // Given — Service 는 가입 + 자동 로그인 결과를 반환한다
+        stubSignupSuccess();
 
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "tester")))
+                        .content(signupBody("valid-token", "new@example.com")))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -479,10 +491,28 @@ class AuthControllerTest {
         JsonNode json = parse(result);
         assertEquals("SUCCESS", json.get("status").asText());
         assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
-
-        // data 는 null (CommonResponse NON_NULL 로 JSON 에서 제외될 수 있음)
-        assertTrue(json.get("data") == null || json.get("data").isNull());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // 자동 로그인 응답 — login 과 동일 구조 (userId/name/token_info)
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals(501, data.get("userId").asInt());
+        assertEquals("홍길동", data.get("name").asText());
+        JsonNode tokenInfo = data.get("token_info");
+        assertNotNull(tokenInfo);
+        assertEquals("Bearer", tokenInfo.get("grant_type").asText());
+        assertEquals("access-token-jwt", tokenInfo.get("access_token").asText());
+        assertEquals(900, tokenInfo.get("access_token_expires_in").asInt());
+        // Refresh Token 은 JSON 본문에 포함되지 않는다 (HttpOnly Cookie 로만 전달)
+        assertTrue(data.get("refreshToken") == null);
+
+        // Set-Cookie — ACCESS_TOKEN(자동 로그인) + refreshToken(HttpOnly)
+        String allCookies = String.join(" ", result.getResponse().getHeaders("Set-Cookie"));
+        assertTrue(allCookies.contains("ACCESS_TOKEN=access-token-jwt"), "ACCESS_TOKEN 쿠키: " + allCookies);
+        assertTrue(allCookies.contains("refreshToken=refresh-token-jwt"), "refreshToken 쿠키: " + allCookies);
+        assertTrue(allCookies.contains("HttpOnly"), "HttpOnly 속성: " + allCookies);
+        assertTrue(allCookies.contains("Path=/"), "Path 속성: " + allCookies);
+        assertTrue(allCookies.contains("Max-Age=1209600"), "Max-Age 속성: " + allCookies);
 
         // Service 가 가입 요청을 전달받았는지 확인
         verify(authService).signup(any(SignupRequestDTO.class));
@@ -497,7 +527,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("expired-token", "new@example.com", "tester")))
+                        .content(signupBody("expired-token", "new@example.com")))
                 .andExpect(status().isUnauthorized())
                 .andReturn();
 
@@ -517,7 +547,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("tampered-token", "new@example.com", "tester")))
+                        .content(signupBody("tampered-token", "new@example.com")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -536,7 +566,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("no-redis-token", "new@example.com", "tester")))
+                        .content(signupBody("no-redis-token", "new@example.com")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -555,7 +585,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("dup-ci-token", "new@example.com", "tester")))
+                        .content(signupBody("dup-ci-token", "new@example.com")))
                 .andExpect(status().isConflict())
                 .andReturn();
 
@@ -574,7 +604,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "used@example.com", "tester")))
+                        .content(signupBody("valid-token", "used@example.com")))
                 .andExpect(status().isConflict())
                 .andReturn();
 
@@ -586,25 +616,6 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("회원가입 완료 - 닉네임 중복 (409 + DUPLICATE_NICKNAME)")
-    void signup_duplicateNickname() throws Exception {
-        // Given — Service 는 닉네임 중복을 거부한다
-        stubSignupError(AuthErrorCode.DUPLICATE_NICKNAME);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "taken")))
-                .andExpect(status().isConflict())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("DUPLICATE_NICKNAME", json.get("errorCode").asText());
-    }
-
-    @Test
     @DisplayName("회원가입 완료 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
     void signup_emailTooLong() throws Exception {
         // Given — Service 는 초과 길이 이메일을 거부한다
@@ -613,7 +624,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", buildLongEmail(255), "tester")))
+                        .content(signupBody("valid-token", buildLongEmail(255))))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -644,14 +655,15 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("회원가입 완료 - agreedTermsIds 포함 정상 요청 (200 + SUCCESS)")
+    @DisplayName("회원가입 완료 - agreedTermsIds 포함 정상 요청 (200 + SUCCESS + 자동 로그인)")
     void signup_withAgreedTerms_success() throws Exception {
-        // Given — Service 는 정상 가입을 허용한다 (void — 별도 Stub 불필요)
+        // Given — Service 는 가입 + 자동 로그인 결과를 반환한다
+        stubSignupSuccess();
 
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "tester",
+                        .content(signupBody("valid-token", "new@example.com",
                                 ",\"agreedTermsIds\":[1,2,3]")))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -661,6 +673,10 @@ class AuthControllerTest {
         assertEquals("SUCCESS", json.get("status").asText());
         assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        // 자동 로그인 — data + ACCESS_TOKEN Cookie 발급
+        assertNotNull(json.get("data"));
+        String allCookies = String.join(" ", result.getResponse().getHeaders("Set-Cookie"));
+        assertTrue(allCookies.contains("ACCESS_TOKEN=access-token-jwt"), "ACCESS_TOKEN 쿠키: " + allCookies);
 
         // Service 가 가입 요청을 전달받았는지 확인
         verify(authService).signup(any(SignupRequestDTO.class));
@@ -675,7 +691,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "tester", "")))
+                        .content(signupBody("valid-token", "new@example.com", "")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -695,7 +711,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "tester",
+                        .content(signupBody("valid-token", "new@example.com",
                                 ",\"agreedTermsIds\":[1,2,99]")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
@@ -716,7 +732,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "tester",
+                        .content(signupBody("valid-token", "new@example.com",
                                 ",\"agreedTermsIds\":[1]")))
                 .andExpect(status().isBadRequest())
                 .andReturn();

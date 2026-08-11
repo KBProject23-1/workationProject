@@ -19,6 +19,7 @@ import com.workit.domain.auth.service.AuthService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
 import com.workit.security.CurrentUser;
+import com.workit.security.JwtAuthenticationFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -44,6 +45,10 @@ public class AuthController {
 
     /** Refresh Token Cookie 명 (docs: refreshToken) — 재발급/로그아웃 API 와 이름 통일 */
     private static final String REFRESH_TOKEN_COOKIE_NAME = "refreshToken";
+
+    // Access Token Cookie 명은 JwtAuthenticationFilter 가 읽는 상수와 동일해야 한다 (공용 상수 공유)
+    // - 회원가입 자동 로그인 시 발급 — HttpOnly Secure Cookie
+    private static final String ACCESS_TOKEN_COOKIE_NAME = JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME;
 
     private final AuthService authService;
 
@@ -96,17 +101,42 @@ public class AuthController {
                 "본인인증 성공. 가입을 진행합니다.");
     }
 
-    // 1.4 최종 회원가입 완료 (회원가입 2단계 — DB 최종 저장)
+    // 1.4 최종 회원가입 완료 (회원가입 2단계 — DB 최종 저장 + 자동 로그인)
     // - docs: 최종 회원가입 완료(DB 최종 저장) (POST /api/v1/auth/signup)
     // - 비로그인 공개 API: 본인인증(verify-identity)과 이메일 중복 확인(check-email) 완료 후 호출
-    // - Controller 에는 비즈니스 로직 없음 — Service 에서 JWT 검증/Redis 조회/중복 검증/DB 저장 수행
+    // - Controller 에는 비즈니스 로직 없음 — Service 에서 JWT 검증/Redis 조회/중복 검증/DB 저장/토큰 발급 수행
+    // - 자동 로그인(knowledge.md Signup Flow): Service 가 발급한 Access/Refresh Token 을
+    //   HttpOnly Cookie 로 내려준다 — 프론트는 별도 로그인 API 를 호출하지 않는다
     @PostMapping("/signup")
-    public ResponseEntity<CommonResponse<Void>> signupPost(
-            @RequestBody SignupRequestDTO request) {
+    public ResponseEntity<CommonResponse<LoginResponseDTO>> signupPost(
+            @RequestBody SignupRequestDTO request,
+            HttpServletResponse servletResponse) {
 
-        authService.signup(request);
+        LoginResponseDTO result = authService.signup(request);
 
-        return GlobalResponseFactory.success(null, "회원가입이 완료되었습니다.");
+        // Access Token Cookie (knowledge.md: ACCESS_TOKEN, HttpOnly Secure Cookie)
+        // - 회원가입 직후 자동 로그인 상태 유지 — 이후 보호 API 호출 시 이 Cookie 로 인증
+        ResponseCookie accessCookie = ResponseCookie.from(
+                        ACCESS_TOKEN_COOKIE_NAME, result.getTokenInfo().getAccessToken())
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite(refreshCookieSameSite)
+                .path("/")
+                .maxAge(result.getTokenInfo().getAccessTokenExpiresIn())
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
+
+        // Refresh Token Cookie (login 과 동일 속성 — refreshToken 은 JSON 본문에 포함하지 않는다)
+        ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, result.getRefreshToken())
+                .httpOnly(true)
+                .secure(refreshCookieSecure)
+                .sameSite(refreshCookieSameSite)
+                .path("/")
+                .maxAge(result.getRefreshTokenMaxAgeSeconds())
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+
+        return GlobalResponseFactory.success(result, "회원가입이 완료되었습니다.");
     }
 
     // 1.5 통합 로그인 (PASSWORD / PIN)
