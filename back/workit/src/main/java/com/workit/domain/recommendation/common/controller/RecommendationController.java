@@ -1,8 +1,6 @@
 package com.workit.domain.recommendation.controller;
 
 import com.workit.domain.recommendation.accommodation.service.AccommodationRecommendationService;
-import com.workit.domain.recommendation.dto.response.RecommendationCandidateListResponseDTO;
-import com.workit.domain.recommendation.dto.response.RecommendationReferenceResponseDTO;
 import com.workit.domain.recommendation.enums.RecommendationType;
 import com.workit.domain.recommendation.enums.MealType;
 import com.workit.domain.recommendation.dto.request.RecommendationRecalculateRequestDTO;
@@ -40,19 +38,23 @@ public class RecommendationController {
             @RequestParam(value = "mealType", required = false) MealType mealType) {
         // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
         Long userId = 1L;
-        Object response = recommendationType == RecommendationType.RESTAURANT
-                ? restaurantRecommendationService.findRestaurantReferencePlace(userId, mealType)
-                : recommendationService.findReferencePlace(userId, recommendationType);
+        Object response;
+        if (recommendationType == RecommendationType.RESTAURANT) {
+            response = restaurantRecommendationService.findRestaurantReferencePlace(userId,
+                    mealType == null ? null : com.workit.domain.recommendation.restaurant.vo.MealType.valueOf(mealType.name()));
+        } else {
+            response = recommendationService.findReferencePlace(userId, recommendationType);
+        }
         return GlobalResponseFactory.success(response);
     }
 
     @GetMapping("/reference-place-candidates")
-    public ResponseEntity<CommonResponse<RecommendationCandidateListResponseDTO>> referencePlaceCandidateList(
+    public ResponseEntity<CommonResponse<Object>> referencePlaceCandidateList(
             @RequestParam(value = "recommendationType", defaultValue = "ACCOMMODATION")
             RecommendationType recommendationType) {
         // 인증 기능이 연결되면 JWT에서 사용자 ID를 가져오도록 교체
         Long userId = 1L;
-        RecommendationCandidateListResponseDTO response = recommendationType == RecommendationType.RESTAURANT
+        Object response = recommendationType == RecommendationType.RESTAURANT
                 ? restaurantRecommendationService.findRestaurantReferencePlaceCandidates(userId)
                 : recommendationService.findReferencePlaceCandidates(userId);
         return GlobalResponseFactory.success(response);
@@ -69,12 +71,20 @@ public class RecommendationController {
             throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
         if (previous.getRecommendationType() == RecommendationType.ACCOMMODATION) {
+            com.workit.domain.recommendation.accommodation.dto.request.RecommendationRecalculateRequestDTO accommodationRequest =
+                    new com.workit.domain.recommendation.accommodation.dto.request.RecommendationRecalculateRequestDTO();
+            accommodationRequest.setReferenceMerchantId(request.getReferenceMerchantId());
             return GlobalResponseFactory.created(
-                    accommodationRecommendationService.recalculateAccommodation(userId, recommendationRequestId, request));
+                    accommodationRecommendationService.recalculateAccommodation(userId, recommendationRequestId, accommodationRequest));
         }
         if (previous.getRecommendationType() == RecommendationType.RESTAURANT) {
+            com.workit.domain.recommendation.restaurant.dto.request.RecommendationRecalculateRequestDTO restaurantRequest =
+                    new com.workit.domain.recommendation.restaurant.dto.request.RecommendationRecalculateRequestDTO();
+            restaurantRequest.setReferenceMerchantId(request.getReferenceMerchantId());
+            restaurantRequest.setMealType(request.getMealType() == null ? null
+                    : com.workit.domain.recommendation.restaurant.vo.MealType.valueOf(request.getMealType().name()));
             return GlobalResponseFactory.created(
-                    restaurantRecommendationService.recalculateRestaurant(userId, recommendationRequestId, request));
+                    restaurantRecommendationService.recalculateRestaurant(userId, recommendationRequestId, restaurantRequest));
         }
         throw new BusinessException(RecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
     }
