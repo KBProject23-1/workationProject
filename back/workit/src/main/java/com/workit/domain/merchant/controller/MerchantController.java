@@ -9,6 +9,7 @@ import com.workit.domain.merchant.vo.MerchantSortType;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
 import com.workit.security.CurrentUser;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,8 +35,8 @@ public class MerchantController {
     @GetMapping
     public ResponseEntity<CommonResponse<MerchantListResponseDTO<MerchantItemResponseDTO>>> findMerchants(
             @RequestParam(value = "category", required = false) String category,
-            @RequestParam(value = "checkInDate", required = false) LocalDate checkInDate,
-            @RequestParam(value = "checkOutDate", required = false) LocalDate checkOutDate,
+            @RequestParam(value = "checkInDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate checkInDate,
+            @RequestParam(value = "checkOutDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate checkOutDate,
             @RequestParam(value = "headcount", required = false) Integer headcount,
             @RequestParam(value = "minPrice", required = false) Long minPrice,
             @RequestParam(value = "maxPrice", required = false) Long maxPrice,
@@ -89,38 +90,19 @@ public class MerchantController {
     }
 
     @GetMapping("/{merchantId}/restaurants")
-    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findRestaurantDetailByLegacyPath(
+    public ResponseEntity<CommonResponse<MerchantDetailCommonResponseDTO>> findRestaurantDetail(
             @CurrentUser Long userId,
             @PathVariable("merchantId") Long merchantId
     ) {
-        MerchantDetailCommonResponseDTO detail = merchantService.findRestaurantProducts(userId, merchantId);
-        return GlobalResponseFactory.success(List.of(detail));
+        return GlobalResponseFactory.success(merchantService.findRestaurantProducts(userId, merchantId));
     }
 
-    @GetMapping("/restaurants/{merchantId}")
-    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findRestaurantDetail(
-            @CurrentUser Long userId,
-            @PathVariable("merchantId") Long merchantId
-    ) {
-        MerchantDetailCommonResponseDTO detail = merchantService.findRestaurantProducts(userId, merchantId);
-        return GlobalResponseFactory.success(List.of(detail));
-    }
 
     @GetMapping("/{merchantId}/activities")
-    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findActivityDetailByLegacyPath(
+    public ResponseEntity<CommonResponse<MerchantDetailCommonResponseDTO>> findActivityDetail(
             @CurrentUser Long userId,
             @PathVariable("merchantId") Long merchantId
     ) {
-        MerchantDetailCommonResponseDTO detail = merchantService.findActivityProducts(userId, merchantId);
-        return GlobalResponseFactory.success(List.of(detail));
-    }
-
-    @GetMapping("/activities/{merchantId}")
-    public ResponseEntity<CommonResponse<List<MerchantDetailCommonResponseDTO>>> findActivityDetail(
-            @CurrentUser Long userId,
-            @PathVariable("merchantId") Long merchantId
-    ) {
-        MerchantDetailCommonResponseDTO detail = merchantService.findActivityProducts(userId, merchantId);
-        return GlobalResponseFactory.success(List.of(detail));
+        return GlobalResponseFactory.success(merchantService.findActivityProducts(userId, merchantId));
     }
 }

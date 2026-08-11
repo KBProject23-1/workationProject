@@ -344,7 +344,6 @@
                m.rating,
                m.thumbnail_url,
                m.price,
-               m.description,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
                0 AS bookmarked
         FROM merchants m
@@ -354,7 +353,7 @@
         WHERE m.id = #{merchantId}
           AND m.category = 'RESTAURANT'
         GROUP BY m.id, m.region_id, m.name, m.address, m.latitude, m.longitude, m.phone_number, m.rating,
-                 m.thumbnail_url, m.price, m.description
+                 m.thumbnail_url, m.price
     </select>
 
     <select id="selectMerchantActivityDetails" resultMap="merchantDetailMap">
@@ -368,7 +367,6 @@
                m.rating,
                m.thumbnail_url,
                m.price,
-               m.description,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
                0 AS bookmarked
         FROM merchants m
@@ -378,6 +376,6 @@
         WHERE m.id = #{merchantId}
           AND m.category = 'ACTIVITY'
         GROUP BY m.id, m.region_id, m.name, m.address, m.latitude, m.longitude, m.phone_number, m.rating,
-                 m.thumbnail_url, m.price, m.description
+                 m.thumbnail_url, m.price
     </select>
 </mapper>
