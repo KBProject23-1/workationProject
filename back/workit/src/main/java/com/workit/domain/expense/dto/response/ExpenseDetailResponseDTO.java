@@ -33,6 +33,10 @@ public class ExpenseDetailResponseDTO {
     private final String categoryName;
     private final Boolean isAutoCategorized;
     private final ExpenseSourceType sourceType;
+    // CARD, WALLET. 지갑 결제는 카드가 없는 게 정상이라 카드 미지정과 구분해야 한다
+    private final String paymentSourceType;
+    // 결제 시점에 업무/개인을 골랐는지. null 이면 미선택이라 화면에서 확인을 받아야 한다
+    private final Boolean isBusinessExpense;
     // 앱 내 결제 건만 값이 있다. 수기 입력 건은 null
     private final String approvedNumber;
     private final String memo;
@@ -81,6 +85,8 @@ public class ExpenseDetailResponseDTO {
                 .categoryName(vo.getDisplayCategoryName())
                 .isAutoCategorized(vo.getIsAutoCategorized())
                 .sourceType(vo.getSourceType())
+                .paymentSourceType(vo.getPaymentSourceType())
+                .isBusinessExpense(vo.getIsBusinessExpense())
                 .approvedNumber(vo.getApprovedNumber())
                 .memo(vo.getMemo())
                 .availableCategories(toOptions(categories))

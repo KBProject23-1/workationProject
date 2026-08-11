@@ -259,7 +259,10 @@ public class PaymentServiceImpl implements PaymentService {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_CARD_NOT_FOUND);
         }
 
-        boolean isBusinessExpense = "WORK".equals(card.getCardType());
+        // 사용자가 고른 값이 먼저다. 안 골랐으면 법인카드일 때만 업무로 보고, 개인카드는 미선택으로 남긴다
+        Boolean isBusinessExpense = request.getIsBusinessExpense() != null
+                ? request.getIsBusinessExpense()
+                : ("WORK".equals(card.getCardType()) ? Boolean.TRUE : null);
         BigDecimal amount = request.getAmount();
 
         // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409)

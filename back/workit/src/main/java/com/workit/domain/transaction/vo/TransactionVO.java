@@ -49,9 +49,9 @@ public class TransactionVO {
     private String cardName;
     private String cardNumber;
     private String cardClassification;
-
+    // isBusinessExpense 는 null 을 허용한다. 미선택 상태를 그대로 남겨야 지출 유입에서 확인을 요청할 수 있다
     public static TransactionVO forCardPayment(Long userId, CardVO card, PaymentRequest request,
-                                               boolean isBusinessExpense) {
+                                               Boolean isBusinessExpense) {
         TransactionVO vo = new TransactionVO();
         vo.setUserId(userId);
         vo.setCardId(card.getId());
@@ -80,7 +80,8 @@ public class TransactionVO {
         vo.setMerchantName(request.getMerchantName());
         vo.setAmount(request.getAmount());
         vo.setTransactionType("PAYMENT");
-        vo.setIsBusinessExpense(false);
+        // 지갑 결제는 카드가 없어 업무/개인을 추측할 수 없다. 고른 값이 없으면 미선택으로 남긴다
+        vo.setIsBusinessExpense(request.getIsBusinessExpense());
         vo.setTransactionNumber(TransactionNumberGenerator.generateTransactionNumber());
         // 상태머신: REQUESTED 로 생성 후 서비스에서 PAID 로 전이
         vo.setStatus(TransactionStatus.REQUESTED.name());
