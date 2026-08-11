@@ -1,4 +1,4 @@
-package com.workit.domain.transaction.gateway;
+package com.workit.domain.payment.gateway;
 
 import java.math.BigDecimal;
 
