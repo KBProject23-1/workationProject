@@ -1,4 +1,4 @@
-package com.workit.domain.transaction.constant;
+package com.workit.domain.payment;
 
 import java.util.Collections;
 import java.util.EnumMap;
@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 거래 상태머신.
+ * 결제 거래 상태머신.
  * DB 컬럼(transactions.status)은 값 집합만 보유하고, 합법적인 상태 전이는 이 enum 에서 강제한다.
  *
  * 전이 규칙:

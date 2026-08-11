@@ -4,7 +4,7 @@ import com.workit.domain.account.mapper.AccountMapper;
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.ledger.service.LedgerService;
 import com.workit.domain.ledger.vo.LedgerEntryVO;
-import com.workit.domain.transaction.constant.TransactionStatus;
+import com.workit.domain.payment.TransactionStatus;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.wallet.dto.request.ChargeRequest;
