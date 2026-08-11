@@ -23,6 +23,7 @@ import com.workit.domain.reservation.vo.ReservationReviewAction;
 import com.workit.domain.reservation.vo.ReservationStatus;
 import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.CancelResponse;
+import com.workit.domain.payment.service.PaymentService;
 import com.workit.domain.transaction.service.TransactionService;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
@@ -59,6 +60,7 @@ public class ReservationServiceImpl implements ReservationService {
 
     private final ReservationMapper reservationMapper;
     private final TransactionService transactionService;
+    private final PaymentService paymentService;
 
 
 //  예약 상태가 CONFIRMED인 예약 중 이용이 끝난 예약을 COMPLETED로 변경
@@ -155,7 +157,7 @@ public class ReservationServiceImpl implements ReservationService {
                 product,
                 totalAmount
         );
-        transactionService.pay(userId, paymentRequest);
+        paymentService.pay(userId, paymentRequest);
 
         for (ReservationDailyInventoryVO inventory : inventories) {
             int updatedRows = reservationMapper.updateDailyInventory(

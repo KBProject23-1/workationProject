@@ -1,34 +1,16 @@
 package com.workit.domain.transaction.service;
 
-import com.workit.domain.account.mapper.AccountMapper;
-import com.workit.domain.account.vo.BankAccountVO;
-import com.workit.domain.card.mapper.CardMapper;
-import com.workit.domain.card.vo.CardVO;
-import com.workit.domain.ledger.service.LedgerService;
-import com.workit.domain.ledger.vo.LedgerEntryVO;
-import com.workit.domain.transaction.dto.request.PaymentRequest;
 import com.workit.domain.transaction.dto.response.*;
 import com.workit.domain.transaction.exception.TransactionErrorCode;
-import com.workit.domain.payment.TransactionStatus;
-import com.workit.domain.payment.gateway.PaymentGatewayClient;
-import com.workit.domain.payment.gateway.PgAuthResult;
-import com.workit.domain.payment.gateway.PgException;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.transaction.vo.TransactionReviewAction;
 import com.workit.domain.wallet.mapper.WalletMapper;
-import com.workit.domain.wallet.vo.WalletVO;
-import com.workit.domain.security.service.PinValidationResult;
-import com.workit.domain.security.service.PinValidator;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import static com.workit.global.constant.PaymentPolicy.MIN_CHARGE_AMOUNT;
-import static com.workit.global.constant.PaymentPolicy.MAX_TRANSACTION_AMOUNT;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -36,6 +18,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * 거래 기록·조회 담당(내역/집계/상세/영수증) + 결제 취소.
+ * 충전/환불/결제 오케스트레이션은 payment 도메인(PaymentService)으로 이관됨.
+ */
 @Service
 @RequiredArgsConstructor
 public class TransactionServiceImpl implements TransactionService {
@@ -45,11 +31,6 @@ public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionMapper transactionMapper;
     private final WalletMapper walletMapper;
-    private final AccountMapper accountMapper;
-    private final CardMapper cardMapper;
-    private final LedgerService ledgerService;
-    private final PaymentGatewayClient paymentGatewayClient;
-    private final PinValidator pinValidator;
 
     @Override
     public PageResponseDTO<TransactionListItemResponse> getTransactions(Long userId, String startDate, String endDate,
@@ -142,192 +123,6 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         return ReceiptResponse.from(transaction);
-    }
-
-    @Override
-    @Transactional
-    public PaymentResponse pay(Long userId, PaymentRequest request) {
-
-        validatePaymentRequest(request);
-        validatePin(userId, request.getDeviceId(), request.getPinNumber());
-
-        if ("WALLET".equals(request.getPaymentSourceType())) {
-            return payWithWallet(userId, request);
-        } else {
-            return payWithCard(userId, request);
-        }
-    }
-
-    private PaymentResponse payWithWallet(Long userId, PaymentRequest request) {
-        BigDecimal amount = request.getAmount();
-
-        WalletVO wallet = walletMapper.findByUserId(userId);
-        if (wallet == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_WALLET_NOT_FOUND);
-        }
-
-        // 1) REQUESTED 결제 거래 생성 — 멱등키 중복이면 자동충전/차감 전에 먼저 거부(409)
-        TransactionVO paymentTx = TransactionVO.forWalletPayment(userId, wallet, request);
-        try {
-            transactionMapper.insertTransaction(paymentTx);
-        } catch (DuplicateKeyException e) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
-        }
-
-        // 2) 잔액 부족 시 자동충전 (주계좌 -> 지갑). 내부 서브거래로 별도 기록 + 원장 기입
-        BigDecimal shortage = amount.subtract(wallet.getBalance());
-        boolean isAutoCharged = shortage.compareTo(BigDecimal.ZERO) > 0;
-        BigDecimal autoChargedAmount = null;
-
-        if (isAutoCharged) {
-            // 부족분이 최소 충전금액(1만원)보다 적으면 1만원으로 채움
-            BigDecimal actualChargeAmount = shortage.compareTo(MIN_CHARGE_AMOUNT) < 0
-                    ? MIN_CHARGE_AMOUNT
-                    : shortage;
-
-            BankAccountVO primaryAccount = accountMapper.findPrimaryAccount(userId);
-            if (primaryAccount == null) {
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_PRIMARY_ACCOUNT_NOT_FOUND_FOR_AUTO_CHARGE);
-            }
-
-            int accountUpdatedRows = accountMapper.decreaseBalance(primaryAccount.getId(), userId, actualChargeAmount);
-            if (accountUpdatedRows == 0) {
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_ACCOUNT_BALANCE);
-            }
-
-            walletMapper.increaseBalance(userId, actualChargeAmount);
-            autoChargedAmount = actualChargeAmount;
-
-            // 자동충전은 내부 원자 충전이라 PAID 로 즉시 생성(forAutoCharge). 단, 잔액이 움직였으므로 원장은 기입한다.
-            TransactionVO depositTx = TransactionVO.forAutoCharge(userId, wallet, primaryAccount, actualChargeAmount);
-            transactionMapper.insertTransaction(depositTx);
-            BigDecimal accBalanceAfter = primaryAccount.getBalance().subtract(actualChargeAmount);
-            BigDecimal walBalanceAfter = wallet.getBalance().add(actualChargeAmount);
-            ledgerService.post(depositTx.getId(),
-                    LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, primaryAccount.getId(), actualChargeAmount, accBalanceAfter),
-                    LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), actualChargeAmount, walBalanceAfter));
-        }
-
-        // 3) 지갑 차감
-        int walletUpdatedRows = walletMapper.decreaseBalance(userId, amount);
-        if (walletUpdatedRows == 0) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_WALLET_BALANCE);
-        }
-
-        WalletVO updatedWallet = walletMapper.findByUserId(userId);
-
-        // 4) 결제 원장: WALLET DEBIT(나감) / MERCHANT CREDIT(들어옴). 가맹점 잔액은 미보유 -> balance_after null
-        ledgerService.post(paymentTx.getId(),
-                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, updatedWallet.getBalance()),
-                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
-
-        // 5) PAID 로 전이
-        LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(paymentTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
-        paymentTx.setStatus(TransactionStatus.PAID.name());
-        paymentTx.setApprovedAt(approvedAt);
-
-        return PaymentResponse.ofWallet(paymentTx, updatedWallet.getBalance(), isAutoCharged, autoChargedAmount);
-    }
-
-    private PaymentResponse payWithCard(Long userId, PaymentRequest request) {
-        if (request.getCardId() == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_CARD_ID_REQUIRED);
-        }
-
-        CardVO card = cardMapper.findCardById(request.getCardId(), userId);
-        if (card == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_CARD_NOT_FOUND);
-        }
-
-        boolean isBusinessExpense = "WORK".equals(card.getCardType());
-        BigDecimal amount = request.getAmount();
-
-        // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409)
-        TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense);
-        try {
-            transactionMapper.insertTransaction(paymentTx);
-        } catch (DuplicateKeyException e) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
-        }
-
-        // 2) PG 승인(authorize) — 실패 시 트랜잭션 롤백(거래 미생성). 승인번호/PG거래ID 기록 + AUTHORIZED 전이
-        PgAuthResult auth;
-        try {
-            auth = paymentGatewayClient.authorize(userId, card.getId(), amount, request.getMerchantName());
-        } catch (PgException e) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_AUTH_FAILED);
-        }
-        transactionMapper.applyPgAuthorization(paymentTx.getId(), userId, auth.getPgTransactionId(), auth.getApprovalNumber());
-        paymentTx.setPgTransactionId(auth.getPgTransactionId());
-        paymentTx.setApprovedNumber(auth.getApprovalNumber());
-        paymentTx.setStatus(TransactionStatus.AUTHORIZED.name());
-
-        // 3) PG 매입(capture) — 실패 시 승인 취소(cancel)로 보상 후 롤백
-        try {
-            paymentGatewayClient.capture(auth.getPgTransactionId(), amount);
-        } catch (PgException e) {
-            paymentGatewayClient.cancel(auth.getPgTransactionId());
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_CAPTURE_FAILED);
-        }
-
-        // 4) 원장: CARD DEBIT / MERCHANT CREDIT. 카드는 외부 발급사 자금이라 내부 잔액 이동 없음 -> balance_after null
-        ledgerService.post(paymentTx.getId(),
-                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_CARD, card.getId(), amount, null),
-                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
-
-        // 5) PAID 로 전이 (매입 완료)
-        LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(paymentTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
-        paymentTx.setStatus(TransactionStatus.PAID.name());
-        paymentTx.setApprovedAt(approvedAt);
-
-        return PaymentResponse.ofCard(paymentTx);
-    }
-
-    private void validatePaymentRequest(PaymentRequest request) {
-        if (request.getMerchantName() == null || request.getMerchantName().trim().isEmpty()) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_MERCHANT_NAME_REQUIRED);
-        }
-        if (request.getAmount() == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_AMOUNT_REQUIRED);
-        }
-        if (request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_INVALID_AMOUNT);
-        }
-        if (request.getAmount().compareTo(MAX_TRANSACTION_AMOUNT) > 0) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_MAX_AMOUNT_EXCEEDED);
-        }
-        if (request.getPaymentSourceType() == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_PAYMENT_SOURCE_TYPE_REQUIRED);
-        }
-        if (request.getPinNumber() == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_REQUIRED);
-        }
-        if (request.getDeviceId() == null || request.getDeviceId().trim().isEmpty()) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_DEVICE_ID_REQUIRED);
-        }
-        if (request.getIdempotencyKey() == null || request.getIdempotencyKey().trim().isEmpty()) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_IDEMPOTENCY_KEY_REQUIRED);
-        }
-    }
-
-    private void validatePin(Long userId, String deviceId, String pinNumber) {
-        if (pinNumber == null || pinNumber.length() != 6) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_INVALID);
-        }
-
-        PinValidationResult result = pinValidator.validate(userId, deviceId, pinNumber);
-        switch (result) {
-            case DEVICE_NOT_REGISTERED:
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_NOT_REGISTERED);
-            case LOCKED:
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_LOCKED);
-            case MISMATCH:
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_INVALID);
-            default:
-                // VALID
-        }
     }
 
     @Override
