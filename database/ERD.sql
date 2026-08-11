@@ -435,7 +435,7 @@ CREATE TABLE `transactions`
     `amount`              DECIMAL(15, 2)                            NOT NULL COMMENT '거래 금액',
     `transaction_type`    ENUM ('DEPOSIT', 'WITHDRAWAL', 'PAYMENT') NOT NULL COMMENT '입금/출금 유형',
     `category_assigned`   VARCHAR(150)                              NULL DEFAULT '기타' COMMENT '자동 분류된 지출 카테고리',
-    `is_business_expense` TINYINT(1)                                NULL DEFAULT 1 COMMENT '업무 경비 여부',
+    `is_business_expense` TINYINT(1)                                NULL DEFAULT NULL COMMENT '업무 경비 여부. 1 업무 / 0 개인 / NULL 미선택. DEFAULT 1 이면 미선택과 업무 선택을 구분할 수 없다',
     `approved_number`     VARCHAR(50)                               NULL COMMENT '카드 승인 번호',
     `pg_transaction_id`   VARCHAR(100)                              NULL COMMENT '외부 PG 거래 식별자 (카드결제 승인 시 발급)',
     `transaction_number`  VARCHAR(50)                               NULL COMMENT '우리 서비스 거래번호',
