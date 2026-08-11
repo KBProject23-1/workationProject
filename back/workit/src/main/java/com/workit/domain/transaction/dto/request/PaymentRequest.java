@@ -15,4 +15,6 @@ public class PaymentRequest {
     private String pinNumber;
     private String deviceId;
     private String idempotencyKey;
+    // 결제 화면에서 고른 업무/개인 구분. 1 업무 / 0 개인 / null 미선택
+    private Boolean isBusinessExpense;
 }
