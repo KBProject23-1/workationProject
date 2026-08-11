@@ -99,11 +99,8 @@ public class PaymentServiceImpl implements PaymentService {
                 LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, account.getId(), amount, accountBalanceAfter),
                 LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter));
 
-        // 4) PAID 로 전이
-        LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(chargeTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
-        chargeTx.setStatus(TransactionStatus.PAID.name());
-        chargeTx.setApprovedAt(approvedAt);
+        // 4) PAID 로 전이 (상태머신 규칙 검증 포함)
+        markPaid(chargeTx, userId);
 
         return ChargeResponse.of(chargeTx, walletBalanceAfter);
     }
@@ -153,11 +150,8 @@ public class PaymentServiceImpl implements PaymentService {
                 LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter),
                 LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_BANK, targetAccount.getId(), amount, accountBalanceAfter));
 
-        // 4) PAID 로 전이
-        LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(refundTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
-        refundTx.setStatus(TransactionStatus.PAID.name());
-        refundTx.setApprovedAt(approvedAt);
+        // 4) PAID 로 전이 (상태머신 규칙 검증 포함)
+        markPaid(refundTx, userId);
 
         return RefundResponse.of(refundTx, walletBalanceAfter, targetAccount);
     }
@@ -241,10 +235,7 @@ public class PaymentServiceImpl implements PaymentService {
                 LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
 
         // 5) PAID 로 전이
-        LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(paymentTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
-        paymentTx.setStatus(TransactionStatus.PAID.name());
-        paymentTx.setApprovedAt(approvedAt);
+        markPaid(paymentTx, userId);
 
         return PaymentResponse.ofWallet(paymentTx, updatedWallet.getBalance(), isAutoCharged, autoChargedAmount);
     }
@@ -277,6 +268,8 @@ public class PaymentServiceImpl implements PaymentService {
         } catch (PgException e) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_AUTH_FAILED);
         }
+        // REQUESTED -> AUTHORIZED 전이 (상태머신 규칙 검증)
+        assertTransition(paymentTx.getStatus(), TransactionStatus.AUTHORIZED);
         transactionMapper.applyPgAuthorization(paymentTx.getId(), userId, auth.getPgTransactionId(), auth.getApprovalNumber());
         paymentTx.setPgTransactionId(auth.getPgTransactionId());
         paymentTx.setApprovedNumber(auth.getApprovalNumber());
@@ -296,10 +289,7 @@ public class PaymentServiceImpl implements PaymentService {
                 LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
 
         // 5) PAID 로 전이 (매입 완료)
-        LocalDateTime approvedAt = LocalDateTime.now();
-        transactionMapper.updateStatus(paymentTx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
-        paymentTx.setStatus(TransactionStatus.PAID.name());
-        paymentTx.setApprovedAt(approvedAt);
+        markPaid(paymentTx, userId);
 
         return PaymentResponse.ofCard(paymentTx);
     }
@@ -347,6 +337,23 @@ public class PaymentServiceImpl implements PaymentService {
 
         TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
         return CancelResponse.of(cancelled, amount, refundedTo);
+    }
+
+    // ===== 상태 전이 (상태머신 규칙 강제) =====
+    /** REQUESTED/AUTHORIZED -> PAID 전이를 규칙 검증과 함께 수행. */
+    private void markPaid(TransactionVO tx, Long userId) {
+        assertTransition(tx.getStatus(), TransactionStatus.PAID);
+        LocalDateTime approvedAt = LocalDateTime.now();
+        transactionMapper.updateStatus(tx.getId(), userId, TransactionStatus.PAID.name(), approvedAt);
+        tx.setStatus(TransactionStatus.PAID.name());
+        tx.setApprovedAt(approvedAt);
+    }
+
+    /** 현재 상태에서 target 전이가 상태머신 규칙상 합법인지 검증. 위반 시 롤백(프로그래밍 오류). */
+    private void assertTransition(String currentStatus, TransactionStatus target) {
+        if (!TransactionStatus.from(currentStatus).canTransitionTo(target)) {
+            throw new IllegalStateException("불법 상태 전이: " + currentStatus + " -> " + target);
+        }
     }
 
     // ===== 검증 (에러코드 계약 보존) =====

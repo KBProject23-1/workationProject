@@ -42,11 +42,6 @@ public enum TransactionStatus {
         return ALLOWED_TRANSITIONS.getOrDefault(this, Collections.emptySet()).contains(target);
     }
 
-    /** 종료상태(더 이상 전이 불가) 여부. */
-    public boolean isTerminal() {
-        return ALLOWED_TRANSITIONS.getOrDefault(this, Collections.emptySet()).isEmpty();
-    }
-
     /** DB varchar <-> enum 변환용. 알 수 없는 값이면 예외. */
     public static TransactionStatus from(String value) {
         return TransactionStatus.valueOf(value);
