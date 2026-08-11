@@ -5,9 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.workit.domain.budget.mapper.BudgetMapper;
 import com.workit.domain.recommendation.offices.dto.request.OfficeRecommendationCreateRequestDTO;
+import com.workit.domain.recommendation.offices.dto.request.OfficeRecommendationRecalculateRequestDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationPageInfoDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationReferenceResponseDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationResponseDTO;
+import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationCandidateListResponseDTO;
+import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationCandidateResponseDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationResultItemResponseDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationScoreResponseDTO;
 import com.workit.domain.recommendation.offices.exception.OfficeRecommendationErrorCode;
@@ -22,7 +25,7 @@ import com.workit.domain.recommendation.offices.vo.OfficeReferenceMerchantVO;
 import com.workit.domain.recommendation.offices.vo.OfficeRecommendationResultVO;
 import com.workit.domain.recommendation.offices.vo.OfficeSurveyAnswerVO;
 import com.workit.domain.recommendation.common.mapper.ReservationProductAvailabilityMapper;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.workation.mapper.WorkationMapper;
 import com.workit.domain.workation.service.WorkationOwnershipValidator;
 import com.workit.domain.workation.vo.BudgetType;
@@ -102,73 +105,89 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             return toCommon(buildOfficeRecommendationResponse(userId, todayRequest, null, request.getSize()));
         }
 
-        List<OfficeSurveyAnswerVO> surveyAnswers = loadSurveyAnswers(userId, workation.getId());
-        String q1Code = extractQ1Code(surveyAnswers);
-        Set<String> q2Codes = extractQ2Codes(surveyAnswers);
+        return createOfficeRecommendationByReference(userId, workation, reference, referenceType, request.getSize());
+    }
 
-        OfficePriorityType priority = resolvePriority(q1Code);
-        Set<OfficeAtmosphereType> atmospheres = resolveAtmospheres(q2Codes);
-
-        BigDecimal officeBudget = loadWorkBudget(workation.getId());
-        BigDecimal budgetPerDay = calculateDailyBudget(officeBudget, workation.getStartDate(), workation.getEndDate());
-
-        OfficeRecommendationRequestVO requestVO = new OfficeRecommendationRequestVO();
-        requestVO.setUserId(userId);
-        requestVO.setWorkationId(workation.getId());
-        requestVO.setRecommendationType(RecommendationType.OFFICE.name());
-        requestVO.setReferenceType(referenceType.name());
-        requestVO.setMealType(RECOMMENDATION_MEAL_TYPE);
-        requestVO.setReferenceMerchantId(referenceMerchantId);
-        requestVO.setReferenceLatitude(reference == null ? null : reference.getLatitude());
-        requestVO.setReferenceLongitude(reference == null ? null : reference.getLongitude());
-        requestVO.setSecondaryReferenceMerchantId(null);
-
-        recommendationMapper.insertRecommendationRequest(requestVO);
-        Long recommendationRequestId = requestVO.getId();
-
-        List<Long> availableMerchantIds = reservationProductAvailabilityMapper.selectAvailableMerchantIdsByPeriod(
-                workation.getRegionId(),
-                "OFFICE",
-                null,
-                workation.getStartDate(),
-                workation.getEndDate(),
-                true,
-                null
-        );
-
-        List<OfficeCandidateVO> candidates = availableMerchantIds == null || availableMerchantIds.isEmpty()
-                ? new ArrayList<>()
-                : recommendationMapper.selectOfficeCandidatesByMerchantIds(userId, availableMerchantIds);
-
-        log.info(
-                "공유오피스 추천 후보 조회: userId={}, workationId={}, regionId={}, startDate={}, endDate={}, candidateCount={}",
-                userId,
-                workation.getId(),
-                workation.getRegionId(),
-                workation.getStartDate(),
-                workation.getEndDate(),
-                candidates.size()
-        );
-
-        List<OfficeRecommendationResultVO> recommendationResultList = calculateRecommendationResults(
-                candidates,
-                budgetPerDay,
-                priority,
-                atmospheres,
-                referenceType,
-                reference
-        );
-
-        sortByTotalScore(recommendationResultList);
-
-        if (!recommendationResultList.isEmpty()) {
-            for (int i = 0; i < recommendationResultList.size(); i++) {
-                recommendationResultList.get(i).setRanking(i + 1);
-            }
-            recommendationMapper.insertRecommendationResults(recommendationRequestId, recommendationResultList);
+    private RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> toCommon(
+            OfficeRecommendationResponseDTO response) {
+        if (response == null) {
+            return RecommendationListResponseDTO.<OfficeRecommendationResultItemResponseDTO>of(
+                    null, null, null, null, null, 0, false, null);
         }
 
-        return toCommon(buildOfficeRecommendationResponse(userId, requestVO, null, request.getSize()));
+        RecommendationListResponseDTO.RecommendationReference reference =
+                new RecommendationListResponseDTO.RecommendationReference(
+                        response.getRecommendationType(),
+                        response.getReference() == null ? null : response.getReference().getPrimaryMerchantId(),
+                        response.getReference() == null ? null : response.getReference().getPrimaryMerchantName(),
+                        response.getReference() == null ? null : response.getReference().getSecondaryMerchantId(),
+                        response.getReference() == null ? null : response.getReference().getSecondaryMerchantName(),
+                        response.getReference() == null || response.getReference().getLatitude() == null
+                                ? null
+                                : response.getReference().getLatitude().toPlainString(),
+                        response.getReference() == null || response.getReference().getLongitude() == null
+                                ? null
+                                : response.getReference().getLongitude().toPlainString(),
+                        null
+                );
+
+        return RecommendationListResponseDTO.of(
+                response.getRecommendationRequestId(),
+                response.getRecommendationType(),
+                null,
+                reference,
+                response.getContent(),
+                response.getPageInfo() == null ? 0 : response.getPageInfo().getSize(),
+                response.getPageInfo() != null && response.getPageInfo().getHasNext() != null
+                        && response.getPageInfo().getHasNext(),
+                response.getPageInfo() == null ? null : response.getPageInfo().getNextCursor()
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OfficeRecommendationReferenceResponseDTO findOfficeReferencePlace(Long userId) {
+        WorkationVO workation = workationMapper.selectActiveWorkation(userId);
+        if (workation == null) {
+            throw new BusinessException(OfficeRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        OfficeRecommendationRequestVO latest = recommendationMapper.selectLatestRecommendationRequestByUser(
+                userId,
+                workation.getId(),
+                null
+        );
+        if (latest != null) {
+            OfficeReferenceType latestReferenceType = toReferenceType(latest.getReferenceType());
+            return buildOfficeReferenceResponse(latest, latestReferenceType);
+        }
+
+        OfficeReferenceMerchantVO reference = recommendationMapper.selectAccommodationReference(userId, workation.getId());
+        OfficeReferenceType referenceType = reference == null ? OfficeReferenceType.REGION_ONLY : OfficeReferenceType.AUTO_MERCHANT;
+        return buildOfficeReferenceResponse(reference, referenceType);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OfficeRecommendationCandidateListResponseDTO findOfficeReferencePlaceCandidates(Long userId) {
+        WorkationVO workation = workationMapper.selectActiveWorkation(userId);
+        if (workation == null) {
+            throw new BusinessException(OfficeRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        List<OfficeCandidateVO> candidates = recommendationMapper.selectOfficeCandidates(
+                userId,
+                workation.getRegionId(),
+                workation.getStartDate(),
+                workation.getEndDate()
+        );
+        if (candidates == null) {
+            candidates = new ArrayList<>();
+        }
+
+        return new OfficeRecommendationCandidateListResponseDTO(
+                candidates.stream().map(OfficeRecommendationCandidateResponseDTO::from).collect(Collectors.toList())
+        );
     }
 
     @Override
@@ -231,40 +250,170 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         return toCommon(buildOfficeRecommendationResponse(userId, requestVO, cursor, size));
     }
 
-    private RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> toCommon(
-            OfficeRecommendationResponseDTO response) {
-        if (response == null) {
-            return RecommendationListResponseDTO.<OfficeRecommendationResultItemResponseDTO>of(
-                    null, null, null, null, null, 0, false, null);
+    @Override
+    @Transactional
+    public RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> recalculateOfficeRecommendation(
+            Long userId, Long recommendationRequestId, OfficeRecommendationRecalculateRequestDTO request) {
+        if (recommendationRequestId == null || request == null || request.getReferenceMerchantId() == null) {
+            throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
 
-        RecommendationListResponseDTO.RecommendationReference reference =
-                new RecommendationListResponseDTO.RecommendationReference(
-                        response.getRecommendationType(),
-                        response.getReference() == null ? null : response.getReference().getPrimaryMerchantId(),
-                        response.getReference() == null ? null : response.getReference().getPrimaryMerchantName(),
-                        response.getReference() == null ? null : response.getReference().getSecondaryMerchantId(),
-                        response.getReference() == null ? null : response.getReference().getSecondaryMerchantName(),
-                        response.getReference() == null || response.getReference().getLatitude() == null
-                                ? null
-                                : response.getReference().getLatitude().toPlainString(),
-                        response.getReference() == null || response.getReference().getLongitude() == null
-                                ? null
-                                : response.getReference().getLongitude().toPlainString(),
-                        null
-                );
+        OfficeRecommendationRequestVO previous = recommendationMapper.selectRecommendationRequestById(userId, recommendationRequestId);
+        if (previous == null || !RecommendationType.OFFICE.name().equals(previous.getRecommendationType())) {
+            throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+        }
 
-        return RecommendationListResponseDTO.of(
-                response.getRecommendationRequestId(),
-                response.getRecommendationType(),
-                null,
-                reference,
-                response.getContent(),
-                response.getPageInfo() == null ? 0 : response.getPageInfo().getSize(),
-                response.getPageInfo() != null && response.getPageInfo().getHasNext() != null
-                        && response.getPageInfo().getHasNext(),
-                response.getPageInfo() == null ? null : response.getPageInfo().getNextCursor()
+        WorkationVO workation = ownershipValidator.getOwned(userId, previous.getWorkationId());
+        if (workation == null) {
+            throw new BusinessException(OfficeRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        List<OfficeCandidateVO> availableCandidates = recommendationMapper.selectOfficeCandidates(
+                userId,
+                workation.getRegionId(),
+                workation.getStartDate(),
+                workation.getEndDate()
         );
+
+        OfficeCandidateVO selectedCandidate = availableCandidates == null
+                ? null
+                : availableCandidates.stream()
+                .filter(candidate -> request.getReferenceMerchantId().equals(candidate.getMerchantId()))
+                .findFirst()
+                .orElse(null);
+
+        if (selectedCandidate == null) {
+            throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+        }
+
+        OfficeReferenceMerchantVO reference = new OfficeReferenceMerchantVO();
+        reference.setMerchantId(selectedCandidate.getMerchantId());
+        reference.setMerchantName(selectedCandidate.getName());
+        reference.setLatitude(selectedCandidate.getLatitude());
+        reference.setLongitude(selectedCandidate.getLongitude());
+
+        return createOfficeRecommendationByReference(
+                userId,
+                workation,
+                reference,
+                OfficeReferenceType.USER_SELECTED,
+                DEFAULT_SIZE
+        );
+    }
+
+    private RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> createOfficeRecommendationByReference(
+            Long userId,
+            WorkationVO workation,
+            OfficeReferenceMerchantVO reference,
+            OfficeReferenceType referenceType,
+            Integer size) {
+        List<OfficeSurveyAnswerVO> surveyAnswers = loadSurveyAnswers(userId, workation.getId());
+        String q1Code = extractQ1Code(surveyAnswers);
+        Set<String> q2Codes = extractQ2Codes(surveyAnswers);
+
+        OfficePriorityType priority = resolvePriority(q1Code);
+        Set<OfficeAtmosphereType> atmospheres = resolveAtmospheres(q2Codes);
+
+        BigDecimal officeBudget = loadWorkBudget(workation.getId());
+        BigDecimal budgetPerDay = calculateDailyBudget(officeBudget, workation.getStartDate(), workation.getEndDate());
+
+        OfficeRecommendationRequestVO requestVO = new OfficeRecommendationRequestVO();
+        requestVO.setUserId(userId);
+        requestVO.setWorkationId(workation.getId());
+        requestVO.setRecommendationType(RecommendationType.OFFICE.name());
+        requestVO.setReferenceType(referenceType.name());
+        requestVO.setMealType(RECOMMENDATION_MEAL_TYPE);
+        requestVO.setReferenceMerchantId(reference == null ? null : reference.getMerchantId());
+        requestVO.setReferenceLatitude(reference == null ? null : reference.getLatitude());
+        requestVO.setReferenceLongitude(reference == null ? null : reference.getLongitude());
+        requestVO.setSecondaryReferenceMerchantId(null);
+
+        recommendationMapper.insertRecommendationRequest(requestVO);
+        Long recommendationRequestId = requestVO.getId();
+
+        List<Long> availableMerchantIds = reservationProductAvailabilityMapper.selectAvailableMerchantIdsByPeriod(
+                workation.getRegionId(),
+                "OFFICE",
+                null,
+                workation.getStartDate(),
+                workation.getEndDate(),
+                true,
+                null
+        );
+
+        List<OfficeCandidateVO> candidates = availableMerchantIds == null || availableMerchantIds.isEmpty()
+                ? new ArrayList<>()
+                : recommendationMapper.selectOfficeCandidatesByMerchantIds(userId, availableMerchantIds);
+
+        log.info(
+                "공유오피스 추천 후보 조회: userId={}, workationId={}, regionId={}, startDate={}, endDate={}, candidateCount={}",
+                userId,
+                workation.getId(),
+                workation.getRegionId(),
+                workation.getStartDate(),
+                workation.getEndDate(),
+                candidates.size()
+        );
+
+        List<OfficeRecommendationResultVO> recommendationResultList = calculateRecommendationResults(
+                candidates,
+                budgetPerDay,
+                priority,
+                atmospheres,
+                referenceType,
+                reference
+        );
+
+        sortByTotalScore(recommendationResultList);
+
+        if (!recommendationResultList.isEmpty()) {
+            for (int i = 0; i < recommendationResultList.size(); i++) {
+                recommendationResultList.get(i).setRanking(i + 1);
+            }
+            recommendationMapper.insertRecommendationResults(recommendationRequestId, recommendationResultList);
+        }
+
+        return toCommon(buildOfficeRecommendationResponse(userId, requestVO, null, size));
+    }
+
+    private OfficeRecommendationReferenceResponseDTO buildOfficeReferenceResponse(OfficeRecommendationRequestVO requestVO,
+                                                                                OfficeReferenceType referenceType) {
+        String description = resolveOfficeReferenceDescription(referenceType);
+        return OfficeRecommendationReferenceResponseDTO.builder()
+                .referenceType(referenceType.name())
+                .primaryMerchantId(requestVO == null ? null : requestVO.getReferenceMerchantId())
+                .primaryMerchantName(requestVO == null ? null : requestVO.getReferenceMerchantName())
+                .secondaryMerchantId(requestVO == null ? null : requestVO.getSecondaryReferenceMerchantId())
+                .secondaryMerchantName(requestVO == null ? null : requestVO.getSecondaryReferenceMerchantName())
+                .latitude(requestVO == null ? null : requestVO.getReferenceLatitude())
+                .longitude(requestVO == null ? null : requestVO.getReferenceLongitude())
+                .description(description)
+                .build();
+    }
+
+    private OfficeRecommendationReferenceResponseDTO buildOfficeReferenceResponse(OfficeReferenceMerchantVO reference,
+                                                                                OfficeReferenceType referenceType) {
+        String description = resolveOfficeReferenceDescription(referenceType);
+        return OfficeRecommendationReferenceResponseDTO.builder()
+                .referenceType(referenceType.name())
+                .primaryMerchantId(reference == null ? null : reference.getMerchantId())
+                .primaryMerchantName(reference == null ? null : reference.getMerchantName())
+                .secondaryMerchantId(null)
+                .secondaryMerchantName(null)
+                .latitude(reference == null ? null : reference.getLatitude())
+                .longitude(reference == null ? null : reference.getLongitude())
+                .description(description)
+                .build();
+    }
+
+    private String resolveOfficeReferenceDescription(OfficeReferenceType referenceType) {
+        if (OfficeReferenceType.AUTO_MERCHANT == referenceType) {
+            return "확정 예약된 숙소를 기준으로 추천했어요.";
+        }
+        if (OfficeReferenceType.USER_SELECTED == referenceType) {
+            return "선택한 숙소를 기준으로 추천했어요.";
+        }
+        return "확정된 숙소가 없어 워케이션 지역을 기준으로 추천했어요.";
     }
 
     private OfficeRecommendationResponseDTO buildOfficeRecommendationResponse(Long userId,

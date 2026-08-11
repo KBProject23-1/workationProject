@@ -1,11 +1,17 @@
 package com.workit.domain.recommendation.offices.service;
 
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.offices.dto.request.OfficeRecommendationCreateRequestDTO;
-import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationResponseDTO;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.offices.dto.request.OfficeRecommendationRecalculateRequestDTO;
+import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationCandidateListResponseDTO;
+import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationReferenceResponseDTO;
 import com.workit.domain.recommendation.offices.dto.response.OfficeRecommendationResultItemResponseDTO;
 
 public interface OfficeRecommendationService {
+
+    OfficeRecommendationReferenceResponseDTO findOfficeReferencePlace(Long userId);
+
+    OfficeRecommendationCandidateListResponseDTO findOfficeReferencePlaceCandidates(Long userId);
 
     RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> createOfficeRecommendation(
             Long userId,
@@ -22,4 +28,9 @@ public interface OfficeRecommendationService {
             Long recommendationRequestId,
             String cursor,
             Integer size);
+
+    RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> recalculateOfficeRecommendation(
+            Long userId,
+            Long recommendationRequestId,
+            OfficeRecommendationRecalculateRequestDTO request);
 }

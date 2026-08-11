@@ -6,7 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.recommendation.activities.dto.request.ActivityRecommendationCreateRequestDTO;
 import com.workit.domain.recommendation.activities.dto.request.RecommendationRecalculateRequestDTO;
 import com.workit.domain.recommendation.activities.dto.response.ActivityRecommendationResponseDTO;
-import com.workit.domain.recommendation.common.dto.RecommendationListResponseDTO;
+import com.workit.domain.recommendation.activities.dto.response.RecommendationCandidateListResponseDTO;
+import com.workit.domain.recommendation.activities.dto.response.RecommendationCandidateResponseDTO;
+import com.workit.domain.recommendation.activities.dto.response.RecommendationReferenceResponseDTO;
+import com.workit.domain.recommendation.common.dto.response.RecommendationListResponseDTO;
 import com.workit.domain.recommendation.activities.exception.ActivityRecommendationErrorCode;
 import com.workit.domain.recommendation.activities.mapper.ActivityRecommendationMapper;
 import com.workit.domain.recommendation.activities.vo.ActivityCandidateVO;
@@ -170,6 +173,56 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
                 parseSelectedActivityCodes(condition), DEFAULT_SIZE));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public RecommendationReferenceResponseDTO findActivityReferencePlace(Long userId) {
+        WorkationVO workation = workationMapper.selectActiveWorkation(userId);
+        if (workation == null) {
+            throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        ActivityConditionVO condition = getActivityCondition(userId, workation.getId());
+        if (condition == null) {
+            throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        RecommendationRequestVO latest = activityRecommendationMapper.selectLatestActivityRequest(
+                userId, workation.getId(), null);
+        RecommendationReferenceResponseDTO latestReference = resolveLatestActivityReference(condition, latest);
+        if (latestReference != null) {
+            return latestReference;
+        }
+
+        RecommendationMerchantVO reference = activityRecommendationMapper.selectConfirmedAccommodation(
+                userId, condition.getWorkationId());
+        if (reference != null) {
+            return RecommendationReferenceResponseDTO.auto(reference);
+        }
+        return RecommendationReferenceResponseDTO.regionOnly();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RecommendationCandidateListResponseDTO findActivityReferencePlaceCandidates(Long userId) {
+        WorkationVO workation = workationMapper.selectActiveWorkation(userId);
+        if (workation == null) {
+            throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        ActivityConditionVO condition = getActivityCondition(userId, workation.getId());
+        if (condition == null) {
+            throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
+        }
+
+        List<ActivityCandidateVO> candidates = activityRecommendationMapper.selectActivities(condition.getRegionId());
+        if (candidates == null) {
+            candidates = new ArrayList<>();
+        }
+        return new RecommendationCandidateListResponseDTO(
+                candidates.stream().map(RecommendationCandidateResponseDTO::from).collect(Collectors.toList())
+        );
+    }
+
     private RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item> toCommon(
             ActivityRecommendationResponseDTO response) {
         if (response == null) {
@@ -329,6 +382,37 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
 
     private int normalizeSize(int size) {
         return size < 1 || size > MAX_SIZE ? DEFAULT_SIZE : size;
+    }
+
+    private RecommendationReferenceResponseDTO resolveLatestActivityReference(ActivityConditionVO condition,
+                                                                             RecommendationRequestVO latest) {
+        if (latest == null || latest.getRecommendationType() == null || latest.getReferenceType() == null) {
+            return null;
+        }
+        if (latest.getReferenceType() == ReferenceType.USER_SELECTED || latest.getReferenceType() == ReferenceType.AUTO_MERCHANT) {
+            if (latest.getReferenceMerchantId() == null) {
+                return null;
+            }
+            RecommendationMerchantVO selected = activityRecommendationMapper.selectActivityReferenceMerchant(
+                    latest.getReferenceMerchantId(), condition.getRegionId());
+            if (selected == null) {
+                return null;
+            }
+            BigDecimal latitude = latest.getReferenceLatitude() == null
+                    ? selected.getLatitude()
+                    : latest.getReferenceLatitude();
+            BigDecimal longitude = latest.getReferenceLongitude() == null
+                    ? selected.getLongitude()
+                    : latest.getReferenceLongitude();
+            if (latest.getReferenceType() == ReferenceType.AUTO_MERCHANT) {
+                return RecommendationReferenceResponseDTO.auto(selected);
+            }
+            return RecommendationReferenceResponseDTO.userSelected(selected, latitude, longitude);
+        }
+        if (latest.getReferenceType() == ReferenceType.REGION_ONLY) {
+            return RecommendationReferenceResponseDTO.regionOnly();
+        }
+        return null;
     }
 
     private String encodeActivityCursor(ActivityRecommendationResultVO result) {

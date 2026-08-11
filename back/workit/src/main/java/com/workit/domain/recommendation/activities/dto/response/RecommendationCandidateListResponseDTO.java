@@ -1,4 +1,4 @@
-package com.workit.domain.recommendation.dto.response;
+package com.workit.domain.recommendation.activities.dto.response;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

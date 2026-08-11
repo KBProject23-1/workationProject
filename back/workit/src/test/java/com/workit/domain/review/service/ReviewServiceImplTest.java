@@ -384,6 +384,15 @@ class ReviewServiceImplTest {
         }
 
         @Override
+        public List<MerchantReviewVO> selectMerchantReviewListWithMine(
+                Long merchantId,
+                Long userId,
+                int offset,
+                int size) {
+            return selectMerchantReviewList(merchantId, offset, size);
+        }
+
+        @Override
         public MerchantReviewStatisticsVO selectMerchantReviewStatistics(Long merchantId) {
             return statistics;
         }
