@@ -28,6 +28,10 @@ public class ExpenseItemResponseDTO {
     private final String categoryName;
     private final Boolean isAutoCategorized;
     private final ExpenseSourceType sourceType;
+
+    // CARD, WALLET. 지갑 결제는 카드가 없는 게 정상이라 카드 미지정과 구분해야 한다
+    private final String paymentSourceType;
+
     private final String memo;
 
     public static ExpenseItemResponseDTO from(WorkationExpenseVO vo) {
@@ -45,6 +49,7 @@ public class ExpenseItemResponseDTO {
                 .categoryName(vo.getDisplayCategoryName())
                 .isAutoCategorized(vo.getIsAutoCategorized())
                 .sourceType(vo.getSourceType())
+                .paymentSourceType(vo.getPaymentSourceType())
                 .memo(vo.getMemo())
                 .build();
     }

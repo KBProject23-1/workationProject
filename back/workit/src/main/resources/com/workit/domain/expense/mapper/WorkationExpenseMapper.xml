@@ -31,6 +31,8 @@
         c.card_type,
         t.merchant_id,
         t.approved_number,
+        <!-- 지갑 결제는 카드가 없는 게 정상이라, 카드 미지정과 구분해야 한다 -->
+        t.payment_source_type,
         m.category             AS merchant_category
     </sql>
 
