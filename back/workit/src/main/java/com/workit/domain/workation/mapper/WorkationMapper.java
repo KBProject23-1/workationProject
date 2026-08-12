@@ -60,9 +60,6 @@ public interface WorkationMapper {
     // 추천 이력 삭제. recommendation_results 는 CASCADE 로 따라 삭제된다
     int deleteRecommendationRequestsByWorkationId(@Param("workationId") Long workationId);
 
-    // 아직 시작하지 않은 예약 건수. 남아 있으면 사용자가 먼저 취소해야 한다
-    int countUpcomingReservations(@Param("workationId") Long workationId);
-
     // 예약 이력은 남기고 워케이션 연결만 끊는다
     int unlinkReservations(@Param("workationId") Long workationId);
 

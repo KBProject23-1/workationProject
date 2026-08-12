@@ -227,14 +227,6 @@
         이용 시작일 전이면 사용자가 취소하고 환불받을 수 있으므로,
         워케이션을 지우기 전에 직접 취소하도록 막는다.
     -->
-    <select id="countUpcomingReservations" resultType="int">
-        SELECT COUNT(*)
-        FROM reservations
-        WHERE workation_id = #{workationId}
-          AND status = 'CONFIRMED'
-          AND start_date &gt; CURDATE()
-    </select>
-
     <!--
         예약은 결제·환불 이력이라 워케이션과 함께 지우지 않고 연결만 끊는다.
         transactions 와 같은 방식이다.

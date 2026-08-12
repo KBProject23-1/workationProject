@@ -160,18 +160,15 @@ public class WorkationServiceImpl implements WorkationService {
         //    지난 워케이션 기록 삭제를 지원하므로 정산 완료 건도 허용한다
         ownershipValidator.getOwned(userId, workationId);
 
-        // 2) 아직 시작하지 않은 예약은 사용자가 직접 취소해야 한다
-        //    환불이 걸려 있어 워케이션을 지우면서 임의로 처리할 수 없다
-        int upcoming = workationMapper.countUpcomingReservations(workationId);
-
-        if (upcoming > 0) {
-            throw new BusinessException(WorkationErrorCode.RESERVATION_EXISTS,
-                    String.format("아직 이용하지 않은 예약 %d건이 있습니다. 예약을 먼저 취소해 주세요.",
-                            upcoming));
-        }
+        // 2) 예약이 있어도 삭제를 막지 않는다.
+        //
+        //    취소 여부는 예약 파트의 정책이라 워케이션이 판단할 수 없다.
+        //    날짜만 보고 막으면, 결제건이 없거나 PG 취소가 실패해 취소가 안 되는 예약에
+        //    걸린 사용자는 취소도 삭제도 못 하는 상태에 갇힌다.
+        //
+        //    남은 예약은 화면에서 안내만 하고, 취소는 사용자가 예약 내역에서 직접 한다.
 
         // 3) 결제·예약 이력은 보존하고 워케이션 연결만 해제
-        //    이미 이용했거나 취소된 예약은 사용자가 손댈 수 없으므로 여기서 정리한다
         workationMapper.unlinkTransactions(workationId);
         workationMapper.unlinkReservations(workationId);
 
