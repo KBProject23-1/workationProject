@@ -1,5 +1,6 @@
 package com.workit.domain.auth.service;
 
+import com.workit.domain.auth.MockPassStatus;
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
@@ -9,18 +10,17 @@ import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
-import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
+import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.util.JwtTokenProvider;
-import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.TermsVO;
 import com.workit.domain.auth.vo.UserAuthVO;
@@ -32,9 +32,6 @@ import com.workit.exception.BusinessException;
 import com.workit.global.util.PasswordEncryptor;
 import com.workit.global.util.PersonalDataCipher;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,7 +73,7 @@ import static org.mockito.Mockito.when;
 
 // AuthServiceImpl 단위 테스트
 // - AuthMapper/저장소/Provider 를 Mockito @Mock 으로 주입한다
-// - JwtTokenProvider/SignupTokenProvider 는 실제 인스턴스로 사용한다 (실제 JWT 발급·검증 검증)
+// - JwtTokenProvider 는 실제 인스턴스로 사용한다 (실제 JWT 발급·검증 검증)
 // - Redis 저장소/카운터는 Mockito Answer 로 상태형 인메모리 Mock 을 구성해 수동 Fake 를 대체한다
 // - @InjectMocks 를 사용하지 않는 이유: JWT Provider 는 실제 인스턴스가 필요하고(Mock 대체 시
 //   토큰 발급·검증 검증 불가), 상태형 Answer 를 함께 구성해야 하므로 생성자 직접 주입을 사용한다
@@ -88,12 +85,12 @@ class AuthServiceImplTest {
     private static final String TEST_AES_KEY = "0123456789abcdef0123456789abcdef"; // 32바이트
     private static final String TEST_JWT_SECRET = "fedcba9876543210fedcba9876543210"; // 32바이트
 
-    // Mock Provider 는 CI = "MOCK-CI-" + identityVerificationId 를 반환한다.
+    // 테스트 Stub Provider 는 CI = "MOCK-CI-" + identityVerificationId 를 반환한다.
+    // (실제 MockIdentityVerificationProvider 의 CI 는 인증된 휴대폰 기반 결정값 — 아래 mockProviderResult 는
+    //  서비스 단위 테스트 전용 Stub 이므로 자체 규칙을 사용하며, 실제 Provider 규칙과 독립적이다)
     // CI SHA-256 해시는 프로덕션 해시 로직을 테스트가 복제하지 않도록 미리 계산한 값을 사용한다.
     private static final String CI_HASH_1234567890 =
             "71e9474f56472fabcc6fc9daf7008e17d92f11dffc705e7c542147ac5eb1e87a";
-    private static final String CI_HASH_5555555555 =
-            "2952fad00678028cbcceedb02f32745939a9c38e35330babb76cc607818f5a3f";
     private static final String CI_HASH_9999999999 =
             "00f5bd77a441d1d2b1a15cc14402e1cb6888ead3c017443fb20875b28f341497";
 
@@ -122,7 +119,7 @@ class AuthServiceImplTest {
     private IdentityVerificationProvider identityVerificationProvider;
 
     @Mock
-    private SignupVerificationStore signupVerificationStore;
+    private MockPassStore mockPassStore;
 
     @Mock
     private WalletService walletService;
@@ -138,20 +135,19 @@ class AuthServiceImplTest {
 
     // 실제 JWT Provider — 토큰 발급/검증은 Mock 대신 실제 구현으로 검증한다
     private JwtTokenProvider jwtTokenProvider;
-    private SignupTokenProvider signupTokenProvider;
 
     private AuthService authService;
 
     // 상태형 Mock 의 백킹 저장소 — Mockito Answer 로 수동 Fake 를 대체한다
-    // (signupVerificationStore.data / refreshTokenStore.saved / loginFailCounter.counts 에 대응)
-    private final Map<String, SignupVerificationData> savedSignupData = new HashMap<>();
+    // (mockPassStore.sessions / refreshTokenStore.saved / loginFailCounter.counts 에 대응)
+    private final Map<String, MockPassSession> savedMockPassSessions = new HashMap<>();
     private final Map<Long, String> savedRefreshTokens = new HashMap<>();
     private final Map<Long, Integer> failCounts = new HashMap<>();
     private final Map<String, Long> savedPasswordResetTokens = new HashMap<>();
 
     @BeforeAll
     static void setUpAesKey() {
-        // verifyIdentity 가 내부에서 PersonalDataCipher.encrypt() 를 호출하므로
+        // signup 이 내부에서 PersonalDataCipher.encrypt() 를 호출하므로
         // 실행 환경(AES 환경변수)과 무관하게 동작하도록 키를 주입한다
         System.setProperty("personal.data.aes.key", TEST_AES_KEY);
         PersonalDataCipher.reloadKey();
@@ -186,12 +182,10 @@ class AuthServiceImplTest {
     @BeforeEach
     void setUp() {
         jwtTokenProvider = new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160);
-        signupTokenProvider = new SignupTokenProvider(TEST_JWT_SECRET, 10);
         authService = new AuthServiceImpl(
                 authMapper,
                 identityVerificationProvider,
-                signupTokenProvider,
-                signupVerificationStore,
+                mockPassStore,
                 walletService,
                 jwtTokenProvider,
                 refreshTokenStore,
@@ -199,18 +193,21 @@ class AuthServiceImplTest {
                 passwordResetTokenStore
         );
 
-        // SignupVerificationStore 상태형 Mock — 저장/조회/삭제를 인메모리 맵으로 흉내낸다
-        // (기존 InMemorySignupVerificationStore 를 Mockito Answer 로 대체)
+        // MockPassStore 상태형 Mock — 저장/조회/사용완료를 인메모리 맵으로 흉내낸다
+        // (Redis mock:pass:{identityVerificationId} 구현을 Mockito Answer 로 대체)
         lenient().doAnswer(invocation -> {
-            savedSignupData.put(invocation.getArgument(0), invocation.getArgument(1));
+            savedMockPassSessions.put(invocation.getArgument(0), invocation.getArgument(1));
             return null;
-        }).when(signupVerificationStore).save(anyString(), any(SignupVerificationData.class));
-        lenient().when(signupVerificationStore.find(anyString()))
-                .thenAnswer(invocation -> savedSignupData.get(invocation.getArgument(0)));
+        }).when(mockPassStore).save(anyString(), any(MockPassSession.class));
+        lenient().when(mockPassStore.find(anyString()))
+                .thenAnswer(invocation -> savedMockPassSessions.get(invocation.getArgument(0)));
         lenient().doAnswer(invocation -> {
-            savedSignupData.remove(invocation.getArgument(0));
+            MockPassSession session = savedMockPassSessions.get(invocation.getArgument(0));
+            if (session != null) {
+                session.setUsed(true);
+            }
             return null;
-        }).when(signupVerificationStore).delete(anyString());
+        }).when(mockPassStore).markUsed(anyString());
 
         // RefreshTokenStore 상태형 Mock — Redis 세션을 인메모리 맵으로 흉내낸다
         // (기존 FakeRefreshTokenStore 를 Mockito Answer 로 대체)
@@ -261,7 +258,11 @@ class AuthServiceImplTest {
                 });
     }
 
-    /** Mock IdentityVerificationProvider 결과 — 실제 Mock 구현체와 동일한 규칙으로 CI/name/phone 을 만든다 */
+    /**
+     * Mock IdentityVerificationProvider 결과 — 실제 Mock 구현체(세션 복호화)와 동일한 규칙으로 만든다.
+     * - CI 는 MockPassService 가 세션에 저장한 값 (실제 구현은 세션에서 복호화하지만,
+     *   서비스 단위 테스트에서는 Provider 를 Mock 하므로 이 규칙을 그대로 사용한다)
+     */
     private IdentityVerificationResult mockProviderResult(String identityVerificationId) {
         return IdentityVerificationResult.builder()
                 .ci("MOCK-CI-" + identityVerificationId)
@@ -336,116 +337,6 @@ class AuthServiceImplTest {
         assertNotNull(result);
         assertNotNull(result.getTermsList());
         assertTrue(result.getTermsList().isEmpty());
-    }
-
-    // ---------- 본인인증 검증 ----------
-
-    @Test
-    @DisplayName("본인인증 성공 - 회원가입 전용 JWT(identityToken)와 name 반환 + 임시 데이터 Redis 저장")
-    void verifyIdentity_success() {
-        // Given — Provider 는 인증 성공 결과를 반환하고, CI 중복은 없다
-        when(identityVerificationProvider.verify("imp_ver_1234567890"))
-                .thenReturn(mockProviderResult("imp_ver_1234567890"));
-        when(authMapper.countByCiHash(CI_HASH_1234567890)).thenReturn(0);
-
-        // When
-        IdentityVerificationResponseDTO result = authService.verifyIdentity("imp_ver_1234567890");
-
-        // Then
-        assertNotNull(result);
-        assertEquals("홍길동", result.getName());
-
-        // identityToken 은 JWT 형식 (헤더.페이로드.서명 3부분)
-        String token = result.getIdentityToken();
-        assertNotNull(token);
-        assertEquals(3, token.split("\\.").length);
-
-        // Payload 검증 — 회원가입용 claims 만 포함 (개인정보 없음)
-        Claims claims = signupTokenProvider.verifySignupToken(token);
-        assertEquals(SignupTokenProvider.SUBJECT_SIGNUP_VERIFICATION, claims.getSubject());
-        assertFalse(claims.containsKey("name"));
-        assertFalse(claims.containsKey("phoneNumber"));
-        assertFalse(claims.containsKey("ci"));
-        assertFalse(claims.containsKey("encryptedCi"));
-
-        // Redis(상태형 Mock 저장소)에 저장된 임시 데이터 검증
-        String temporaryUserKey = claims.get("temporaryUserKey", String.class);
-        SignupVerificationData saved = signupVerificationStore.find(temporaryUserKey);
-        assertNotNull(saved);
-        assertEquals("imp_ver_1234567890", saved.getVerificationId());
-        assertEquals(CI_HASH_1234567890, saved.getCiHash());
-
-        // CI 는 원문이 아닌 AES 암호화본만 저장된다
-        assertFalse(saved.getEncryptedCi().contains("MOCK-CI-"));
-        assertEquals("MOCK-CI-imp_ver_1234567890",
-                PersonalDataCipher.decrypt(saved.getEncryptedCi()));
-
-        // name 도 암호화본만 저장된다 (개인정보 원문 Redis 저장 금지)
-        assertNotEquals("홍길동", saved.getEncryptedName());
-        assertEquals("홍길동", PersonalDataCipher.decrypt(saved.getEncryptedName()));
-
-        // phone 도 암호화본만 저장된다 (원문 Redis 저장 금지)
-        assertNotEquals(MOCK_PHONE_NUMBER, saved.getEncryptedPhone());
-        assertEquals(MOCK_PHONE_NUMBER, PersonalDataCipher.decrypt(saved.getEncryptedPhone()));
-    }
-
-    @Test
-    @DisplayName("본인인증 실패 - 유효하지 않은 인증 ID는 예외 발생")
-    void verifyIdentity_invalidId_throws() {
-        // Given — Provider 는 유효하지 않은 인증 ID 를 거부한다
-        when(identityVerificationProvider.verify("invalid"))
-                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
-
-        // When & Then
-        assertThrows(BusinessException.class,
-                () -> authService.verifyIdentity("invalid"));
-        assertThrows(BusinessException.class,
-                () -> authService.verifyIdentity(""));
-        assertThrows(BusinessException.class,
-                () -> authService.verifyIdentity(null));
-    }
-
-    @Test
-    @DisplayName("중복 가입 - 동일 CI로 이미 가입한 회원이 있으면 DUPLICATE_USER 예외 발생")
-    void verifyIdentity_duplicateUser_throws() {
-        // Given — 동일 CI(SHA-256 해시) 로 이미 가입된 회원이 있다
-        // Mock Provider 는 CI = "MOCK-CI-" + identityVerificationId 를 반환한다.
-        when(identityVerificationProvider.verify("imp_ver_9999999999"))
-                .thenReturn(mockProviderResult("imp_ver_9999999999"));
-        when(authMapper.countByCiHash(CI_HASH_9999999999)).thenReturn(1);
-
-        // When
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.verifyIdentity("imp_ver_9999999999"));
-
-        // Then
-        assertEquals(AuthErrorCode.DUPLICATE_USER, ex.getErrorCode());
-
-        // 중복 감지 시 임시 데이터가 저장되지 않아야 한다
-        assertTrue(savedSignupData.isEmpty());
-    }
-
-    @Test
-    @DisplayName("중복 미해당 - CI가 없으면 정상 진행, JWT와 임시 데이터 저장 확인")
-    void verifyIdentity_noDuplicate_success() {
-        // Given — CI 중복이 없다
-        when(identityVerificationProvider.verify("imp_ver_5555555555"))
-                .thenReturn(mockProviderResult("imp_ver_5555555555"));
-        when(authMapper.countByCiHash(CI_HASH_5555555555)).thenReturn(0);
-
-        // When
-        IdentityVerificationResponseDTO result = authService.verifyIdentity("imp_ver_5555555555");
-
-        // Then
-        assertNotNull(result);
-        assertEquals(3, result.getIdentityToken().split("\\.").length);
-
-        Claims claims = signupTokenProvider.verifySignupToken(result.getIdentityToken());
-
-        SignupVerificationData saved =
-                signupVerificationStore.find(claims.get("temporaryUserKey", String.class));
-        assertNotNull(saved);
-        assertEquals(CI_HASH_5555555555, saved.getCiHash());
     }
 
     // ---------- 아이디 찾기 ----------
@@ -649,36 +540,108 @@ class AuthServiceImplTest {
         return sb.toString();
     }
 
+    // ---------- 회원가입 본인인증 검증 및 회원 중복 체크 (verify-identity) ----------
+
+    @Test
+    @DisplayName("본인인증 검증 성공 - 중복 회원이 없으면 화면 표시용 name 반환")
+    void verifyIdentity_success() {
+        // Given — 유효한 Mock PASS 세션 + 동일 CI 로 가입한 회원 없음
+        stubVerifiedSession("imp_ver_1234567890");
+        when(authMapper.countByCiHash(CI_HASH_1234567890)).thenReturn(0);
+
+        // When
+        VerifyIdentityResponseDTO result =
+                authService.verifyIdentityForSignup("imp_ver_1234567890");
+
+        // Then — 화면 표시용 이름만 반환 (개인정보 미포함)
+        assertNotNull(result);
+        assertEquals("홍길동", result.getName());
+
+        // CI hash 로 중복 조회했는지 검증 (원문 CI 조회 금지)
+        verify(authMapper).countByCiHash(CI_HASH_1234567890);
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - 인증 ID 누락/빈 값 → INVALID_VERIFICATION_ID")
+    void verifyIdentity_blankId_throws() {
+        // When & Then — Provider 호출 없이 Service Layer 에서 즉시 거부
+        assertThrows(BusinessException.class, () -> authService.verifyIdentityForSignup(null));
+        assertThrows(BusinessException.class, () -> authService.verifyIdentityForSignup(""));
+        assertThrows(BusinessException.class, () -> authService.verifyIdentityForSignup("   "));
+        verify(identityVerificationProvider, never()).verify(any());
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - PASS 인증 실패 → INVALID_VERIFICATION_ID")
+    void verifyIdentity_invalidVerification_throws() {
+        // Given — Provider 가 인증 실패를 던진다
+        when(identityVerificationProvider.verify("invalid"))
+                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyIdentityForSignup("invalid"));
+
+        // Then
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
+        // 인증 실패 시 중복 조회가 발생하지 않아야 한다
+        verify(authMapper, never()).countByCiHash(anyString());
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - 동일 휴대폰(CI) 으로 이미 가입한 회원 → DUPLICATE_USER")
+    void verifyIdentity_duplicateUser_throws() {
+        // Given — 유효한 Mock PASS 세션 + 동일 CI 해시가 이미 가입된 상태 (동일 휴대폰 = 동일 CI)
+        stubVerifiedSession("imp_ver_1234567890");
+        when(authMapper.countByCiHash(CI_HASH_1234567890)).thenReturn(1);
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyIdentityForSignup("imp_ver_1234567890"));
+
+        // Then
+        assertEquals(AuthErrorCode.DUPLICATE_USER, ex.getErrorCode());
+        // 세션은 사용 완료 처리되지 않고 남아 있어야 한다 (회원가입 진행 불가 상태)
+        verify(mockPassStore, never()).markUsed(anyString());
+    }
+
     // ---------- 최종 회원가입 완료 ----------
 
     /** 회원가입 요청 DTO 생성 헬퍼 — 기본값으로 필수 약관(1, 2) 전체 동의 상태를 만든다 */
-    private SignupRequestDTO signupRequest(String identityToken, String email) {
-        return signupRequest(identityToken, email, Arrays.asList(1L, 2L));
+    private SignupRequestDTO signupRequest(String identityVerificationId, String email) {
+        return signupRequest(identityVerificationId, email, Arrays.asList(1L, 2L));
     }
 
     /** 회원가입 요청 DTO 생성 헬퍼 — 동의 약관 ID 목록 지정 */
-    private SignupRequestDTO signupRequest(String identityToken, String email,
+    private SignupRequestDTO signupRequest(String identityVerificationId, String email,
                                            List<Long> agreedTermsIds) {
         SignupRequestDTO request = new SignupRequestDTO();
-        request.setIdentityToken(identityToken);
+        request.setIdentityVerificationId(identityVerificationId);
         request.setEmail(email);
         request.setPassword("password123!");
         request.setAgreedTermsIds(agreedTermsIds);
         return request;
-    }
-
-    /**
-     * verifyIdentity 를 거쳐 발급된 유효한 identityToken 을 만든다.
-     * - Provider 성공 결과와 CI 중복 없음 상태를 Stub 한 뒤 실제 verifyIdentity 를 호출하므로
-     *   토큰의 temporaryUserKey 에 대응하는 임시 데이터가 상태형 저장소에 저장된다
+    }    /**
+     * 유효한 Mock PASS 세션(VERIFIED, used=false) 이 Redis 에 존재하는 상황을 만든다.
+     * - 백엔드가 POST /auth/pass 에서 생성한 세션과 동일한 구조로 보관하고,
+     *   Provider 는 세션 복호화 결과(CI/name/phone)를 반환하도록 Stub 한다.
+     *   (signup 은 이 세션을 기반으로 검증/복원한다)
      */
-    private String issueValidIdentityToken() {
-        when(identityVerificationProvider.verify("imp_ver_1234567890"))
-                .thenReturn(mockProviderResult("imp_ver_1234567890"));
-        when(authMapper.countByCiHash(CI_HASH_1234567890)).thenReturn(0);
-        IdentityVerificationResponseDTO result =
-                authService.verifyIdentity("imp_ver_1234567890");
-        return result.getIdentityToken();
+    private void stubVerifiedSession(String identityVerificationId) {
+        // Redis(mock:pass:{id}) — 개인정보는 AES 암호화본만 저장 (지식 규칙 준수)
+        MockPassSession session = MockPassSession.builder()
+                .identityVerificationId(identityVerificationId)
+                .status(MockPassStatus.VERIFIED.name())
+                .encryptedName(PersonalDataCipher.encrypt("홍길동"))
+                .encryptedPhone(PersonalDataCipher.encrypt(mockPhoneNumber(identityVerificationId)))
+                .encryptedCi(PersonalDataCipher.encrypt("MOCK-CI-" + identityVerificationId))
+                .used(false)
+                .build();
+        savedMockPassSessions.put(identityVerificationId, session);
+
+        // Provider 는 세션 복호화 결과를 반환한다 (MockIdentityVerificationProvider 동작)
+        when(identityVerificationProvider.verify(identityVerificationId))
+                .thenReturn(mockProviderResult(identityVerificationId));
     }
 
     /**
@@ -692,16 +655,16 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("정상 회원가입 - users/user_auth/user_profile insert + 지갑 생성 + Redis 삭제 + 자동 로그인 토큰 발급")
+    @DisplayName("정상 회원가입 - 세션 복원 후 insert + 지갑 생성 + 세션 사용 완료 + 자동 로그인 토큰 발급")
     void signup_success() {
-        // Given — 유효한 인증 토큰 + 중복 없음 + 약관 마스터 정상
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 중복 없음 + 약관 마스터 정상
+        stubVerifiedSession("imp_ver_1234567890");
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When — 자동 로그인으로 LoginResponseDTO 반환
-        LoginResponseDTO result = authService.signup(signupRequest(token, "test@example.com"));
+        LoginResponseDTO result = authService.signup(signupRequest("imp_ver_1234567890", "test@example.com"));
 
-        // Then — users insert 검증
+        // Then — users insert 검증 (Mock PASS 세션에서 복원한 name/phone 저장)
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
         verify(authMapper).insertUser(userCaptor.capture());
         UserVO user = userCaptor.getValue();
@@ -721,10 +684,10 @@ class AuthServiceImplTest {
         verify(authMapper).insertUserAuth(userAuthCaptor.capture());
         UserAuthVO userAuth = userAuthCaptor.getValue();
         assertEquals(user.getId(), userAuth.getUserId());
-        // password 는 BCrypt 해시 (원문과 다르고 matches 검증 통과)
+        // password 는 BCrypt 해시 (원문과 다르고 matches 검증 통과 — AES 암호화 금지)
         assertNotEquals("password123!", userAuth.getPasswordHash());
         assertTrue(PasswordEncryptor.matches("password123!", userAuth.getPasswordHash()));
-        // CI hash / encrypt
+        // CI hash / encrypt (세션에서 복원한 CI 재암호화 저장)
         assertEquals(CI_HASH_1234567890, userAuth.getIdentityCiHash());
         assertEquals("MOCK-CI-imp_ver_1234567890",
                 PersonalDataCipher.decrypt(userAuth.getIdentityCiEncrypt()));
@@ -742,8 +705,9 @@ class AuthServiceImplTest {
         // 전자지갑 생성 검증
         verify(walletService).createWallet(user.getId());
 
-        // 회원가입 완료 후 Redis 임시 데이터 삭제 검증
-        assertTrue(savedSignupData.isEmpty());
+        // Mock PASS 세션 사용 완료 처리 검증 (1회성 — 같은 identityVerificationId 재사용 방지)
+        verify(mockPassStore).markUsed("imp_ver_1234567890");
+        assertTrue(savedMockPassSessions.get("imp_ver_1234567890").isUsed());
 
         // 자동 로그인 검증 (knowledge.md Signup Flow — 별도 로그인 API 호출 없이 토큰 발급)
         assertNotNull(result);
@@ -763,16 +727,34 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("CI 중복 실패 - 최종 가입 시점에 동일 CI 가입자가 있으면 DUPLICATE_USER")
+    @DisplayName("인증 세션 검증 실패 - 유효하지 않은 identityVerificationId 는 INVALID_VERIFICATION_ID")
+    void signup_invalidSession_throws() {
+        // Given — 존재하지 않거나 만료/사용 완료된 인증 세션 (Provider 가 거부)
+        //   (세션 없음/TTL 만료/PENDING/used=true 는 Provider 검증 — MockIdentityVerificationProviderTest 참고)
+        when(identityVerificationProvider.verify("invalid-id"))
+                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
+
+        // When — 임의의(백엔드 미발급) identityVerificationId
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest("invalid-id", "test@example.com")));
+
+        // Then
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
+        // 어떤 insert / 세션 사용 완료 처리도 발생하지 않아야 한다
+        verify(authMapper, never()).insertUser(any(UserVO.class));
+        verify(mockPassStore, never()).markUsed(anyString());
+    }
+
+    @Test
+    @DisplayName("CI 중복 실패 - 동일 CI 로 이미 가입한 회원이 있으면 DUPLICATE_USER")
     void signup_duplicateCi_throws() {
-        // Given — verifyIdentity 단계를 통과한 뒤, 동일 CI 해시가 이미 가입된 상태로 변경
-        String token = issueValidIdentityToken();
-        // (Mockito 연속 Stub 큐잉: verifyIdentity 중 조회는 0, signup 중 재검증은 1 이 반환된다)
+        // Given — 유효한 Mock PASS 세션, 동일 CI 해시가 이미 가입된 상태
+        stubVerifiedSession("imp_ver_1234567890");
         when(authMapper.countByCiHash(CI_HASH_1234567890)).thenReturn(1);
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com")));
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.DUPLICATE_USER, ex.getErrorCode());
@@ -781,116 +763,39 @@ class AuthServiceImplTest {
         verify(authMapper, never()).insertUser(any(UserVO.class));
         verify(authMapper, never()).insertUserAuth(any(UserAuthVO.class));
         verify(authMapper, never()).insertUserProfile(any(UserProfileVO.class));
-        // Redis 데이터는 삭제되지 않고 남아 있어야 재시도 가능
-        assertFalse(savedSignupData.isEmpty());
+        // 세션은 사용 완료 처리되지 않고 남아 있어야 재시도 가능
+        verify(mockPassStore, never()).markUsed(anyString());
     }
 
     @Test
     @DisplayName("이메일 중복 실패 - 동일 email_hash 가 있으면 DUPLICATE_EMAIL")
     void signup_duplicateEmail_throws() {
-        // Given — 동일 email_hash 가 이미 가입된 상태
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 동일 email_hash 가 이미 가입된 상태
+        stubVerifiedSession("imp_ver_1234567890");
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(1);
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com")));
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com")));
 
         // Then
         assertEquals(AuthErrorCode.DUPLICATE_EMAIL, ex.getErrorCode());
         verify(authMapper, never()).insertUser(any(UserVO.class));
+        verify(mockPassStore, never()).markUsed(anyString());
     }
 
     @Test
-    @DisplayName("JWT 만료 - 만료된 identityToken 은 EXPIRED_SIGNUP_TOKEN")
-    void signup_expiredToken_throws() {
-        // Given — verifyIdentity 는 유효한 임시 데이터를 저장하지만, 토큰은 과거 만료 시각으로 발급한다
-        SignupVerificationData data = SignupVerificationData.builder()
-                .verificationId("imp_ver_1234567890")
-                .ciHash(CI_HASH_1234567890)
-                .encryptedCi(PersonalDataCipher.encrypt("MOCK-CI-imp_ver_1234567890"))
-                .encryptedName(PersonalDataCipher.encrypt("홍길동"))
-                .encryptedPhone(PersonalDataCipher.encrypt(MOCK_PHONE_NUMBER))
-                .build();
-        signupVerificationStore.save("expired-key", data);
-
-        String expiredToken = signupTokenProvider.issue("expired-key",
-                new Date(System.currentTimeMillis() - 60_000L));
-
-        // When
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(expiredToken, "test@example.com")));
-
-        // Then
-        assertEquals(AuthErrorCode.EXPIRED_SIGNUP_TOKEN, ex.getErrorCode());
-    }
-
-    @Test
-    @DisplayName("JWT 위변조 - 서명이 틀린 identityToken 은 INVALID_SIGNUP_TOKEN")
-    void signup_tamperedToken_throws() {
-        // Given — 유효한 토큰을 발급받아 위변조한다
-        String token = issueValidIdentityToken();
-        // 끝에서 두 번째 base64 글자를 바꾼다.
-        // 마지막 글자는 256비트 서명의 패딩 비트만 담고 있어 'a'→'b' 교체 시
-        // 복호화된 서명이 동일해질 수 있어(플레이크) 반드시 유효 비트를 바꾸는 위치를 사용한다
-        String tampered = token.substring(0, token.length() - 2)
-                + (token.charAt(token.length() - 2) == 'a' ? "b" : "a")
-                + token.charAt(token.length() - 1);
-
-        // When
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(tampered, "test@example.com")));
-
-        // Then
-        assertEquals(AuthErrorCode.INVALID_SIGNUP_TOKEN, ex.getErrorCode());
-    }
-
-    @Test
-    @DisplayName("용도 오류 - 회원가입 전용 토큰이 아닌 JWT(sub 불일치)는 INVALID_SIGNUP_TOKEN")
-    void signup_wrongSubjectToken_throws() {
-        // Given — 같은 시크릿으로 서명했지만 sub 만 다른 토큰 (회원가입 토큰 오용 방지 검증)
-        String otherToken = Jwts.builder()
-                .setSubject("access-token")
-                .claim("temporaryUserKey", "temp-key-1")
-                .setExpiration(new Date(System.currentTimeMillis() + 60_000L))
-                .signWith(Keys.hmacShaKeyFor(TEST_JWT_SECRET.getBytes(StandardCharsets.UTF_8)),
-                        SignatureAlgorithm.HS256)
-                .compact();
-
-        // When
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(otherToken, "test@example.com")));
-
-        // Then
-        assertEquals(AuthErrorCode.INVALID_SIGNUP_TOKEN, ex.getErrorCode());
-    }
-
-    @Test
-    @DisplayName("Redis 데이터 없음 - 토큰은 유효하지만 임시 데이터가 없으면 SIGNUP_VERIFICATION_NOT_FOUND")
-    void signup_verificationNotFound_throws() {
-        // Given — 임시 데이터 저장 없이 유효한 토큰만 발급한다
-        String token = signupTokenProvider.issue("no-data-key");
-
-        // When
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com")));
-
-        // Then
-        assertEquals(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND, ex.getErrorCode());
-        verify(authMapper, never()).insertUser(any(UserVO.class));
-    }
-
-    @Test
-    @DisplayName("필수 값 누락 - identityToken/email/password 누락은 INVALID_SIGNUP_REQUEST")
+    @DisplayName("필수 값 누락 - identityVerificationId/email/password 누락은 INVALID_SIGNUP_REQUEST")
     void signup_missingRequired_throws() {
-        // When & Then — identityToken 누락
+        // When & Then — identityVerificationId 누락 (Provider 호출 전에 Service Layer 에서 차단)
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> authService.signup(signupRequest("", "test@example.com")));
         assertEquals(AuthErrorCode.INVALID_SIGNUP_REQUEST, ex.getErrorCode());
+        verify(identityVerificationProvider, never()).verify(anyString());
 
         // email 누락
         assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest("some-token", "")));
+                () -> authService.signup(signupRequest("some-id", "")));
 
         // null 요청
         assertThrows(BusinessException.class, () -> authService.signup(null));
@@ -899,12 +804,12 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("이메일 형식 오류 - 잘못된 이메일은 INVALID_EMAIL_FORMAT")
     void signup_invalidEmailFormat_throws() {
-        // Given — 유효한 인증 토큰
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션
+        stubVerifiedSession("imp_ver_1234567890");
 
         // When — 잘못된 이메일 형식은 hash/DB 조회 전에 차단된다
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "not-an-email")));
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "not-an-email")));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());
@@ -913,14 +818,14 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - 모든 필수 약관 동의 시 가입 성공 + 약관 동의 저장 (필수 + 선택)")
     void signup_allRequiredTermsAgreed_success() {
-        // Given — 유효한 인증 토큰 + 필수(1, 2) + 선택(3) 전부 동의 상태
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 필수(1, 2) + 선택(3) 전부 동의 상태
+        stubVerifiedSession("imp_ver_1234567890");
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L, 3L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
 
         // When
-        authService.signup(signupRequest(token, "test@example.com",
+        authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                 Arrays.asList(1L, 2L, 3L)));
 
         // Then — 동의한 약관이 그대로 저장된다
@@ -933,15 +838,15 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - 필수 약관 일부 누락 시 MISSING_REQUIRED_TERMS")
     void signup_missingRequiredTerms_throws() {
-        // Given — 유효한 인증 토큰 + 필수 약관 2 번을 누락하고 1 번만 동의
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 필수 약관 2 번을 누락하고 1 번만 동의
+        stubVerifiedSession("imp_ver_1234567890");
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Collections.singletonList(1L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com",
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                         Collections.singletonList(1L))));
 
         // Then
@@ -957,15 +862,15 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - 존재하지 않는 약관 ID 포함 시 INVALID_TERM_ID")
     void signup_invalidTermId_throws() {
-        // Given — 유효한 인증 토큰 + 필수(1, 2)는 동의했지만 terms 에 존재하지 않는 99 번이 섞여 있음
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 필수(1, 2)는 동의했지만 terms 에 존재하지 않는 99 번이 섞여 있음
+        stubVerifiedSession("imp_ver_1234567890");
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
         // 존재하는 약관은 1, 2 만 조회되므로 입력([1, 2, 99])과 크기가 달라진다
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com",
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                         Arrays.asList(1L, 2L, 99L))));
 
         // Then
@@ -979,8 +884,8 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - null 요소 포함 시에도 INVALID_TERM_ID")
     void signup_nullTermId_throws() {
-        // Given — 유효한 인증 토큰 + [1, 2, null] — null 요소는 terms 에 존재할 수 없다
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + [1, 2, null] — null 요소는 terms 에 존재할 수 없다
+        stubVerifiedSession("imp_ver_1234567890");
         when(authMapper.countByEmailHash(EMAIL_HASH_TEST)).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
 
@@ -988,7 +893,7 @@ class AuthServiceImplTest {
 
         // When
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com",
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                         agreedWithNull)));
 
         // Then
@@ -999,12 +904,12 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - 선택 약관 미동의 시에도 가입 성공")
     void signup_optionalTermsNotAgreed_success() {
-        // Given — 유효한 인증 토큰 + 필수(1, 2)만 동의하고 선택(3)은 미동의
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 필수(1, 2)만 동의하고 선택(3)은 미동의
+        stubVerifiedSession("imp_ver_1234567890");
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When
-        authService.signup(signupRequest(token, "test@example.com",
+        authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                 Arrays.asList(1L, 2L)));
 
         // Then
@@ -1017,17 +922,17 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - agreedTermsIds 누락/빈 배열 시 MISSING_REQUIRED_TERMS")
     void signup_agreedTermsMissing_throws() {
-        // Given — 유효한 인증 토큰
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션
+        stubVerifiedSession("imp_ver_1234567890");
 
         // When & Then — null
         BusinessException nullEx = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com", null)));
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com", null)));
         assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, nullEx.getErrorCode());
 
         // 빈 배열
         BusinessException emptyEx = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, "test@example.com",
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                         Collections.emptyList())));
         assertEquals(AuthErrorCode.MISSING_REQUIRED_TERMS, emptyEx.getErrorCode());
 
@@ -1038,12 +943,12 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("약관 동의 - 중복 ID 전달 시 중복 제거 후 저장")
     void signup_duplicateTermIds_deduplicated() {
-        // Given — 유효한 인증 토큰 + 중복 ID([1, 1, 2, 2]) 전달
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 중복 ID([1, 1, 2, 2]) 전달
+        stubVerifiedSession("imp_ver_1234567890");
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When
-        authService.signup(signupRequest(token, "test@example.com",
+        authService.signup(signupRequest("imp_ver_1234567890", "test@example.com",
                 Arrays.asList(1L, 1L, 2L, 2L)));
 
         // Then — 중복이 제거된 [1, 2] 만 저장된다
@@ -1056,12 +961,12 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("이메일 소문자 정규화 - 대문자 이메일도 소문자 hash 로 저장된다")
     void signup_emailLowercased() {
-        // Given — 유효한 인증 토큰 + 중복 없음
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 중복 없음
+        stubVerifiedSession("imp_ver_1234567890");
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
         // When — 대문자 이메일로 가입
-        authService.signup(signupRequest(token, "TEST@EXAMPLE.COM"));
+        authService.signup(signupRequest("imp_ver_1234567890", "TEST@EXAMPLE.COM"));
 
         // Then — SHA-256("test@example.com") 과 동일해야 한다 (소문자 정규화)
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
@@ -1074,15 +979,15 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("회원가입 완료 - 최대 길이(254자) 이메일 정상 가입 (trim/lowercase 후 암호화·hash 저장)")
     void signup_emailMaxLength_success() {
-        // Given — 유효한 인증 토큰 + 최대 길이 이메일
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션 + 최대 길이 이메일
+        stubVerifiedSession("imp_ver_1234567890");
         String maxLengthEmail = buildLongEmail(254);
         when(authMapper.countByEmailHash(anyString())).thenReturn(0);
         when(authMapper.selectExistingTermIds(anyList())).thenReturn(Arrays.asList(1L, 2L));
         when(authMapper.selectRequiredTermsIds()).thenReturn(Arrays.asList(1L, 2L));
 
         // When
-        authService.signup(signupRequest(token, maxLengthEmail));
+        authService.signup(signupRequest("imp_ver_1234567890", maxLengthEmail));
 
         // Then
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
@@ -1099,12 +1004,12 @@ class AuthServiceImplTest {
     @Test
     @DisplayName("회원가입 완료 - 255자 이상 이메일 → INVALID_EMAIL_FORMAT + hash 조회/insert 미발생")
     void signup_emailTooLong_throws() {
-        // Given — 유효한 인증 토큰
-        String token = issueValidIdentityToken();
+        // Given — 유효한 Mock PASS 세션
+        stubVerifiedSession("imp_ver_1234567890");
 
         // When — 255자 이상 이메일은 검증 단계에서 차단된다
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.signup(signupRequest(token, buildLongEmail(255))));
+                () -> authService.signup(signupRequest("imp_ver_1234567890", buildLongEmail(255))));
 
         // Then
         assertEquals(AuthErrorCode.INVALID_EMAIL_FORMAT, ex.getErrorCode());

@@ -3,26 +3,28 @@ package com.workit.domain.auth.dto.response;
 import lombok.Builder;
 import lombok.Getter;
 
-// Mock PASS 인증 상태 응답 (verify / status / cancel 공용)
-// POST /api/v1/auth/pass/verify
-// GET  /api/v1/auth/pass/{identityVerificationId}
-// POST /api/v1/auth/pass/{identityVerificationId}/cancel
+// Mock PASS 인증 응답
+// POST /api/v1/auth/pass
 //
 // - status: PENDING | VERIFIED | FAILED | CANCELLED (MockPassStatus)
-// - name: VERIFIED 상태에서만 사용자 이름을 함께 반환 (화면 표시용 — 본인이 입력한 값)
+// - 개인정보(name/phoneNumber/CI)는 응답에 포함하지 않는다.
+//   프론트는 발급받은 identityVerificationId 만 보관하고,
+//   회원가입/아이디 찾기 등 후속 API 에 identityVerificationId 만 전달하면
+//   백엔드가 Redis 세션에서 인증 정보를 복원한다.
 @Getter
 @Builder
 public class MockPassStatusResponseDTO {
 
+    /** Mock PASS 인증 고유 번호 — MockPassService 가 생성해 프론트에 발급한다 */
     private String identityVerificationId;
-    private String status;
-    private String name;
 
-    public static MockPassStatusResponseDTO of(String identityVerificationId, String status, String name) {
+    /** 인증 상태 (VERIFIED) */
+    private String status;
+
+    public static MockPassStatusResponseDTO of(String identityVerificationId, String status) {
         return MockPassStatusResponseDTO.builder()
                 .identityVerificationId(identityVerificationId)
                 .status(status)
-                .name(name)
                 .build();
     }
 }

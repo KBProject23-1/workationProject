@@ -20,21 +20,21 @@ import java.util.Date;
 // - Refresh Token: Access Token 재발급, 긴 만료(기본 14일), HttpOnly Cookie 저장 예정
 //                  (Provider 는 Token 생성만 담당 — Cookie 생성은 로그인 API 단계에서 처리)
 //
-// SignupTokenProvider(회원가입 전용 임시 토큰)와 역할이 분리되어 있다.
-// - SignupTokenProvider: 회원가입 플로우의 임시 인증 토큰 (sub = signup-verification)
+// Access Token(인증용) / Refresh Token(세션 유지용) 이렇게 두 종류의 JWT 를 관리한다.
+// - 회원가입 플로우는 별도 임시 토큰 없이 Mock PASS 세션(identityVerificationId) 으로 처리한다
 // - JwtTokenProvider    : 로그인 이후 인증 토큰 (sub = userId, tokenType = ACCESS/REFRESH)
 //
 // Claim 정책 (knowledge.md JWT Rules — Payload 최소화, 개인정보 금지):
 //   sub      : userId (Long → String)
 //   role     : 권한 (DB role 컬럼 도입 전까지 DEFAULT_ROLE = "ROLE_USER" 사용)
 //   tokenType: 토큰 용도 구분 (ACCESS / REFRESH) — Refresh Token 이 Access Token 으로
-//              오용되는 것을 차단하기 위해 추가 (SignupTokenProvider 의 sub 용도 구분 패턴과 동일)
+//              오용되는 것을 차단하기 위해 추가 (토큰 종류 구분 sub 패턴)
 //   iat / exp: 발급/만료 시각
 //
 // 절대 포함 금지 (knowledge.md Personal Information Policy):
 //   password, pin, email, phoneNumber, CI 및 기타 개인정보는 Payload 에 넣지 않는다.
 //
-// Secret 관리 (SignupTokenProvider 와 동일 정책):
+// Secret 관리:
 //   - 하드코딩 금지 — application-secret.properties 의 jwt.secret 값을 우선 사용
 //   - 값이 없으면 환경변수 JWT_SECRET 로 대체, 둘 다 없으면 fail-fast
 //   - HS256 서명이므로 최소 32바이트(256-bit) 키 필요
@@ -53,7 +53,7 @@ public class JwtTokenProvider {
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_TOKEN_TYPE = "tokenType";
 
-    /** JWT 시크릿 프로퍼티 키 (application-secret.properties, gitignored) — SignupTokenProvider 와 공유 */
+    /** JWT 시크릿 프로퍼티 키 (application-secret.properties, gitignored) */
     public static final String JWT_SECRET_PROPERTY = "jwt.secret";
 
     /** Access Token 만료(분) 프로퍼티 키 — 기본 15분 */

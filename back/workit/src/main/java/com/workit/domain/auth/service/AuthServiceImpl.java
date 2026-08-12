@@ -10,19 +10,18 @@ import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
-import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
+import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.mapper.AuthMapper;
 import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.util.EmailMasker;
 import com.workit.domain.auth.util.JwtTokenProvider;
-import com.workit.domain.auth.util.SignupTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
 import com.workit.domain.auth.vo.UserAuthVO;
 import com.workit.domain.auth.vo.UserDeviceVO;
@@ -63,8 +62,7 @@ public class AuthServiceImpl implements AuthService {
 
     private final AuthMapper authMapper;
     private final IdentityVerificationProvider identityVerificationProvider;
-    private final SignupTokenProvider signupTokenProvider;
-    private final SignupVerificationStore signupVerificationStore;
+    private final MockPassStore mockPassStore;
     private final WalletService walletService;
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenStore refreshTokenStore;
@@ -146,47 +144,33 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    // DB 는 SELECT 만 수행하지만 Redis 임시 데이터 저장(side-effect)이 있으므로
-    // readOnly=true 로 오인되지 않도록 일반 @Transactional 을 사용한다
-    @Transactional
-    public IdentityVerificationResponseDTO verifyIdentity(String identityVerificationId) {
+    @Transactional(readOnly = true)
+    public VerifyIdentityResponseDTO verifyIdentityForSignup(String identityVerificationId) {
 
-        // 0. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
-        //    null/빈 값은 Provider 에서도 검증하지만, 가입 가능 여부 판단 전에 명시적으로 처리한다
+        // 1. 요청 값 검증 — null/빈 값 → INVALID_VERIFICATION_ID(400)
+        //    (findId/signup 과 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
         if (identityVerificationId == null || identityVerificationId.trim().isEmpty()) {
             throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
         }
 
-        // 1. Provider 로 PASS 인증 결과 검증 (현재 Mock — 실패 시 BusinessException)
-        IdentityVerificationResult result = identityVerificationProvider.verify(identityVerificationId);
+        // 2. PASS 본인인증 결과 검증 → CI 추출
+        //    - 인증 실패 시 Provider 가 BusinessException(INVALID_VERIFICATION_ID) 을 던진다
+        //    - CI 는 Mock PASS 세션에 저장된 결정값(동일 휴대폰 → 동일 CI) — 원문 로그 출력 금지
+        IdentityVerificationResult result =
+                identityVerificationProvider.verify(identityVerificationId);
 
-        // 2. CI 중복 가입 검증
-        //    - CI 원문을 그대로 비교하지 않고 SHA-256 해시로 변환해 조회 (knowledge.md: 검색용 hash 저장)
-        //    - 이미 가입된 회원이면 회원가입 진행 불가 (docs: 409 DUPLICATE_USER)
+        // 3. CI SHA-256 hash 변환 → 중복 가입 회원 조회 (user_auth.identity_ci_hash UNIQUE)
+        //    - CI 원문이 아닌 hash 로만 조회한다 (knowledge.md: 검색용 hash 저장)
+        //    - 동일 휴대폰 번호(CI) 로 이미 가입한 회원이 있으면 회원가입 진행 불가
+        //      (docs: 409 DUPLICATE_USER — "이미 가입된 회원입니다. 로그인을 진행해주세요.")
         String ciHash = sha256Hex(result.getCi());
         if (authMapper.countByCiHash(ciHash) > 0) {
             throw new BusinessException(AuthErrorCode.DUPLICATE_USER);
         }
 
-        // 3. 회원가입 임시 데이터 생성 + Redis 임시 저장
-        //    - JWT Payload 에 개인정보를 담지 않는 대신, 회원가입 완료 시 복원할 데이터를
-        //      signup:verification:{temporaryUserKey} 키로 짧은 TTL 동안 보관한다
-        //    - CI/name/phone 은 원문 대신 AES-256 암호화본만 저장 (knowledge.md: Redis 회원 정보 원문 저장 금지)
-        String temporaryUserKey = UUID.randomUUID().toString();
-        SignupVerificationData verificationData = SignupVerificationData.builder()
-                .verificationId(identityVerificationId)
-                .ciHash(ciHash)
-                .encryptedCi(PersonalDataCipher.encrypt(result.getCi()))
-                .encryptedName(PersonalDataCipher.encrypt(result.getName()))
-                .encryptedPhone(PersonalDataCipher.encrypt(result.getPhoneNumber()))
-                .build();
-        signupVerificationStore.save(temporaryUserKey, verificationData);
-
-        // 4. 회원가입 전용 임시 JWT 발급 (Payload: sub, temporaryUserKey, iat, exp — 개인정보 없음)
-        String identityToken = signupTokenProvider.issue(temporaryUserKey);
-
-        // 5. 응답 생성 — API Contract 유지 (identityToken, name)
-        return IdentityVerificationResponseDTO.of(identityToken, result.getName());
+        // 4. 가입 가능 — 화면 표시용 이름만 반환 (name/phoneNumber/CI 는 signup 에 재전송하지 않는다)
+        //    - 개인정보/CI 원문 로그 출력 금지 (knowledge.md)
+        return VerifyIdentityResponseDTO.of(result.getName());
     }
 
     @Override
@@ -196,31 +180,25 @@ public class AuthServiceImpl implements AuthService {
         // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
         validateSignupRequest(request);
 
-        // 2. 회원가입 전용 JWT 검증
-        //    - 서명/만료 검증 + sub == signup-verification 확인 (SignupTokenProvider.verifySignupToken)
-        //    - 만료: EXPIRED_SIGNUP_TOKEN(401), 위변조/용도 오류: INVALID_SIGNUP_TOKEN(400)
-        //    - JWT Payload 에서 temporaryUserKey 추출 (Payload 에 개인정보 없음)
-        Claims claims = verifySignupToken(request.getIdentityToken());
-        String temporaryUserKey = claims.get("temporaryUserKey", String.class);
-        if (temporaryUserKey == null || temporaryUserKey.trim().isEmpty()) {
-            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN);
-        }
+        // 2. Mock PASS 인증 세션 검증 + 인증 정보 복원
+        //    - identityVerificationId 로 Redis(mock:pass:{id}) 세션을 조회·검증한다
+        //      (세션 없음 / TTL 만료 / status != VERIFIED / used == true → INVALID_VERIFICATION_ID)
+        //    - identityVerificationId 는 MockPassService 가 발급한 값만 유효하므로
+        //      프론트가 임의 생성/우회한 인증은 이 단계에서 차단된다
+        //    - Provider 가 세션에 저장된 name / phoneNumber / CI 를 복호화해 반환한다
+        String identityVerificationId = request.getIdentityVerificationId().trim();
+        IdentityVerificationResult verificationResult =
+                identityVerificationProvider.verify(identityVerificationId);
 
-        // 3. Redis 임시 인증 데이터 조회 (없으면 인증 만료로 간주 — 다시 본인인증 필요)
-        //    - 회원가입 완료 전까지는 TTL(기본 10분) 내 데이터가 존재해야 한다
-        SignupVerificationData verificationData = signupVerificationStore.find(temporaryUserKey);
-        if (verificationData == null) {
-            throw new BusinessException(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND);
-        }
-
-        // 4. CI 중복 재검증 (Race Condition 방지)
-        //    - 본인인증 완료 ~ 최종 가입 완료 사이 시간차 동안 동일 CI 로 가입될 수 있으므로 완료 시점에 다시 검증
-        //    - user_auth.identity_ci_hash (UNIQUE) 기준 조회
-        if (authMapper.countByCiHash(verificationData.getCiHash()) > 0) {
+        // 3. CI 중복 가입 검증
+        //    - CI 원문을 그대로 비교하지 않고 SHA-256 해시로 변환해 조회 (knowledge.md: 검색용 hash 저장)
+        //    - 이미 가입된 회원이면 회원가입 진행 불가 (docs: 409 DUPLICATE_USER)
+        String ciHash = sha256Hex(verificationResult.getCi());
+        if (authMapper.countByCiHash(ciHash) > 0) {
             throw new BusinessException(AuthErrorCode.DUPLICATE_USER);
         }
 
-        // 5. 이메일 처리
+        // 4. 이메일 처리
         //    - 검증(blank/길이/형식) → 소문자 정규화 → SHA-256 hash 생성 (EmailValidator 공통 정책)
         //    - users.email_hash 기준 중복 재검증 (이메일 원문 DB 조회 금지)
         String normalizedEmail = normalizeAndValidateEmail(request.getEmail());
@@ -229,7 +207,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.DUPLICATE_EMAIL);
         }
 
-        // 6. 약관 동의 검증 (DB terms 마스터 기준)
+        // 5. 약관 동의 검증 (DB terms 마스터 기준)
         //    - agreedTermsIds 가 null/빈 배열이면 필수 약관 동의 자체가 없으므로 실패
         //    - DB 의 필수 약관(required = 1) ID 가 모두 포함되어야 가입 가능
         //    - 선택 약관은 포함하지 않아도 가입 가능
@@ -240,7 +218,7 @@ public class AuthServiceImpl implements AuthService {
         }
         List<Long> distinctAgreedTermIds = new ArrayList<>(new LinkedHashSet<>(agreedTermsIds));
 
-        // 6-1. 존재하지 않는 약관 ID 검증
+        // 5-1. 존재하지 않는 약관 ID 검증
         //    - terms 마스터에 없는 ID 가 섞여 있으면 user_terms_agreements FK 위반으로
         //      500 이 발생하므로 insert 전에 INVALID_TERM_ID(400) 로 사전 차단한다
         //    - null 요소가 포함된 경우에도 IN 쿼리가 매칭되지 않아 크기 비교로 걸러진다
@@ -249,49 +227,50 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.INVALID_TERM_ID);
         }
 
-        // 6-2. 필수 약관 누락 검증
+        // 5-2. 필수 약관 누락 검증
         List<Long> requiredTermIds = authMapper.selectRequiredTermsIds();
         if (requiredTermIds == null || !distinctAgreedTermIds.containsAll(requiredTermIds)) {
             throw new BusinessException(AuthErrorCode.MISSING_REQUIRED_TERMS);
         }
 
-        // 7. 저장 데이터 준비 (Service Layer 에서만 암호화/해시 수행 — Controller/Mapper 금지)
+        // 6. 저장 데이터 준비 (Service Layer 에서만 암호화/해시 수행 — Controller/Mapper 금지)
         //    - password: BCrypt 단방향 해시 (원문 저장/AES 사용 금지)
-        //    - email/name/phone: AES-256 양방향 암호화 + 검색용 SHA-256 hash
-        //    - CI: AES-256 암호화 + SHA-256 hash (Redis 에서 복원)
+        //    - email/name/phone/CI: AES-256 양방향 암호화 + 검색용 SHA-256 hash
+        //      (Mock PASS 세션에서 복원한 값 — Redis 에는 원문이 아닌 암호화본만 저장되어 있었다)
         String passwordHash = PasswordEncryptor.encode(request.getPassword());
 
-        // 8. 회원 정보 DB 저장 (users → user_auth → user_profile → user_terms_agreements) + 전자지갑 생성
+        // 7. 회원 정보 DB 저장 (users → user_auth → user_profile → user_terms_agreements) + 전자지갑 생성
         //    - 사전 중복 체크(SELECT)와 실제 insert 사이의 Race Condition 은
         //      DB UNIQUE 제약(email_hash, identity_ci_hash, nickname)이 최종 방어선이 된다.
         //    - SELECT 체크를 통과했지만 동시 요청에 의해 UNIQUE 위반이 발생하면
         //      DuplicateKeyException → 409 로 변환해 깔끔한 응답을 반환한다.
         Long userId;
         try {
-            userId = insertUserWithAuthAndProfile(verificationData, normalizedEmail, emailHash, passwordHash,
-                    distinctAgreedTermIds);
+            userId = insertUserWithAuthAndProfile(verificationResult, ciHash, normalizedEmail, emailHash,
+                    passwordHash, distinctAgreedTermIds);
         } catch (DuplicateKeyException e) {
             throw mapDuplicateKeyException(e);
         }
 
-        // 9. 회원가입 완료 후 Redis 임시 데이터 삭제 (1회성 — 재사용 방지)
-        //    - Redis 는 DB 트랜잭션의 일부가 아니므로, DB 커밋이 확정된 후(afterCommit)에만 삭제한다.
-        //    - 트랜잭션 롤백 시 Redis 데이터가 그대로 남아 사용자가 동일 인증으로 재시도할 수 있다.
-        deleteVerificationDataAfterCommit(temporaryUserKey);
+        // 8. Mock PASS 세션 사용 완료 처리 (1회성 — 같은 identityVerificationId 재사용 방지)
+        //    - Redis 는 DB 트랜잭션의 일부가 아니므로, DB 커밋이 확정된 후(afterCommit)에만 처리한다.
+        //    - 트랜잭션 롤백 시 세션이 미사용으로 남아 사용자가 동일 인증으로 재시도할 수 있다.
+        markMockPassSessionUsedAfterCommit(identityVerificationId);
 
-        // 10. 자동 로그인 — Access Token / Refresh Token 발급 (knowledge.md Signup Flow: 회원가입 완료 후 자동 로그인)
+        // 9. 자동 로그인 — Access Token / Refresh Token 발급 (knowledge.md Signup Flow: 회원가입 완료 후 자동 로그인)
         //    - login() 과 동일한 응답 구조 — Refresh Token 원문이 아닌 SHA-256 hash 를 Redis 에 저장한다
         //    - 회원가입 자동 로그인은 PIN 등록 유도 대상이 아니므로 pinSetupRequired=false
-        LoginResponseDTO response = createLoginResponse(userId, verificationData.getEncryptedName(), false);
+        LoginResponseDTO response = createLoginResponse(userId,
+                PersonalDataCipher.encrypt(verificationResult.getName()), false);
 
-        // 11. Refresh Session 은 DB 커밋 확정 후(afterCommit)에만 Redis 저장한다
+        // 10. Refresh Session 은 DB 커밋 확정 후(afterCommit)에만 Redis 저장한다
         //    - knowledge.md: "회원가입 DB Transaction이 성공한 이후 인증 Session 및 Cookie 발급"
         //      / "DB Transaction과 Redis 작업은 동일한 Transaction으로 간주하지 않는다"
         //    - DB 커밋 전에 저장하면 롤백 시 고아 Refresh Session 이 남고, Redis 장애가 DB 롤백을 유발한다
         saveRefreshSessionAfterCommit(userId, response.getRefreshToken(),
                 response.getRefreshTokenMaxAgeSeconds());
 
-        // 12. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지 — knowledge.md)
+        // 11. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지 — knowledge.md)
         log.info("회원가입 완료 + 자동 로그인 - userId={}", userId);
 
         return response;
@@ -345,23 +324,24 @@ public class AuthServiceImpl implements AuthService {
      * users → user_auth → user_profile → user_terms_agreements insert + 전자지갑 생성 (동일 트랜잭션)
      * - 회원가입 전체 과정이 하나의 트랜잭션 — 하나라도 실패하면 전부 롤백된다
      *
+     * @param verificationResult Mock PASS 세션에서 복원한 인증 정보 (name/phoneNumber/CI)
      * @return 생성된 userId (자동 로그인 토큰 발급에 사용)
      */
-    private Long insertUserWithAuthAndProfile(SignupVerificationData verificationData,
+    private Long insertUserWithAuthAndProfile(IdentityVerificationResult verificationResult,
+                                              String ciHash,
                                               String normalizedEmail,
                                               String emailHash,
                                               String passwordHash,
                                               List<Long> agreedTermIds) {
         // users insert (회원 기본 정보)
-        // - phone 은 Redis 의 AES 암호화본을 그대로 사용 (원문 재암호화 불필요)
-        // - phone_hash 는 복호화 후 SHA-256 계산 — users.phone_number_hash (UNIQUE)
-        String phoneNumber = PersonalDataCipher.decrypt(verificationData.getEncryptedPhone());
+        // - name/phone 는 Mock PASS 세션에서 복원한 값을 AES-256 암호화해 저장
+        // - phone_hash 는 SHA-256 계산 — users.phone_number_hash (UNIQUE)
         UserVO user = new UserVO();
         user.setEmailHash(emailHash);
         user.setEmailEncrypt(PersonalDataCipher.encrypt(normalizedEmail));
-        user.setNameEncrypt(verificationData.getEncryptedName());
-        user.setPhoneNumberHash(sha256Hex(phoneNumber));
-        user.setPhoneNumberEncrypt(verificationData.getEncryptedPhone());
+        user.setNameEncrypt(PersonalDataCipher.encrypt(verificationResult.getName()));
+        user.setPhoneNumberHash(sha256Hex(verificationResult.getPhoneNumber()));
+        user.setPhoneNumberEncrypt(PersonalDataCipher.encrypt(verificationResult.getPhoneNumber()));
         user.setStatus(USER_STATUS_ACTIVE);
         authMapper.insertUser(user);
 
@@ -369,8 +349,8 @@ public class AuthServiceImpl implements AuthService {
         UserAuthVO userAuth = new UserAuthVO();
         userAuth.setUserId(user.getId());
         userAuth.setPasswordHash(passwordHash);
-        userAuth.setIdentityCiHash(verificationData.getCiHash());
-        userAuth.setIdentityCiEncrypt(verificationData.getEncryptedCi());
+        userAuth.setIdentityCiHash(ciHash);
+        userAuth.setIdentityCiEncrypt(PersonalDataCipher.encrypt(verificationResult.getCi()));
         authMapper.insertUserAuth(userAuth);
 
         // user_profile insert (기본 닉네임 — 닉네임 입력 기능 제거, 서버가 자동 생성)
@@ -411,20 +391,20 @@ public class AuthServiceImpl implements AuthService {
     }
 
     /**
-     * DB 트랜잭션이 커밋된 후(afterCommit)에만 Redis 임시 데이터를 삭제한다.
-     * - 트랜잭션이 진행 중일 때 Redis 를 지우면 롤백 시 사용자가 재시도할 수 없게 된다.
-     * - 실제 트랜잭션 밖(테스트 등)에서는 즉시 삭제한다.
+     * DB 트랜잭션이 커밋된 후(afterCommit)에만 Mock PASS 세션을 사용 완료 처리한다.
+     * - 트랜잭션이 진행 중일 때 used=true 로 바꾸면 롤백 시 사용자가 재시도할 수 없게 된다.
+     * - 실제 트랜잭션 밖(테스트 등)에서는 즉시 처리한다.
      */
-    private void deleteVerificationDataAfterCommit(String temporaryUserKey) {
+    private void markMockPassSessionUsedAfterCommit(String identityVerificationId) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    signupVerificationStore.delete(temporaryUserKey);
+                    mockPassStore.markUsed(identityVerificationId);
                 }
             });
         } else {
-            signupVerificationStore.delete(temporaryUserKey);
+            mockPassStore.markUsed(identityVerificationId);
         }
     }
 
@@ -590,7 +570,7 @@ public class AuthServiceImpl implements AuthService {
     public FindIdResponseDTO findId(String identityVerificationId) {
 
         // 1. 요청 값 검증 — null/빈 값 → INVALID_VERIFICATION_ID(400)
-        //    (verifyIdentity 와 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
+        //    (signup 과 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
         if (identityVerificationId == null || identityVerificationId.trim().isEmpty()) {
             throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
         }
@@ -675,7 +655,7 @@ public class AuthServiceImpl implements AuthService {
         // 6. passwordResetToken 발급 + Redis 5분 TTL 저장
         //    - UUID 는 예측 불가능한 1회성 토큰 — key: password:reset:{token}, value: userId
         //    - TTL 은 저장소가 설정값(기본 5분)을 내부 적용한다 — Service 에서 하드코딩/전달하지 않는다
-        //      (RedisSignupVerificationStore 패턴과 동일)
+        //      (RedisMockPassStore 패턴과 동일)
         String passwordResetToken = UUID.randomUUID().toString();
         passwordResetTokenStore.save(passwordResetToken, user.getId());
 
@@ -854,7 +834,7 @@ public class AuthServiceImpl implements AuthService {
 
         // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
         //    - identityVerificationId 누락·빈 값 → INVALID_VERIFICATION_ID(400)
-        //      (findId/verifyIdentity 와 동일 정책)
+        //      (findId 와 동일 정책)
         //    - pinNumber 누락·빈 값은 형식 검증(validatePinFormat)에서 INVALID_PIN_FORMAT 으로 차단된다
         if (request == null || isBlank(request.getIdentityVerificationId())) {
             throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
@@ -1130,12 +1110,12 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 회원가입 요청 값 검증
-     * - identityToken/email/password 누락 → INVALID_SIGNUP_REQUEST
+     * - identityVerificationId/email/password 누락 → INVALID_SIGNUP_REQUEST
      * - pin 은 이번 API 범위 제외 (별도 PIN 등록 API 에서 처리) — 검증/저장하지 않는다
      */
     private void validateSignupRequest(SignupRequestDTO request) {
         if (request == null
-                || isBlank(request.getIdentityToken())
+                || isBlank(request.getIdentityVerificationId())
                 || isBlank(request.getEmail())
                 || isBlank(request.getPassword())) {
             throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_REQUEST);
@@ -1153,21 +1133,6 @@ public class AuthServiceImpl implements AuthService {
             return EmailValidator.normalize(email);
         } catch (IllegalArgumentException e) {
             throw new BusinessException(AuthErrorCode.INVALID_EMAIL_FORMAT);
-        }
-    }
-
-    /**
-     * 회원가입 전용 JWT 검증 — 서명/만료 + sub == signup-verification 확인
-     *
-     * @throws BusinessException EXPIRED_SIGNUP_TOKEN(만료) / INVALID_SIGNUP_TOKEN(위변조·용도 오류)
-     */
-    private Claims verifySignupToken(String token) {
-        try {
-            return signupTokenProvider.verifySignupToken(token);
-        } catch (ExpiredJwtException e) {
-            throw new BusinessException(AuthErrorCode.EXPIRED_SIGNUP_TOKEN);
-        } catch (JwtException e) {
-            throw new BusinessException(AuthErrorCode.INVALID_SIGNUP_TOKEN);
         }
     }
 

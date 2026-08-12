@@ -6,27 +6,30 @@ import com.workit.domain.auth.dto.response.MockPassStatusResponseDTO;
 // Mock PASS 본인인증 서비스 (개발/테스트용 — 실제 PortOne 연동 전까지)
 //
 // 책임:
-// - 프론트가 생성한 identityVerificationId 를 VERIFIED 세션으로 등록
-//   (Mock 인증 완료를 백엔드가 기록 — verify-identity 는 VERIFIED 세션만 수용하므로
-//    흐름을 건너뛰고 인증 ID 만 전송하는 방식은 성립하지 않는다)
+// - identityVerificationId 를 백엔드가 직접 생성한다 (프론트 생성/전달 금지)
+// - Mock CI 를 생성하고, name/phoneNumber/CI 를 AES-256 암호화해
+//   VERIFIED(used=false) 세션으로 Redis(mock:pass:{id}) 에 저장한 뒤 identityVerificationId 를 반환한다
 //
-// 프론트 흐름: Mock PASS 팝업(통신사/약관 → 이름/휴대폰/보안문자) 완료
-//   → identityVerificationId 생성 → POST /api/v1/auth/pass (complete)
-//   → VERIFIED 세션 → POST /api/v1/auth/signup/verify-identity → identityToken 발급
+// 프론트 흐름:
+//   이름/휴대폰 번호 입력 → POST /api/v1/auth/pass (complete)
+//   → 백엔드가 인증 세션 생성 → identityVerificationId 발급
+//   → 회원가입(POST /api/v1/auth/signup) / 아이디 찾기(POST /api/v1/auth/find-id) 등에서
+//     identityVerificationId 만 전달하면 백엔드가 Redis 세션에서 인증 정보를 복원한다
 public interface MockPassService {
 
     /**
-     * Mock 인증 완료 등록 — 프론트가 생성한 identityVerificationId 를 VERIFIED 세션으로 저장
+     * Mock 본인인증 처리 — 백엔드가 인증 세션을 생성하고 identityVerificationId 를 발급한다
      *
      * 흐름:
-     *   1. 필수 값 검증 (identityVerificationId 누락 → INVALID_VERIFICATION_ID,
-     *      name/phoneNumber 누락 → INVALID_PASS_REQUEST)
-     *   2. 형식 검증 (identityVerificationId: mock- 접두어 + 최대 길이,
-     *      phoneNumber: 숫자 10~11자리 → INVALID_PASS_REQUEST)
-     *   3. name/phoneNumber AES-256 암호화 후 VERIFIED 세션 저장 (Redis TTL 기본 10분)
+     *   1. 필수 값 검증 (name/phoneNumber 누락·빈 값 → INVALID_PASS_REQUEST)
+     *   2. 형식 검증 (phoneNumber: 숫자 10~11자리 → INVALID_PASS_REQUEST)
+     *   3. identityVerificationId(UUID) / Mock CI 생성
+     *   4. name/phoneNumber/CI AES-256 암호화 후 VERIFIED(used=false) 세션 저장
+     *      (Redis TTL 기본 10분 — mock.pass.ttl.minutes)
+     *   5. identityVerificationId / status(VERIFIED) 반환 (개인정보는 응답에 미포함)
      *
-     * @param request 인증 완료 요청 (identityVerificationId, name, phoneNumber)
-     * @return identityVerificationId / status(VERIFIED) / name
+     * @param request 본인인증 요청 (name, phoneNumber)
+     * @return identityVerificationId / status(VERIFIED)
      */
     MockPassStatusResponseDTO complete(MockPassCompleteRequestDTO request);
 }

@@ -8,7 +8,8 @@ import org.springframework.http.HttpStatus;
 public enum AuthErrorCode implements ErrorCode {
 
     // 본인인증(PASS) 관련
-    // docs: 본인인증 검증 및 회원 중복 체크 → 400
+    // - 인증 ID 누락/빈 값, Redis 세션 없음(만료 포함), status != VERIFIED, 이미 사용 완료(used) 된 세션 → 400
+    //   (회원가입/아이디 찾기/비밀번호·PIN 재설정 공용)
     INVALID_VERIFICATION_ID(HttpStatus.BAD_REQUEST, "PASS 인증이 유효하지 않습니다. 다시 시도해주세요."),
 
     // Mock PASS 본인인증 - 완료 등록 요청 값 오류 (name/phoneNumber 누락·빈 값, 형식 오류) → 400
@@ -21,17 +22,8 @@ public enum AuthErrorCode implements ErrorCode {
     // 회원가입 이메일 중복 확인 - 이메일 미입력/형식 오류 → 400 (docs errorCode: INVALID_EMAIL_FORMAT)
     INVALID_EMAIL_FORMAT(HttpStatus.BAD_REQUEST, "올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요."),
 
-    // 회원가입 완료 - 요청 값 검증 실패 (identityToken/email/password 누락 등) → 400
+    // 회원가입 완료 - 요청 값 검증 실패 (identityVerificationId/email/password 누락 등) → 400
     INVALID_SIGNUP_REQUEST(HttpStatus.BAD_REQUEST, "회원가입 요청 값이 올바르지 않습니다. 다시 확인해 주세요."),
-
-    // 회원가입 완료 - 회원가입 전용 JWT 서명/형식/용도(sub) 오류 → 400
-    INVALID_SIGNUP_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않은 본인인증 토큰입니다. 본인인증을 다시 진행해 주세요."),
-
-    // 회원가입 완료 - 회원가입 전용 JWT 만료 → 401
-    EXPIRED_SIGNUP_TOKEN(HttpStatus.UNAUTHORIZED, "본인인증 유효 시간이 만료되었습니다. 인증을 다시 진행해 주세요."),
-
-    // 회원가입 완료 - Redis 임시 인증 데이터 없음(만료/삭제) → 400
-    SIGNUP_VERIFICATION_NOT_FOUND(HttpStatus.BAD_REQUEST, "본인인증 정보가 만료되었습니다. 본인인증을 다시 진행해 주세요."),
 
     // 회원가입 완료 - 이메일 중복 → 409
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
@@ -60,7 +52,7 @@ public enum AuthErrorCode implements ErrorCode {
     PIN_LOCK_EXCEEDED(HttpStatus.FORBIDDEN, "핀번호 입력 횟수가 5회 초과하여 계정이 잠겼습니다. PASS 본인인증을 통해 핀번호를 재설정해 주세요."),
 
     // JWT 토큰 검증 실패 - 서명/형식 오류, sub(userId) 누락 등 → 400
-    // (회원가입 INVALID_SIGNUP_TOKEN 규약과 동일 — 위변조/형식 오류는 400)
+    // (위변조/형식 오류는 400 — 만료는 별도 EXPIRED_TOKEN 401)
     INVALID_TOKEN(HttpStatus.BAD_REQUEST, "유효하지 않은 토큰입니다. 다시 로그인해 주세요."),
 
     // JWT 토큰 만료 → 401 (knowledge.md: Token 만료는 401)
