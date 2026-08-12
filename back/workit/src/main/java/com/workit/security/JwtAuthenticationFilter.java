@@ -20,12 +20,13 @@ import java.io.IOException;
 // 요청마다 Access Token(JWT)을 검증해 SecurityContext 를 설정하는 필터
 //
 // 책임 (knowledge.md — Spring Security 는 로그인/회원가입/토큰 발급을 담당하지 않음):
-//   - Authorization: Bearer {accessToken} 추출
+//   - HttpOnly accessToken Cookie 에서 Access Token 추출 (Cookie 기반 인증 전용)
 //   - JwtTokenProvider.parseAccessToken() 검증 (서명 + 만료 + tokenType==ACCESS)
 //   - 검증 성공 → WorkitPrincipal(userId, role) 을 SecurityContext 에 저장
 //   - 검증 실패 → CommonResponse JSON 으로 즉시 응답 (필터 단계라 @RestControllerAdvice 미동작)
 //
 // 보안 요구사항:
+//   - Access Token 은 accessToken HttpOnly Cookie 로만 전달된다 — Authorization: Bearer 헤더 미사용
 //   - JWT 원문/개인정보 로그 출력 금지 — 로그에는 errorCode 만 기록
 //   - Refresh Token 은 API 인증에 사용 불가 (parseAccessToken 이 tokenType 검증)
 //
@@ -36,16 +37,15 @@ import java.io.IOException;
 @Slf4j
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private static final String AUTHORIZATION_HEADER = "Authorization";
-    private static final String BEARER_PREFIX = "Bearer ";
     private static final String CLAIM_ROLE = "role";
 
     /**
-     * Access Token Cookie 명 (AuthController 발급 — 회원가입 자동 로그인용)
-     * - knowledge.md Cookie Security: ACCESS_TOKEN / HttpOnly / Path=/
-     * - Authorization 헤더가 없을 때 이 Cookie 로 인증한다 (Cookie 기반 인증 지원)
+     * Access Token Cookie 명 (Cookie 기반 인증)
+     * - knowledge.md Cookie Security: accessToken / HttpOnly / Path=/
+     * - 로그인/재발급 API 가 이 이름으로 발급한 Cookie 만 인증에 사용한다.
+     * - AuthController 의 ACCESS_TOKEN_COOKIE_NAME 과 동일해야 한다 (이름 어긋나면 인증 불가)
      */
-    public static final String ACCESS_TOKEN_COOKIE_NAME = "ACCESS_TOKEN";
+    public static final String ACCESS_TOKEN_COOKIE_NAME = "accessToken";
 
     private final JwtTokenProvider jwtTokenProvider;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -59,8 +59,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-        // 1. Access Token 추출 — Authorization: Bearer 헤더 우선, 없으면 ACCESS_TOKEN Cookie 폴백
-        //    (회원가입 자동 로그인 등 Cookie 기반 인증 지원 — knowledge.md Cookie Security)
+        // 1. Access Token 추출 — accessToken HttpOnly Cookie 에서만 추출 (Cookie 기반 인증)
         String token = extractAccessToken(request);
 
         // 2. 토큰 없음 → 인증 없이 진행 (보호 경로는 이후 진입점이 401 처리)
@@ -102,17 +101,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     /**
      * Access Token 추출
-     * - Authorization: Bearer {token} 헤더가 있으면 그 값을 사용한다 (기존 클라이언트 호환)
-     * - 헤더가 없으면 HttpOnly ACCESS_TOKEN Cookie 값을 사용한다 (Cookie 기반 인증)
-     * - 둘 다 없으면 null 반환 → 인증 없이 진행
+     * - accessToken HttpOnly Cookie 에서만 추출한다 (Authorization: Bearer 헤더 미사용)
+     * - Cookie 가 없으면 null 반환 → 인증 없이 진행
      */
     private String extractAccessToken(HttpServletRequest request) {
-        String authorization = request.getHeader(AUTHORIZATION_HEADER);
-        if (authorization != null && authorization.startsWith(BEARER_PREFIX)) {
-            // 헤더에 Bearer 가 붙어 있으면 빈 값이어도 "토큰 있음"으로 처리해 400 검증으로 보낸다
-            // (기존 동작 유지 — "Bearer   " 는 INVALID_TOKEN)
-            return authorization.substring(BEARER_PREFIX.length()).trim();
-        }
         javax.servlet.http.Cookie[] cookies = request.getCookies();
         if (cookies != null) {
             for (javax.servlet.http.Cookie cookie : cookies) {

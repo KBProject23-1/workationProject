@@ -13,6 +13,7 @@ import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.SignupResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
 import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
@@ -655,14 +656,14 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("정상 회원가입 - 세션 복원 후 insert + 지갑 생성 + 세션 사용 완료 + 자동 로그인 토큰 발급")
+    @DisplayName("정상 회원가입 - 세션 복원 후 insert + 지갑 생성 + 세션 사용 완료 + 토큰 미발급")
     void signup_success() {
         // Given — 유효한 Mock PASS 세션 + 중복 없음 + 약관 마스터 정상
         stubVerifiedSession("imp_ver_1234567890");
         stubSignupSuccessPath(EMAIL_HASH_TEST);
 
-        // When — 자동 로그인으로 LoginResponseDTO 반환
-        LoginResponseDTO result = authService.signup(signupRequest("imp_ver_1234567890", "test@example.com"));
+        // When — 회원가입 완료 (토큰 미발급)
+        SignupResponseDTO result = authService.signup(signupRequest("imp_ver_1234567890", "test@example.com"));
 
         // Then — users insert 검증 (Mock PASS 세션에서 복원한 name/phone 저장)
         ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
@@ -709,21 +710,14 @@ class AuthServiceImplTest {
         verify(mockPassStore).markUsed("imp_ver_1234567890");
         assertTrue(savedMockPassSessions.get("imp_ver_1234567890").isUsed());
 
-        // 자동 로그인 검증 (knowledge.md Signup Flow — 별도 로그인 API 호출 없이 토큰 발급)
+        // 회원가입 완료 응답 — userId/name 만 반환 (자동 로그인 없음 — 토큰 미발급)
         assertNotNull(result);
         assertEquals(user.getId(), result.getUserId());
         assertEquals("홍길동", result.getName());
-        assertNotNull(result.getTokenInfo().getAccessToken());
-        assertEquals("Bearer", result.getTokenInfo().getGrantType());
-        assertEquals(900, result.getTokenInfo().getAccessTokenExpiresIn());
-        assertNotNull(result.getRefreshToken());
-        assertEquals(1209600, result.getRefreshTokenMaxAgeSeconds());
 
-        // Refresh Session Redis 저장 검증 (login 과 동일 — TTL = refresh 만료(20160분))
-        verify(refreshTokenStore).save(eq(user.getId()), anyString(), eq(1209600L));
-        // Redis 에는 원문이 아닌 SHA-256 hash 가 저장된다 (knowledge.md Refresh Token Security)
-        assertNotNull(savedRefreshTokens.get(user.getId()));
-        assertNotEquals(result.getRefreshToken(), savedRefreshTokens.get(user.getId()));
+        // Refresh Session 을 저장하지 않는다 (회원가입은 토큰을 발급하지 않음)
+        assertTrue(savedRefreshTokens.isEmpty());
+        verify(refreshTokenStore, never()).save(anyLong(), anyString(), anyLong());
     }
 
     @Test
@@ -1073,7 +1067,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("PASSWORD 이메일 로그인 성공 - userId/name/token_info 반환 + 토큰 발급 + Refresh Token Redis 저장")
+    @DisplayName("PASSWORD 이메일 로그인 성공 - userId/name 반환 + Access/Refresh Token 발급 + Refresh Token Redis 저장")
     void login_passwordEmail_success() {
         // Given — email_hash 로 조회되는 ACTIVE 회원
         registerLoginUser(501L, "user@example.com", "01034567890",
@@ -1090,15 +1084,13 @@ class AuthServiceImplTest {
         // deviceId 미전달 → 기기 등록 여부를 판별하지 않으므로 pinSetupRequired=false
         assertFalse(result.isPinSetupRequired());
 
-        // token_info (snake_case JSON 직렬화는 Controller 테스트에서 확인)
-        LoginResponseDTO.TokenInfo tokenInfo = result.getTokenInfo();
-        assertNotNull(tokenInfo);
-        assertEquals("Bearer", tokenInfo.getGrantType());
-        assertNotNull(tokenInfo.getAccessToken());
-        assertEquals(900L, tokenInfo.getAccessTokenExpiresIn());
+        // Access Token — Cookie 전용 값 (JSON 직렬화 제외는 Controller 테스트에서 확인)
+        String accessToken = result.getAccessToken();
+        assertNotNull(accessToken);
+        assertEquals(900L, result.getAccessTokenMaxAgeSeconds());
 
         // Access Token 검증 — sub == userId, tokenType == ACCESS, 개인정보 없음
-        Claims accessClaims = jwtTokenProvider.parseAccessToken(tokenInfo.getAccessToken());
+        Claims accessClaims = jwtTokenProvider.parseAccessToken(accessToken);
         assertEquals("501", accessClaims.getSubject());
         assertFalse(accessClaims.containsKey("email"));
         assertFalse(accessClaims.containsKey("phoneNumber"));
@@ -1388,15 +1380,13 @@ class AuthServiceImplTest {
         // When
         RefreshTokenResponseDTO result = authService.refreshAccessToken(refreshToken);
 
-        // Then — token_info (신규 Access Token, sub == userId, tokenType == ACCESS, 개인정보 없음)
+        // Then — 신규 Access Token (Cookie 전용, sub == userId, tokenType == ACCESS, 개인정보 없음)
         assertNotNull(result);
-        LoginResponseDTO.TokenInfo tokenInfo = result.getTokenInfo();
-        assertNotNull(tokenInfo);
-        assertEquals("Bearer", tokenInfo.getGrantType());
-        assertNotNull(tokenInfo.getAccessToken());
-        assertEquals(900L, tokenInfo.getAccessTokenExpiresIn());
+        String accessToken = result.getAccessToken();
+        assertNotNull(accessToken);
+        assertEquals(900L, result.getAccessTokenMaxAgeSeconds());
 
-        Claims accessClaims = jwtTokenProvider.parseAccessToken(tokenInfo.getAccessToken());
+        Claims accessClaims = jwtTokenProvider.parseAccessToken(accessToken);
         assertEquals("501", accessClaims.getSubject());
         assertFalse(accessClaims.containsKey("email"));
         assertFalse(accessClaims.containsKey("password"));
@@ -1575,7 +1565,8 @@ class AuthServiceImplTest {
     void refresh_responseToStringHidesToken() {
         // Given
         RefreshTokenResponseDTO dto = RefreshTokenResponseDTO.builder()
-                .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
+                .accessToken("secret-access-token-value")
+                .accessTokenMaxAgeSeconds(900)
                 .refreshToken("secret-refresh-token-value")
                 .refreshTokenMaxAgeSeconds(1209600)
                 .build();
@@ -1584,6 +1575,7 @@ class AuthServiceImplTest {
         String text = dto.toString();
 
         // Then
+        assertFalse(text.contains("secret-access-token-value"));
         assertFalse(text.contains("secret-refresh-token-value"));
     }
 

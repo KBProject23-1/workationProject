@@ -16,9 +16,9 @@ import java.util.Date;
 // 로그인 이후 공통으로 사용하는 JWT Provider
 //
 // Access Token / Refresh Token 발급·검증을 담당한다.
-// - Access Token : API 인증 (Authorization: Bearer {accessToken}), 짧은 만료(기본 15분)
-// - Refresh Token: Access Token 재발급, 긴 만료(기본 14일), HttpOnly Cookie 저장 예정
-//                  (Provider 는 Token 생성만 담당 — Cookie 생성은 로그인 API 단계에서 처리)
+// - Access Token : API 인증 (accessToken HttpOnly Cookie), 짧은 만료(기본 15분)
+// - Refresh Token: Access Token 재발급, 긴 만료(기본 14일), HttpOnly Cookie 저장
+//                  (Provider 는 Token 생성만 담당 — Cookie 생성은 로그인/재발급 API 단계에서 처리)
 //
 // Access Token(인증용) / Refresh Token(세션 유지용) 이렇게 두 종류의 JWT 를 관리한다.
 // - 회원가입 플로우는 별도 임시 토큰 없이 Mock PASS 세션(identityVerificationId) 으로 처리한다
@@ -121,7 +121,7 @@ public class JwtTokenProvider {
 
     /**
      * Access Token 만료 시간(초) 반환.
-     * - API 응답 token_info.access_token_expires_in 값 (OAuth2 관례: 초 단위)
+     * - Access Token Cookie Max-Age 값 (Cookie 기반 인증 — 토큰 만료와 동일하게 설정)
      * - 예: jwt.access-token-expiration=15(분) → 900초
      */
     public long getAccessTokenExpirationSeconds() {

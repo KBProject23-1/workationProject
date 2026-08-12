@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 // API 요청 인증 필터 단위 테스트
 // - JwtTokenProvider 를 실제 구현(테스트 시크릿)으로 사용해 발급/검증 흐름을 검증한다
 // - knowledge.md 필수 테스트: 정상 토큰 / 만료 / 위변조 / 토큰 없음 / 용도 오류(Refresh Token)
+// - Cookie 기반 인증 전용: accessToken HttpOnly Cookie 에서만 토큰을 추출한다
+//   (Authorization: Bearer 헤더는 사용하지 않는다 — 프론트도 쿠키로만 인증)
 class JwtAuthenticationFilterTest {
 
     /** HS256 최소 32바이트 테스트용 시크릿 (JwtTokenProviderTest 와 동일 정책) */
@@ -42,18 +44,25 @@ class JwtAuthenticationFilterTest {
         SecurityContextHolder.clearContext();
     }
 
-    private MockHttpServletRequest requestWithAuthorization(String authorization) {
+    /** accessToken Cookie 가 없는 기본 요청 */
+    private MockHttpServletRequest requestWithoutCookie() {
+        return new MockHttpServletRequest("GET", "/api/v1/wallets/me");
+    }
+
+    /** accessToken Cookie 를 설정한 요청 (Cookie 기반 인증) */
+    private MockHttpServletRequest requestWithCookie(String cookieValue) {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/wallets/me");
-        if (authorization != null) {
-            request.addHeader("Authorization", authorization);
+        if (cookieValue != null) {
+            request.setCookies(new javax.servlet.http.Cookie(
+                    JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, cookieValue));
         }
         return request;
     }
 
     @Test
-    @DisplayName("인증 헤더 없음 → 필터 통과 (인증 없이 진행, 보호 경로는 진입점이 처리)")
-    void noAuthorizationHeader_passesThrough() throws Exception {
-        MockHttpServletRequest request = requestWithAuthorization(null);
+    @DisplayName("accessToken Cookie 없음 → 필터 통과 (인증 없이 진행, 보호 경로는 진입점이 처리)")
+    void noCookie_passesThrough() throws Exception {
+        MockHttpServletRequest request = requestWithoutCookie();
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -64,10 +73,25 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("정상 Access Token → SecurityContext 에 WorkitPrincipal(userId, ROLE_USER) 저장")
-    void validAccessToken_authenticates() throws Exception {
+    @DisplayName("Authorization Bearer 헤더는 무시된다 — Cookie 가 없으면 인증되지 않는다")
+    void authorizationHeader_ignored() throws Exception {
+        // Authorization 헤더만 있고 accessToken Cookie 가 없는 요청 — 헤더 기반 인증은 사용하지 않는다
+        MockHttpServletRequest request = requestWithoutCookie();
+        request.addHeader("Authorization", "Bearer some.jwt.value");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertNotNull(chain.getRequest(), "필터 체인은 계속 진행되어야 한다");
+        assertNull(SecurityContextHolder.getContext().getAuthentication(), "Bearer 헤더로는 인증되지 않는다");
+    }
+
+    @Test
+    @DisplayName("정상 Access Token Cookie → SecurityContext 에 WorkitPrincipal(userId, ROLE_USER) 저장")
+    void validAccessTokenCookie_authenticates() throws Exception {
         String token = provider.createAccessToken(42L);
-        MockHttpServletRequest request = requestWithAuthorization("Bearer " + token);
+        MockHttpServletRequest request = requestWithCookie(token);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -83,27 +107,9 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("ACCESS_TOKEN Cookie 로 인증 - Authorization 헤더 없이도 인증 처리 (회원가입 자동 로그인)")
-    void accessTokenCookie_authenticates() throws Exception {
-        String token = provider.createAccessToken(99L);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/wallets/me");
-        request.setCookies(new javax.servlet.http.Cookie("ACCESS_TOKEN", token));
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-
-        filter.doFilter(request, response, chain);
-
-        assertNotNull(chain.getRequest(), "Cookie 인증 성공 시 필터 체인은 계속 진행되어야 한다");
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        assertInstanceOf(WorkitPrincipal.class, authentication);
-        assertEquals(99L, ((WorkitPrincipal) authentication).getUserId());
-    }
-
-    @Test
-    @DisplayName("ACCESS_TOKEN Cookie 가 위변조/만료 → 400 INVALID_TOKEN 응답 (체인 중단)")
+    @DisplayName("accessToken Cookie 가 위변조 → 400 INVALID_TOKEN 응답 (체인 중단)")
     void accessTokenCookie_invalid_returns400() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/wallets/me");
-        request.setCookies(new javax.servlet.http.Cookie("ACCESS_TOKEN", "invalid.token.value"));
+        MockHttpServletRequest request = requestWithCookie("invalid.token.value");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -115,10 +121,10 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("만료된 Access Token → 401 EXPIRED_TOKEN 응답 (체인 중단)")
+    @DisplayName("만료된 Access Token Cookie → 401 EXPIRED_TOKEN 응답 (체인 중단)")
     void expiredToken_returns401() throws Exception {
         String token = provider.createAccessToken(42L, new Date(System.currentTimeMillis() - 60_000L));
-        MockHttpServletRequest request = requestWithAuthorization("Bearer " + token);
+        MockHttpServletRequest request = requestWithCookie(token);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -132,7 +138,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("위변조된 토큰 → 400 INVALID_TOKEN 응답 (체인 중단)")
     void invalidToken_returns400() throws Exception {
-        MockHttpServletRequest request = requestWithAuthorization("Bearer invalid.token.value");
+        MockHttpServletRequest request = requestWithCookie("invalid.token.value");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -147,7 +153,7 @@ class JwtAuthenticationFilterTest {
     @DisplayName("Refresh Token 을 API 인증에 사용 → 400 INVALID_TOKEN (용도 오류)")
     void refreshTokenRejected() throws Exception {
         String refreshToken = provider.createRefreshToken(42L);
-        MockHttpServletRequest request = requestWithAuthorization("Bearer " + refreshToken);
+        MockHttpServletRequest request = requestWithCookie(refreshToken);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -158,22 +164,9 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("Bearer 접두어 없음 → 토큰 검증 없이 통과 (인증 없음 취급)")
-    void nonBearerHeader_passesThrough() throws Exception {
-        MockHttpServletRequest request = requestWithAuthorization("Basic abc123");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-
-        filter.doFilter(request, response, chain);
-
-        assertNotNull(chain.getRequest());
-        assertNull(SecurityContextHolder.getContext().getAuthentication());
-    }
-
-    @Test
-    @DisplayName("Bearer 뒤 토큰이 빈 값 → 400 INVALID_TOKEN")
-    void emptyToken_returns400() throws Exception {
-        MockHttpServletRequest request = requestWithAuthorization("Bearer   ");
+    @DisplayName("Cookie 값이 빈 문자열 → 400 INVALID_TOKEN")
+    void emptyCookie_returns400() throws Exception {
+        MockHttpServletRequest request = requestWithCookie("   ");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -187,7 +180,8 @@ class JwtAuthenticationFilterTest {
     @DisplayName("공개 인증 API(/api/v1/auth/**)는 토큰 검증 없이 통과 — 로그인/재발급 흐름 보호")
     void publicAuthPath_passesThrough() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/refresh");
-        request.addHeader("Authorization", "Bearer invalid.token.value");
+        request.setCookies(new javax.servlet.http.Cookie(
+                JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, "invalid.token.value"));
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -205,7 +199,8 @@ class JwtAuthenticationFilterTest {
         // 공개 경로 판별이 실패하지 않아야 한다 — 만료/위변조 토큰이 재발급 흐름을 막지 않는다
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/workit/api/v1/auth/refresh");
         request.setContextPath("/workit");
-        request.addHeader("Authorization", "Bearer invalid.token.value");
+        request.setCookies(new javax.servlet.http.Cookie(
+                JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, "invalid.token.value"));
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -224,7 +219,8 @@ class JwtAuthenticationFilterTest {
         String expiredToken = provider.createAccessToken(42L, new Date(System.currentTimeMillis() - 60_000L));
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/workit/api/v1/auth/refresh");
         request.setContextPath("/workit");
-        request.addHeader("Authorization", "Bearer " + expiredToken);
+        request.setCookies(new javax.servlet.http.Cookie(
+                JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, expiredToken));
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -242,7 +238,8 @@ class JwtAuthenticationFilterTest {
         String expiredToken = provider.createAccessToken(42L, new Date(System.currentTimeMillis() - 60_000L));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/workit/api/v1/wallets/me");
         request.setContextPath("/workit");
-        request.addHeader("Authorization", "Bearer " + expiredToken);
+        request.setCookies(new javax.servlet.http.Cookie(
+                JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, expiredToken));
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -254,11 +251,12 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    @DisplayName("로그인 사용자 전용 경로(/api/v1/auth/me/pin) - 정상 토큰 → 인증 처리")
+    @DisplayName("로그인 사용자 전용 경로(/api/v1/auth/me/pin) - 정상 토큰 Cookie → 인증 처리")
     void authenticatedAuthPath_withValidToken_authenticates() throws Exception {
         String token = provider.createAccessToken(77L);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/me/pin");
-        request.addHeader("Authorization", "Bearer " + token);
+        request.setCookies(new javax.servlet.http.Cookie(
+                JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, token));
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -274,7 +272,8 @@ class JwtAuthenticationFilterTest {
     @DisplayName("로그인 사용자 전용 경로(/api/v1/auth/me/pin) - 잘못된 토큰 → 400 거부")
     void authenticatedAuthPath_invalidToken_rejected() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/me/pin");
-        request.addHeader("Authorization", "Bearer invalid.token.value");
+        request.setCookies(new javax.servlet.http.Cookie(
+                JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME, "invalid.token.value"));
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 

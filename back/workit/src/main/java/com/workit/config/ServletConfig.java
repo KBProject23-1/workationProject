@@ -49,7 +49,8 @@ public class ServletConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins("http://localhost:5173", "http://localhost:4173")  // FE 개발서버 주소, FE 성능 테스트 주소, 배포 시 실제 도메인으로 변경
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("*")
+                // CSRF Header(X-XSRF-TOKEN) 명시 허용 — SecurityConfig(corsConfigurationSource) 와 동일 정책 유지
+                .allowedHeaders("Content-Type", "X-XSRF-TOKEN", "*")
                 .allowCredentials(true);
     }
 

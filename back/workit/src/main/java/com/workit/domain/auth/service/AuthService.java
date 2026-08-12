@@ -12,6 +12,7 @@ import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.SignupResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 
@@ -45,7 +46,7 @@ public interface AuthService {
     VerifyIdentityResponseDTO verifyIdentityForSignup(String identityVerificationId);
 
     /**
-     * 최종 회원가입 완료 + 자동 로그인 (Access/Refresh Token 발급)
+     * 최종 회원가입 완료 (토큰 미발급 — 자동 로그인 없음)
      *
      * 흐름:
      *   1. Mock PASS 인증 세션 검증 — identityVerificationId 로 Redis(mock:pass:{id}) 조회
@@ -56,15 +57,13 @@ public interface AuthService {
      *      - user_profile.nickname 은 서버가 기본값(워케이너{userId}) 자동 생성 (닉네임 입력 기능 제거)
      *   5. 전자지갑 생성
      *   6. 회원가입 완료 후 Mock PASS 세션 사용 완료 처리 (used=true — 1회성)
-     *   7. 자동 로그인 — Access Token / Refresh Token 발급, Refresh Session Redis 저장
-     *
-     * (knowledge.md Signup Flow: 회원가입 완료 시 Access Token/Refresh Token 발급 후
-     *  HttpOnly Cookie 로 설정 — 별도 로그인 API 를 다시 호출하지 않는다)
+     *   7. 회원가입 완료 — Access/Refresh Token 을 발급하지 않는다
+     *      (변경 정책: 회원가입 후 로그인 화면으로 이동해 다시 로그인)
      *
      * @param request 회원가입 요청 (identityVerificationId, email, password, agreedTermsIds)
-     * @return 회원가입 완료 응답 (userId, name, token_info) + 쿠키용 refreshToken
+     * @return 회원가입 완료 응답 (userId, name — 토큰/쿠키 없음)
      */
-    LoginResponseDTO signup(SignupRequestDTO request);
+    SignupResponseDTO signup(SignupRequestDTO request);
 
     /**
      * 통합 로그인 (PASSWORD / PIN)
@@ -76,10 +75,10 @@ public interface AuthService {
      *   3. 회원 상태(ACTIVE) 확인
      *   4. Access Token / Refresh Token 발급
      *   5. Refresh Token SHA-256 hash 를 Redis(refresh:token:{userId})에 TTL 저장
-     *   6. LoginResponseDTO 반환 (refreshToken 은 HttpOnly Cookie 전용 — JSON 제외)
+     *   6. LoginResponseDTO 반환 (accessToken/refreshToken 은 HttpOnly Cookie 전용 — JSON 제외)
      *
      * @param request 로그인 요청 (loginType, loginId, password, pinNumber, deviceId)
-     * @return 로그인 성공 응답 (userId, name, token_info) + 쿠키용 refreshToken
+     * @return 로그인 성공 응답 (userId, name, pinSetupRequired) + 쿠키용 accessToken/refreshToken
      */
     LoginResponseDTO login(LoginRequestDTO request);
 
@@ -94,10 +93,10 @@ public interface AuthService {
      *      - 불일치(재사용 감지) → 세션 revoke(delete) + INVALID_REFRESH_TOKEN(401)
      *   4. 신규 Access Token + 신규 Refresh Token 발급 (Rotation)
      *   5. 신규 Refresh Token SHA-256 hash 를 Redis 에 교체 저장 (TTL 동일)
-     *   6. RefreshTokenResponseDTO 반환 (refreshToken 은 HttpOnly Cookie 전용 — JSON 제외)
+     *   6. RefreshTokenResponseDTO 반환 (accessToken/refreshToken 은 HttpOnly Cookie 전용 — JSON 제외)
      *
      * @param refreshToken HttpOnly Cookie 에서 받은 Refresh Token (없으면 null)
-     * @return 재발급 응답 (token_info) + 쿠키용 신규 refreshToken
+     * @return 재발급 결과 + 쿠키용 신규 accessToken/refreshToken
      */
     RefreshTokenResponseDTO refreshAccessToken(String refreshToken);
 

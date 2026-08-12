@@ -6,6 +6,7 @@ import com.workit.security.NoHandlerRequestMatcher;
 import com.workit.security.RestAccessDeniedHandler;
 import com.workit.security.RestAuthenticationEntryPoint;
 import com.workit.security.SecurityPath;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -14,6 +15,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -34,7 +36,8 @@ import java.util.Collections;
 //
 // 주의사항:
 //   - WebSecurityConfigurerAdapter 사용 금지 — SecurityFilterChain 빈 기반 (5.7 표준)
-//   - STATELESS + HttpOnly Cookie 세션 정책이므로 CSRF 비활성
+//   - STATELESS 세션 정책이지만 HttpOnly Cookie 기반 인증이므로 CSRF 방어를 적용한다
+//     (knowledge.md CSRF 정책: XSRF-TOKEN Cookie + X-XSRF-TOKEN Header, 상태 변경 메서드만 검증)
 //   - 이 설정은 ROOT 컨텍스트(RootConfig @Import)에 등록된다.
 //     DelegatingFilterProxy("springSecurityFilterChain")가 ROOT 컨텍스트에서 빈을 찾기 때문.
 @Configuration
@@ -43,14 +46,28 @@ public class SecurityConfig {
 
     private final JwtTokenProvider jwtTokenProvider;
 
-    public SecurityConfig(JwtTokenProvider jwtTokenProvider) {
+    /** CSRF Token Cookie(XSRF-TOKEN) Secure 속성 — docs: 운영 Secure, 로컬 http 개발 false (jwt.refresh-cookie-secure 와 동일 패턴) */
+    private final boolean csrfCookieSecure;
+
+    public SecurityConfig(JwtTokenProvider jwtTokenProvider,
+                          @Value("${jwt.csrf-cookie-secure:true}") boolean csrfCookieSecure) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.csrfCookieSecure = csrfCookieSecure;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf().disable() // STATELESS + HttpOnly Cookie — CSRF 공격면적 없음
+                // CSRF 방어 (Cookie 기반 인증 필수)
+                // - CookieCsrfTokenRepository: XSRF-TOKEN Cookie (HttpOnly=false — JS 가 읽어야 하므로)
+                //   + X-XSRF-TOKEN Request Header 로 토큰 검증 (knowledge.md CSRF 정책)
+                // - Spring Security 5.7 기본 동작: Cookie 에 토큰이 없으면 응답마다 XSRF-TOKEN Cookie 를
+                //   자동 발급하고, 상태 변경 요청(POST/PUT/PATCH/DELETE)만 헤더 토큰과 비교한다
+                //   (GET/HEAD/OPTIONS 는 검증 대상에서 제외 — DEFAULT_CSRF_MATCHER)
+                // - 5.7 의 CsrfFilter 는 Cookie 원문과 Header 를 직접 비교하므로 별도 핸들러 불필요
+                //   (XorCsrfTokenRequestAttributeHandler 는 5.8+ 전용 — SPA 원문 전송과 호환)
+                .csrf(csrf -> csrf
+                        .csrfTokenRepository(csrfTokenRepository()))
                 .cors(Customizer.withDefaults()) // corsConfigurationSource() 빈 참조 (preflight 401 방지)
                 .sessionManagement()
                     .sessionCreationPolicy(SessionCreationPolicy.STATELESS) // 세션 미사용
@@ -78,6 +95,25 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * CSRF Token 저장소 — XSRF-TOKEN Cookie 기반 (knowledge.md CSRF 정책)
+     *
+     * Cookie 스펙:
+     *   - Cookie Name: XSRF-TOKEN (기본값) / Request Header: X-XSRF-TOKEN (기본값)
+     *   - HttpOnly=false: 브라우저 JS 가 Cookie 를 읽어 Header 로 전송해야 한다 (docs)
+     *   - Path=/: Access/Refresh Token Cookie 와 동일하게 전체 경로 적용
+     *   - Secure: 운영(true) / 로컬 http 개발(false) — jwt.csrf-cookie-secure
+     *   - SameSite: spring-security-web 5.7.11 의 CookieCsrfTokenRepository 는
+     *     SameSite 속성을 지원하지 않아 브라우저 기본값(Lax)으로 발급된다 (docs 의 Strict 는 미적용)
+     */
+    @Bean
+    public CookieCsrfTokenRepository csrfTokenRepository() {
+        CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        repository.setCookiePath("/");
+        repository.setSecure(csrfCookieSecure);
+        return repository;
     }
 
     /** Access Token 검증 후 SecurityContext 를 설정하는 필터 */
@@ -114,7 +150,9 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(Arrays.asList("http://localhost:5173", "http://localhost:4173")); // 배포 시 도메인 변경
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Collections.singletonList("*"));
+        // CSRF Header(X-XSRF-TOKEN) 명시 허용 — allowCredentials(true) 와 함께 브라우저 preflight 통과를 보장
+        // (와일드카드 "*" 만으로는 credentials 모드에서 비표준 헤더가 차단될 수 있어 명시한다)
+        configuration.setAllowedHeaders(Arrays.asList("Content-Type", "X-XSRF-TOKEN", "*"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

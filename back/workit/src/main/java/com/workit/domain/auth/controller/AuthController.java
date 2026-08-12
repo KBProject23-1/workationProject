@@ -8,11 +8,13 @@ import com.workit.domain.auth.dto.request.PinResetRequestDTO;
 import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
+import com.workit.domain.auth.dto.response.CsrfTokenResponseDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.SignupResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 import com.workit.domain.auth.service.AuthService;
@@ -33,7 +35,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.web.csrf.CsrfToken;
 
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 // 인증 도메인 컨트롤러
@@ -43,27 +47,29 @@ import javax.servlet.http.HttpServletResponse;
 @Slf4j
 public class AuthController {
 
+    /**
+     * Access Token Cookie 명 (docs: accessToken) — JwtAuthenticationFilter 의 Cookie 추출명과 동일해야 한다
+     * - 필터가 이 이름으로만 Access Token 을 추출하므로 이름이 어긋나면 인증이 동작하지 않는다
+     */
+    private static final String ACCESS_TOKEN_COOKIE_NAME = JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME;
+
     /** Refresh Token Cookie 명 (docs: refreshToken) — 재발급/로그아웃 API 와 이름 통일 */
     private static final String REFRESH_TOKEN_COOKIE_NAME = "refreshToken";
 
-    // Access Token Cookie 명은 JwtAuthenticationFilter 가 읽는 상수와 동일해야 한다 (공용 상수 공유)
-    // - 회원가입 자동 로그인 시 발급 — HttpOnly Secure Cookie
-    private static final String ACCESS_TOKEN_COOKIE_NAME = JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME;
-
     private final AuthService authService;
 
-    /** Refresh Token Cookie Secure 속성 (docs: 운영에서는 Secure) */
-    private final boolean refreshCookieSecure;
+    /** 토큰 Cookie Secure 속성 (docs: 운영에서는 Secure) — Access/Refresh 공통 */
+    private final boolean cookieSecure;
 
-    /** Refresh Token Cookie SameSite 속성 (과제 스펙: SameSite=Lax) */
-    private final String refreshCookieSameSite;
+    /** 토큰 Cookie SameSite 속성 (과제 스펙: SameSite=Lax) — Access/Refresh 공통 */
+    private final String cookieSameSite;
 
     public AuthController(AuthService authService,
-                          @Value("${jwt.refresh-cookie-secure:true}") boolean refreshCookieSecure,
-                          @Value("${jwt.refresh-cookie-samesite:Lax}") String refreshCookieSameSite) {
+                          @Value("${jwt.refresh-cookie-secure:true}") boolean cookieSecure,
+                          @Value("${jwt.refresh-cookie-samesite:Lax}") String cookieSameSite) {
         this.authService = authService;
-        this.refreshCookieSecure = refreshCookieSecure;
-        this.refreshCookieSameSite = refreshCookieSameSite;
+        this.cookieSecure = cookieSecure;
+        this.cookieSameSite = cookieSameSite;
     }
 
     // 1.1 필수/선택 약관 목록 조회
@@ -72,6 +78,24 @@ public class AuthController {
 
         return GlobalResponseFactory.success(
                 authService.getTermsList(), "약관 목록 조회가 완료되었습니다.");
+    }
+
+    // 1.1-1 CSRF Token 발급 (Cookie 기반 인증 — XSRF-TOKEN)
+    // - docs(knowledge.md): GET /api/v1/auth/csrf → data.csrfToken
+    // - Spring Security 의 CsrfFilter(CookieCsrfTokenRepository)가 이 요청을 처리하면서
+    //   XSRF-TOKEN Cookie(HttpOnly=false) 를 자동 발급하고, request attribute 에 원문 토큰을 저장한다.
+    // - Controller 는 그 값을 그대로 data.csrfToken 으로 반환만 한다 (생성/검증 로직 없음).
+    // - 프론트(크로스 오리진)는 JS 가 백엔드 Origin 의 Cookie 를 읽을 수 없으므로
+    //   이 응답 본문의 토큰을 메모리에 보관해 X-XSRF-TOKEN Header 로 전송한다.
+    // - GET 이므로 CSRF 검증 대상에서 제외된다 (상태 변경 없음).
+    @GetMapping("/csrf")
+    public ResponseEntity<CommonResponse<CsrfTokenResponseDTO>> csrfTokenGet(HttpServletRequest request) {
+
+        CsrfToken csrfToken = (CsrfToken) request.getAttribute(CsrfToken.class.getName());
+        String token = csrfToken != null ? csrfToken.getToken() : null;
+
+        return GlobalResponseFactory.success(
+                CsrfTokenResponseDTO.of(token), "CSRF 토큰이 발급되었습니다.");
     }
 
     // 1.2 회원가입 이메일 중복 확인
@@ -104,43 +128,20 @@ public class AuthController {
                 "본인인증 성공. 가입을 진행합니다.");
     }
 
-    // 1.3 최종 회원가입 완료 (DB 최종 저장 + 자동 로그인)
+    // 1.3 최종 회원가입 완료 (DB 최종 저장 — 토큰 미발급)
     // - docs: 최종 회원가입 완료(DB 최종 저장) (POST /api/v1/auth/signup)
     // - 비로그인 공개 API: PASS 인증(POST /auth/pass)과 이메일 중복 확인(check-email) 완료 후 호출
     // - body: { identityVerificationId, email, password, agreedTermsIds }
     //   identityVerificationId 는 백엔드가 발급한 값 — Service 가 Redis(mock:pass:{id}) 세션에서
-    //   인증 정보(name/phoneNumber/CI)를 복원·검증한 뒤 DB 저장/토큰 발급을 수행한다
-    // - Controller 에는 비즈니스 로직 없음 — Service 에서 Redis 조회/중복 검증/DB 저장/토큰 발급 수행
-    // - 자동 로그인(knowledge.md Signup Flow): Service 가 발급한 Access/Refresh Token 을
-    //   HttpOnly Cookie 로 내려준다 — 프론트는 별도 로그인 API 를 호출하지 않는다
+    //   인증 정보(name/phoneNumber/CI)를 복원·검증한 뒤 DB 저장을 수행한다
+    // - Controller 에는 비즈니스 로직 없음 — Service 에서 Redis 조회/중복 검증/DB 저장 수행
+    // - 토큰 미발급(자동 로그인 제거): 회원가입 완료 후 로그인 화면으로 이동해 다시 로그인한다.
+    //   Access/Refresh Token Cookie 를 설정하지 않는다 (Cookie 발급은 login 만 담당)
     @PostMapping("/signup")
-    public ResponseEntity<CommonResponse<LoginResponseDTO>> signupPost(
-            @RequestBody SignupRequestDTO request,
-            HttpServletResponse servletResponse) {
+    public ResponseEntity<CommonResponse<SignupResponseDTO>> signupPost(
+            @RequestBody SignupRequestDTO request) {
 
-        LoginResponseDTO result = authService.signup(request);
-
-        // Access Token Cookie (knowledge.md: ACCESS_TOKEN, HttpOnly Secure Cookie)
-        // - 회원가입 직후 자동 로그인 상태 유지 — 이후 보호 API 호출 시 이 Cookie 로 인증
-        ResponseCookie accessCookie = ResponseCookie.from(
-                        ACCESS_TOKEN_COOKIE_NAME, result.getTokenInfo().getAccessToken())
-                .httpOnly(true)
-                .secure(refreshCookieSecure)
-                .sameSite(refreshCookieSameSite)
-                .path("/")
-                .maxAge(result.getTokenInfo().getAccessTokenExpiresIn())
-                .build();
-        servletResponse.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
-
-        // Refresh Token Cookie (login 과 동일 속성 — refreshToken 은 JSON 본문에 포함하지 않는다)
-        ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, result.getRefreshToken())
-                .httpOnly(true)
-                .secure(refreshCookieSecure)
-                .sameSite(refreshCookieSameSite)
-                .path("/")
-                .maxAge(result.getRefreshTokenMaxAgeSeconds())
-                .build();
-        servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
+        SignupResponseDTO result = authService.signup(request);
 
         return GlobalResponseFactory.success(result, "회원가입이 완료되었습니다.");
     }
@@ -149,7 +150,8 @@ public class AuthController {
     // - docs: 로그인 (POST /api/v1/auth/login)
     // - 비로그인 공개 API: 이메일/휴대폰 + 비밀번호(PASSWORD) 또는 PIN + deviceId(PIN) 로 로그인
     // - 인증/토큰 발급/Redis 저장은 Service 에서 수행하고, Controller 는
-    //   Refresh Token 을 HttpOnly Cookie 로 내려주는 HTTP 처리만 담당한다
+    //   Access Token 과 Refresh Token 을 모두 HttpOnly Cookie 로 내려주는 HTTP 처리만 담당한다
+    // - Response Body 에는 JWT 를 포함하지 않는다 (userId/name/pinSetupRequired 만 반환)
     @PostMapping("/login")
     public ResponseEntity<CommonResponse<LoginResponseDTO>> loginPost(
             @RequestBody LoginRequestDTO request,
@@ -157,13 +159,24 @@ public class AuthController {
 
         LoginResponseDTO result = authService.login(request);
 
-        // Refresh Token Cookie (docs: refreshToken=...; Max-Age=...; HttpOnly; Path=/; SameSite=None; Secure)
-        // - refreshToken 은 JSON 본문에 포함하지 않고 HttpOnly Cookie 로만 전달 (XSS 탈취 방지)
+        // Access Token Cookie (docs: accessToken=...; Max-Age=...; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        // - Max-Age 는 Access Token 만료와 동일(초) — jwt.access-token-expiration 기준
+        // - HttpOnly 로 브라우저 JS 에서 접근 불가 — 프론트는 Cookie 를 자동 전송만 한다
+        ResponseCookie accessCookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE_NAME, result.getAccessToken())
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(result.getAccessTokenMaxAgeSeconds())
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
+
+        // Refresh Token Cookie (docs: refreshToken=...; Max-Age=...; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
         // - Max-Age 는 Refresh Token 만료와 동일(초) — jwt.refresh-token-expiration 기준
         ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, result.getRefreshToken())
                 .httpOnly(true)
-                .secure(refreshCookieSecure)
-                .sameSite(refreshCookieSameSite)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(result.getRefreshTokenMaxAgeSeconds())
                 .build();
@@ -177,33 +190,46 @@ public class AuthController {
     // - 비로그인 공개 API: Access Token 만료 시 Vue3 Axios Interceptor 가 호출
     // - Refresh Token 은 HttpOnly Cookie(refreshToken)에서만 받는다 (Body 없음)
     // - Service 에서 검증/회원 상태 확인/Redis hash 비교(재사용 감지)/재발급(Rotation)을 수행하고,
-    //   Controller 는 Rotation 으로 갱신된 신규 Refresh Token 을 HttpOnly Cookie 로 다시 구워주는 HTTP 처리만 담당한다
+    //   Controller 는 Rotation 으로 갱신된 신규 Access/Refresh Token 을 모두
+    //   HttpOnly Cookie 로 다시 구워주는 HTTP 처리만 담당한다
+    // - Response Body 에는 JWT 를 포함하지 않는다 (data = null)
     @PostMapping("/refresh")
-    public ResponseEntity<CommonResponse<RefreshTokenResponseDTO>> refreshPost(
+    public ResponseEntity<CommonResponse<Void>> refreshPost(
             @CookieValue(value = REFRESH_TOKEN_COOKIE_NAME, required = false) String refreshToken,
             HttpServletResponse servletResponse) {
 
         RefreshTokenResponseDTO result = authService.refreshAccessToken(refreshToken);
 
+        // 신규 Access Token Cookie (login 과 동일한 속성)
+        // - Max-Age 는 Access Token 만료와 동일(초) — jwt.access-token-expiration 기준
+        ResponseCookie accessCookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE_NAME, result.getAccessToken())
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(result.getAccessTokenMaxAgeSeconds())
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, accessCookie.toString());
+
         // Rotation 으로 갱신된 신규 Refresh Token Cookie (login 과 동일한 속성)
         // - Max-Age 는 Refresh Token 만료와 동일(초) — jwt.refresh-token-expiration 기준
         ResponseCookie refreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, result.getRefreshToken())
                 .httpOnly(true)
-                .secure(refreshCookieSecure)
-                .sameSite(refreshCookieSameSite)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(result.getRefreshTokenMaxAgeSeconds())
                 .build();
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, refreshCookie.toString());
 
-        return GlobalResponseFactory.success(result, "액세스 토큰이 성공적으로 재발급되었습니다.");
+        return GlobalResponseFactory.success(null, "액세스 토큰이 성공적으로 재발급되었습니다.");
     }
 
     // 1.7 로그아웃
     // - docs: 로그아웃 (POST /api/v1/auth/logout)
     // - 비로그인 공개 API: Refresh Token 이 HttpOnly Cookie(refreshToken)에 있는 상태에서 호출
     // - Service 에서 Refresh Token 검증/Redis hash 비교/세션 삭제를 수행하고,
-    //   Controller 는 Cookie 를 즉시 만료(Max-Age=0)시키는 HTTP 처리만 담당한다
+    //   Controller 는 Access/Refresh Token Cookie 를 모두 즉시 만료(Max-Age=0)시키는 HTTP 처리만 담당한다
     //   (JWT 검증/Redis 접근/Token 삭제 로직은 Controller 금지 — 전부 Service 책임)
     // - 실패 시(쿠키 누락/위변조/만료/Redis 부재) INVALID_REFRESH_TOKEN(401) — 원인 비노출
     @PostMapping("/logout")
@@ -213,12 +239,23 @@ public class AuthController {
 
         authService.logout(refreshToken);
 
-        // Refresh Token Cookie 즉시 만료 (docs: refreshToken=; Max-Age=0; HttpOnly; Path=/; SameSite=None; Secure)
+        // Access Token Cookie 즉시 만료 (docs: accessToken=; Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        // - Max-Age=0 으로 브라우저가 즉시 삭제 — 기존 Cookie 이름/HttpOnly/Secure/Path/SameSite 속성 유지
+        ResponseCookie expiredAccessCookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(0)
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredAccessCookie.toString());
+
+        // Refresh Token Cookie 즉시 만료 (docs: refreshToken=; Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
         // - Max-Age=0 으로 브라우저가 즉시 삭제 — 기존 Cookie 이름/HttpOnly/Secure/Path/SameSite 속성 유지
         ResponseCookie expiredCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, "")
                 .httpOnly(true)
-                .secure(refreshCookieSecure)
-                .sameSite(refreshCookieSameSite)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(0)
                 .build();
