@@ -17,16 +17,16 @@ import java.text.DecimalFormat;
 public class UploadFiles {
     public static String upload(String baseDir, MultipartFile part) throws IOException {
 
-        // 기본 디렉토리가 있는지 확인, 없으면 새로 생성
-        File base = new File(baseDir);
-        if (!base.exists()) {
-            base.mkdirs();        // 중간에 존재하지 않는 디렉토리까지 모두 생성
-        }
-
+        // 상대 경로가 Servlet 임시 경로에 다시 결합되지 않도록 절대 경로를 사용한다.
+        Path basePath = Paths.get(baseDir).toAbsolutePath().normalize();
+        Files.createDirectories(basePath);
         String fileName = part.getOriginalFilename();
-        File dest = new File(baseDir, UploadFileName.getUniqueName(fileName));
-        part.transferTo(dest);        // 지정한 경로로 업로드 파일 이동
-        return dest.getPath();        // 저장된 파일 경로 리턴
+        Path destination = basePath.resolve(UploadFileName.getUniqueName(fileName)).normalize();
+        if (!destination.startsWith(basePath)) {
+            throw new IOException("허용되지 않은 파일 저장 경로입니다.");
+        }
+        part.transferTo(destination.toFile());
+        return destination.toString();
     }
 
     public static String getFormatSize(Long size) {

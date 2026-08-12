@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 public class ReviewDetailResponseDTO {
 
     private Long reviewId;
+    private Boolean isMine;
     private String nickname;
     private Integer rating;
     private String content;
@@ -21,9 +22,7 @@ public class ReviewDetailResponseDTO {
     private String imageUrl;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private Long merchantId;
-    private String merchantName;
-    private String merchantCategory;
+    private ReviewMerchantResponseDTO merchant;
     private Long reservationId;
     private String reservationCode;
     private LocalDate reservationStartDate;
@@ -33,9 +32,10 @@ public class ReviewDetailResponseDTO {
     private BigDecimal transactionAmount;
     private LocalDateTime transactionApprovedAt;
 
-    public static ReviewDetailResponseDTO from(ReviewDetailVO review) {
+    public static ReviewDetailResponseDTO from(ReviewDetailVO review, Long currentUserId) {
         return ReviewDetailResponseDTO.builder()
                 .reviewId(review.getReviewId())
+                .isMine(currentUserId != null && currentUserId.equals(review.getUserId()))
                 .nickname(review.getNickname())
                 .rating(review.getRating())
                 .content(review.getContent())
@@ -43,9 +43,7 @@ public class ReviewDetailResponseDTO {
                 .imageUrl(review.getImageUrl())
                 .createdAt(review.getCreatedAt())
                 .updatedAt(review.getUpdatedAt())
-                .merchantId(review.getMerchantId())
-                .merchantName(review.getMerchantName())
-                .merchantCategory(review.getMerchantCategory())
+                .merchant(ReviewMerchantResponseDTO.from(review))
                 .reservationId(review.getReservationId())
                 .reservationCode(review.getReservationCode())
                 .reservationStartDate(review.getReservationStartDate())

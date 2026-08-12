@@ -19,6 +19,7 @@ public class OwnedReviewVO {
     private Long transactionId;
     private String status;
     private String merchantCategory;
+    private LocalDateTime createdAt;
     private LocalDate reservationEndDate;
     private LocalDateTime transactionApprovedAt;
 }

@@ -13,6 +13,8 @@ import java.util.Map;
 @Builder
 public class MerchantReviewListResponseDTO {
 
+    private Long merchantId;
+    private String merchantName;
     private PageResponseDTO<MerchantReviewItemResponseDTO> reviews;
     private BigDecimal averageRating;
     private Long reviewCount;
@@ -20,9 +22,13 @@ public class MerchantReviewListResponseDTO {
 
     public static MerchantReviewListResponseDTO of(
             PageResponseDTO<MerchantReviewItemResponseDTO> reviews,
+            Long merchantId,
+            String merchantName,
             MerchantReviewStatisticsVO statistics,
             Map<Integer, Long> ratingDistribution) {
         return MerchantReviewListResponseDTO.builder()
+                .merchantId(merchantId)
+                .merchantName(merchantName)
                 .reviews(reviews)
                 .averageRating(statistics.getAverageRating())
                 .reviewCount(statistics.getReviewCount())

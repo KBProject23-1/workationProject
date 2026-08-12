@@ -2,6 +2,7 @@ package com.workit.domain.review.dto.request;
 
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.workit.domain.review.vo.ReviewAtmosphere;
+import org.springframework.web.multipart.MultipartFile;
 
 public class ReviewUpdateRequestDTO {
 
@@ -9,6 +10,7 @@ public class ReviewUpdateRequestDTO {
     private String content;
     private ReviewAtmosphere atmosphere;
     private String imageUrl;
+    private MultipartFile image;
     private boolean ratingProvided;
     private boolean contentProvided;
     private boolean atmosphereProvided;
@@ -71,6 +73,15 @@ public class ReviewUpdateRequestDTO {
     }
 
     public boolean hasAnyField() {
-        return ratingProvided || contentProvided || atmosphereProvided || imageUrlProvided;
+        return ratingProvided || contentProvided || atmosphereProvided || imageUrlProvided
+                || (image != null && !image.isEmpty());
+    }
+
+    public MultipartFile getImage() {
+        return image;
+    }
+
+    public void setImage(MultipartFile image) {
+        this.image = image;
     }
 }

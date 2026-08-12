@@ -19,8 +19,10 @@ import com.workit.domain.review.vo.ReviewVO;
 import com.workit.domain.review.vo.TransactionReviewSourceVO;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
+import com.workit.global.util.UploadFiles;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -30,6 +32,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Paths;
 
 @Service
 @RequiredArgsConstructor
@@ -38,6 +43,9 @@ public class ReviewServiceImpl implements ReviewService {
     private static final int MAX_PAGE_SIZE = 50;
 
     private final ReviewMapper reviewMapper;
+
+    @Value("${file.upload-dir:./uploads}")
+    private String uploadDir;
 
     @Override
     @Transactional(readOnly = true)
@@ -56,6 +64,7 @@ public class ReviewServiceImpl implements ReviewService {
 
         MerchantReviewStatisticsVO statistics =
                 reviewMapper.selectMerchantReviewStatistics(merchantId);
+        String merchantName = reviewMapper.selectMerchantName(merchantId);
         Map<Integer, Long> ratingDistribution = createRatingDistribution(statistics);
         int offset = page * size;
         List<MerchantReviewItemResponseDTO> reviews =
@@ -66,6 +75,8 @@ public class ReviewServiceImpl implements ReviewService {
 
         return MerchantReviewListResponseDTO.of(
                 PageResponseDTO.of(reviews, page, size, statistics.getReviewCount()),
+                merchantId,
+                merchantName,
                 statistics,
                 ratingDistribution
         );
@@ -73,7 +84,7 @@ public class ReviewServiceImpl implements ReviewService {
 
     @Override
     @Transactional(readOnly = true)
-    public ReviewDetailResponseDTO findReviewDetails(Long reviewId) {
+    public ReviewDetailResponseDTO findReviewDetails(Long userId, Long reviewId) {
         if (reviewId == null || reviewId < 1) {
             throw new IllegalArgumentException("리뷰 번호는 1 이상이어야 합니다.");
         }
@@ -83,24 +94,27 @@ public class ReviewServiceImpl implements ReviewService {
             throw new BusinessException(ReviewErrorCode.REVIEW_NOT_FOUND);
         }
 
-        return ReviewDetailResponseDTO.from(review);
+        return ReviewDetailResponseDTO.from(review, userId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PageResponseDTO<MyReviewListResponseDTO> findMyReviewList(
             Long userId,
+            String category,
             int page,
             int size) {
         if (userId == null || userId < 1) {
             throw new IllegalArgumentException("사용자 번호는 1 이상이어야 합니다.");
         }
         validatePageRequest(page, size);
+        validateCategory(category);
 
-        long totalElements = reviewMapper.countMyReviewList(userId);
+        long totalElements = reviewMapper.countMyReviewList(userId, category);
         int offset = page * size;
         List<MyReviewListResponseDTO> content = reviewMapper.selectMyReviewList(
                         userId,
+                        category,
                         offset,
                         size
                 )
@@ -138,6 +152,7 @@ public class ReviewServiceImpl implements ReviewService {
 
         validateReservationPeriod(source);
         validateAtmosphere(source.getMerchantCategory(), request.getAtmosphere(), true);
+        request.setImageUrl(storeReviewImage(request.getImage()));
 
         ReviewVO review = createReview(userId, source.getMerchantId(), request);
         review.setReservationId(reservationId);
@@ -174,6 +189,7 @@ public class ReviewServiceImpl implements ReviewService {
             throw new BusinessException(ReviewErrorCode.REVIEW_PERIOD_EXPIRED);
         }
         validateAtmosphere(source.getMerchantCategory(), request.getAtmosphere(), true);
+        request.setImageUrl(storeReviewImage(request.getImage()));
 
         ReviewVO review = createReview(userId, source.getMerchantId(), request);
         review.setTransactionId(transactionId);
@@ -210,6 +226,10 @@ public class ReviewServiceImpl implements ReviewService {
                     request.getAtmosphere(),
                     false
             );
+        }
+
+        if (request.getImage() != null && !request.getImage().isEmpty()) {
+            request.setImageUrl(storeReviewImage(request.getImage()));
         }
 
         reviewMapper.updateReview(reviewId, request);
@@ -258,6 +278,16 @@ public class ReviewServiceImpl implements ReviewService {
         }
     }
 
+    private void validateCategory(String category) {
+        if (category == null || "ALL".equals(category)) {
+            return;
+        }
+
+        if (!List.of("ACCOMMODATION", "OFFICE", "RESTAURANT", "ACTIVITY").contains(category)) {
+            throw new IllegalArgumentException("지원하지 않는 가맹점 카테고리입니다.");
+        }
+    }
+
     private void validateCreateRequest(ReviewCreateRequestDTO request) {
         if (request == null) {
             throw new IllegalArgumentException("리뷰 작성 정보가 필요합니다.");
@@ -296,12 +326,16 @@ public class ReviewServiceImpl implements ReviewService {
 
     private void validateModificationPeriod(OwnedReviewVO review) {
         boolean expired;
-        if (review.getReservationId() != null) {
+        if (review.getReservationId() != null && review.getReservationEndDate() != null) {
             expired = LocalDate.now().isAfter(review.getReservationEndDate().plusDays(30));
-        } else {
+        } else if (review.getTransactionId() != null
+                && review.getTransactionApprovedAt() != null) {
             expired = LocalDateTime.now().isAfter(
                     review.getTransactionApprovedAt().plusDays(30)
             );
+        } else {
+            expired = review.getCreatedAt() != null
+                    && LocalDateTime.now().isAfter(review.getCreatedAt().plusDays(30));
         }
 
         if (expired) {
@@ -347,6 +381,19 @@ public class ReviewServiceImpl implements ReviewService {
             reviewMapper.insertReview(review);
         } catch (DuplicateKeyException exception) {
             throw new BusinessException(ReviewErrorCode.DUPLICATE_REVIEW);
+        }
+    }
+
+    // 업로드된 리뷰 이미지를 정적 리소스 경로로 변환
+    private String storeReviewImage(org.springframework.web.multipart.MultipartFile image) {
+        if (image == null || image.isEmpty()) {
+            return null;
+        }
+        try {
+            String storedPath = UploadFiles.upload(uploadDir, image);
+            return "/uploads/" + Paths.get(storedPath).getFileName();
+        } catch (IOException exception) {
+            throw new UncheckedIOException("리뷰 이미지 저장에 실패했습니다.", exception);
         }
     }
 }

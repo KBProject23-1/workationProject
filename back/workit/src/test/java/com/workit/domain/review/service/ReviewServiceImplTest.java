@@ -34,6 +34,7 @@ class ReviewServiceImplTest {
     void 가맹점리뷰목록과평점통계를조회한다() {
         MerchantReviewVO review = new MerchantReviewVO();
         review.setReviewId(11L);
+        review.setUserId(1L);
         review.setNickname("워케이션러");
         review.setRating(5);
         review.setContent("좋았어요.");
@@ -84,6 +85,7 @@ class ReviewServiceImplTest {
     void 예약기반리뷰상세를조회한다() {
         ReviewDetailVO review = new ReviewDetailVO();
         review.setReviewId(11L);
+        review.setUserId(1L);
         review.setNickname("워케이션러");
         review.setMerchantName("테스트 호텔");
         review.setReservationId(21L);
@@ -98,11 +100,12 @@ class ReviewServiceImplTest {
                 )
         );
 
-        ReviewDetailResponseDTO response = service.findReviewDetails(11L);
+        ReviewDetailResponseDTO response = service.findReviewDetails(1L, 11L);
 
         assertEquals("워케이션러", response.getNickname());
-        assertEquals("테스트 호텔", response.getMerchantName());
+        assertEquals("테스트 호텔", response.getMerchant().getMerchantName());
         assertEquals("RES-20260804", response.getReservationCode());
+        assertEquals(true, response.getIsMine());
     }
 
     @Test
@@ -118,7 +121,7 @@ class ReviewServiceImplTest {
 
         BusinessException exception = assertThrows(
                 BusinessException.class,
-                () -> service.findReviewDetails(999L)
+                () -> service.findReviewDetails(1L, 999L)
         );
 
         assertEquals(ReviewErrorCode.REVIEW_NOT_FOUND, exception.getErrorCode());
@@ -143,7 +146,7 @@ class ReviewServiceImplTest {
         );
 
         PageResponseDTO<MyReviewListResponseDTO> response =
-                service.findMyReviewList(1L, 0, 10);
+                service.findMyReviewList(1L, "ALL", 0, 10);
 
         assertEquals(1, response.getContent().size());
         assertEquals(1L, response.getTotalElements());
@@ -159,7 +162,7 @@ class ReviewServiceImplTest {
 
         assertThrows(
                 IllegalArgumentException.class,
-                () -> service.findMyReviewList(1L, 0, 51)
+                () -> service.findMyReviewList(1L, "ALL", 0, 51)
         );
     }
 
@@ -317,6 +320,28 @@ class ReviewServiceImplTest {
         assertEquals(1, mapper.softDeleteCount);
     }
 
+    @Test
+    void 작성근거가없는기존리뷰도널예외없이수정한다() {
+        StubReviewMapper mapper = new StubReviewMapper(
+                true,
+                Collections.emptyList(),
+                createStatistics()
+        );
+        OwnedReviewVO review = new OwnedReviewVO();
+        review.setReviewId(52L);
+        review.setUserId(1L);
+        review.setStatus("ACTIVE");
+        review.setMerchantCategory("RESTAURANT");
+        review.setCreatedAt(LocalDateTime.now().minusDays(1));
+        mapper.ownedReview = review;
+
+        ReviewUpdateRequestDTO request = new ReviewUpdateRequestDTO();
+        request.setRating(5);
+
+        ReviewService service = new ReviewServiceImpl(mapper);
+        service.modifyReview(1L, 52L, request);
+    }
+
     private MerchantReviewStatisticsVO createStatistics() {
         MerchantReviewStatisticsVO statistics = new MerchantReviewStatisticsVO();
         statistics.setAverageRating(new BigDecimal("4.5"));
@@ -398,6 +423,11 @@ class ReviewServiceImplTest {
         }
 
         @Override
+        public String selectMerchantName(Long merchantId) {
+            return "테스트 가맹점";
+        }
+
+        @Override
         public ReviewDetailVO selectReviewDetails(Long reviewId) {
             return reviewDetail;
         }
@@ -405,13 +435,14 @@ class ReviewServiceImplTest {
         @Override
         public List<MyReviewListItemVO> selectMyReviewList(
                 Long userId,
+                String category,
                 int offset,
                 int size) {
             return myReviews;
         }
 
         @Override
-        public long countMyReviewList(Long userId) {
+        public long countMyReviewList(Long userId, String category) {
             return myReviews.size();
         }
 
