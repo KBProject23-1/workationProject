@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.workit.security.CurrentUserArgumentResolver;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
@@ -17,6 +18,8 @@ import org.springframework.web.multipart.MultipartResolver;
 import org.springframework.web.multipart.support.StandardServletMultipartResolver;
 import org.springframework.web.servlet.config.annotation.*;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 @EnableWebMvc
@@ -32,6 +35,9 @@ import java.util.List;
 )
 public class ServletConfig implements WebMvcConfigurer {
 
+    @Value("${file.upload-dir:./uploads}")
+    private String uploadDir;
+
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
         registry.addViewController("/")
@@ -45,6 +51,14 @@ public class ServletConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true);
+    }
+
+    // 저장된 리뷰 이미지를 /uploads/** URL로 조회할 수 있도록 실제 업로드 폴더와 연결한다.
+    @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
+        registry.addResourceHandler("/uploads/**")
+                .addResourceLocations(uploadPath.toUri().toString());
     }
 
     //	Servlet 3.0 파일 업로드 사용시

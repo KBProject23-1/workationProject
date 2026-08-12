@@ -2,12 +2,16 @@ package com.workit.config;
 
 import org.springframework.web.servlet.support.AbstractAnnotationConfigDispatcherServletInitializer;
 import org.springframework.web.filter.DelegatingFilterProxy;
+import org.springframework.web.filter.CharacterEncodingFilter;
 
 import javax.servlet.Filter;
 import javax.servlet.MultipartConfigElement;
 import javax.servlet.ServletRegistration;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Properties;
 
 public class WebConfig extends AbstractAnnotationConfigDispatcherServletInitializer {
@@ -28,7 +32,14 @@ public class WebConfig extends AbstractAnnotationConfigDispatcherServletInitiali
         } catch (IOException e) {
             throw new RuntimeException("application.properties 로드 실패", e);
         }
-        return props.getProperty("file.upload-dir", "./uploads"); // 기본값 fallback
+        String configuredUploadDir = props.getProperty("file.upload-dir", "./uploads");
+        Path uploadPath = Paths.get(configuredUploadDir).toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(uploadPath);
+        } catch (IOException e) {
+            throw new IllegalStateException("파일 업로드 디렉터리를 생성할 수 없습니다.", e);
+        }
+        return uploadPath.toString();
     }
 
 
@@ -54,7 +65,14 @@ public class WebConfig extends AbstractAnnotationConfigDispatcherServletInitiali
      */
     @Override
     protected Filter[] getServletFilters() {
-        return new Filter[]{new DelegatingFilterProxy("springSecurityFilterChain")};
+        // multipart/form-data의 한글 일반 필드도 UTF-8로 해석되도록 가장 먼저 적용한다.
+        CharacterEncodingFilter encodingFilter = new CharacterEncodingFilter();
+        encodingFilter.setEncoding("UTF-8");
+        encodingFilter.setForceEncoding(true);
+        return new Filter[]{
+                encodingFilter,
+                new DelegatingFilterProxy("springSecurityFilterChain")
+        };
     }
 
     @Override

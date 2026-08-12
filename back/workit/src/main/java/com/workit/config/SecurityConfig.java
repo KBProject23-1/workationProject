@@ -61,7 +61,7 @@ public class SecurityConfig {
                 .and()
                 .authorizeHttpRequests(authorize -> authorize
                         // 공개 경로 — 인증 불필요
-                        .antMatchers("/", "/index.html", "/index.jsp").permitAll()
+                        .antMatchers("/", "/index.html", "/index.jsp", "/uploads/**").permitAll()
                         .antMatchers("/api/v1/recommendations/offices/**", "/api/v1/recommendations/activities/**").authenticated()
                         .antMatchers("/api/v1/bookmarks/**", "/api/v1/surveys/**").authenticated()
                         // 로그인 사용자 전용 인증 API(/api/v1/auth/me/**) — 공개 예외보다 먼저 평가되어 인증 필수

@@ -13,9 +13,14 @@ public interface ReviewService {
 
     MerchantReviewListResponseDTO findMerchantReviewList(Long merchantId, int page, int size);
 
-    ReviewDetailResponseDTO findReviewDetails(Long reviewId);
+    ReviewDetailResponseDTO findReviewDetails(Long userId, Long reviewId);
 
-    PageResponseDTO<MyReviewListResponseDTO> findMyReviewList(Long userId, int page, int size);
+    PageResponseDTO<MyReviewListResponseDTO> findMyReviewList(
+            Long userId,
+            String category,
+            int page,
+            int size
+    );
 
     ReviewCreateResponseDTO addReservationReview(
             Long userId,

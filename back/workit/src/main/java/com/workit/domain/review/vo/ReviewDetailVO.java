@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 public class ReviewDetailVO {
 
     private Long reviewId;
+    private Long userId;
     private String nickname;
     private Integer rating;
     private String content;
@@ -25,6 +26,8 @@ public class ReviewDetailVO {
     private Long merchantId;
     private String merchantName;
     private String merchantCategory;
+    private String merchantAddress;
+    private String merchantThumbnailUrl;
     private Long reservationId;
     private String reservationCode;
     private LocalDate reservationStartDate;

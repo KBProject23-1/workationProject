@@ -17,6 +17,8 @@ public interface ReviewMapper {
 
     boolean selectMerchantExists(@Param("merchantId") Long merchantId);
 
+    String selectMerchantName(@Param("merchantId") Long merchantId);
+
     List<MerchantReviewVO> selectMerchantReviewList(
             @Param("merchantId") Long merchantId,
             @Param("offset") int offset,
@@ -38,11 +40,13 @@ public interface ReviewMapper {
 
     List<MyReviewListItemVO> selectMyReviewList(
             @Param("userId") Long userId,
+            @Param("category") String category,
             @Param("offset") int offset,
             @Param("size") int size
     );
 
-    long countMyReviewList(@Param("userId") Long userId);
+    long countMyReviewList(@Param("userId") Long userId,
+                           @Param("category") String category);
 
     ReservationReviewSourceVO selectReservationReviewSource(
             @Param("userId") Long userId,

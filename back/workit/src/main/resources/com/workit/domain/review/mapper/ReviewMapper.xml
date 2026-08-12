@@ -29,6 +29,7 @@
 
     <resultMap id="reviewDetailMap" type="com.workit.domain.review.vo.ReviewDetailVO">
         <id property="reviewId" column="review_id"/>
+        <result property="userId" column="user_id"/>
         <result property="nickname" column="nickname"/>
         <result property="rating" column="rating"/>
         <result property="content" column="content"/>
@@ -39,6 +40,8 @@
         <result property="merchantId" column="merchant_id"/>
         <result property="merchantName" column="merchant_name"/>
         <result property="merchantCategory" column="merchant_category"/>
+        <result property="merchantAddress" column="merchant_address"/>
+        <result property="merchantThumbnailUrl" column="merchant_thumbnail_url"/>
         <result property="reservationId" column="reservation_id"/>
         <result property="reservationCode" column="reservation_code"/>
         <result property="reservationStartDate" column="reservation_start_date"/>
@@ -96,6 +99,7 @@
         <result property="transactionId" column="transaction_id"/>
         <result property="status" column="status"/>
         <result property="merchantCategory" column="merchant_category"/>
+        <result property="createdAt" column="created_at"/>
         <result property="reservationEndDate" column="reservation_end_date"/>
         <result property="transactionApprovedAt" column="transaction_approved_at"/>
     </resultMap>
@@ -123,6 +127,12 @@
           AND r.status = 'ACTIVE'
         ORDER BY r.created_at DESC, r.review_id DESC
         LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="selectMerchantName" resultType="string">
+        SELECT name
+        FROM merchants
+        WHERE id = #{merchantId}
     </select>
 
     <select id="selectMerchantReviewListWithMine" resultMap="merchantReviewMap">
@@ -161,6 +171,7 @@
     <select id="selectReviewDetails" resultMap="reviewDetailMap">
         SELECT
             rv.review_id,
+            rv.user_id,
             up.nickname,
             rv.rating,
             rv.content,
@@ -171,6 +182,8 @@
             m.id AS merchant_id,
             m.name AS merchant_name,
             m.category AS merchant_category,
+            m.address AS merchant_address,
+            m.thumbnail_url AS merchant_thumbnail_url,
             rs.id AS reservation_id,
             rs.reservation_code,
             rs.start_date AS reservation_start_date,
@@ -207,6 +220,9 @@
         JOIN merchants m ON m.id = rv.merchant_id
         WHERE rv.user_id = #{userId}
           AND rv.status = 'ACTIVE'
+        <if test="category != null and category != 'ALL'">
+            AND m.category = #{category}
+        </if>
         ORDER BY
             FIELD(m.category, 'ACCOMMODATION', 'OFFICE', 'RESTAURANT', 'ACTIVITY'),
             rv.created_at DESC,
@@ -219,6 +235,11 @@
         FROM reviews
         WHERE user_id = #{userId}
           AND status = 'ACTIVE'
+        <if test="category != null and category != 'ALL'">
+            AND merchant_id IN (
+                SELECT id FROM merchants WHERE category = #{category}
+            )
+        </if>
     </select>
 
     <select id="selectReservationReviewSource" resultMap="reservationReviewSourceMap">
@@ -287,6 +308,7 @@
             rv.transaction_id,
             rv.status,
             m.category AS merchant_category,
+            rv.created_at,
             rs.end_date AS reservation_end_date,
             tr.approved_at AS transaction_approved_at
         FROM reviews rv
