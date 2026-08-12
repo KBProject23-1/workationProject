@@ -4,11 +4,14 @@
 
 <mapper namespace="com.workit.domain.recommendation.offices.mapper.OfficeRecommendationMapper">
 
+    <!--
+        설문은 사용자당 1회라 워케이션 조건을 걸지 않는다.
+        workationId 파라미터는 호출부 시그니처를 유지하려고 남겨 둔 것이고 쓰지 않는다.
+    -->
     <select id="selectLatestSurveyIdByWorkation" resultType="java.lang.Long">
         SELECT id
         FROM user_surveys
         WHERE user_id = #{userId}
-          AND workation_id = #{workationId}
         ORDER BY updated_at DESC, id DESC
         LIMIT 1
     </select>

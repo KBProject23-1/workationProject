@@ -27,6 +27,17 @@
         m.name AS reference_merchant_name, sm.name AS secondary_reference_merchant_name
     </sql>
 
+    <!--
+        그 사용자의 최신 설문 1건.
+        설문을 먼저 하나로 좁혀야 문항별 답변이 서로 다른 설문에서 섞여 나오지 않는다.
+    -->
+    <sql id="latestSurveyId">
+        (SELECT s.id FROM user_surveys s
+          WHERE s.user_id = w.user_id
+          ORDER BY s.updated_at DESC, s.id DESC
+          LIMIT 1)
+    </sql>
+
     <select id="selectActivityCondition"
             resultType="com.workit.domain.recommendation.activities.vo.ActivityConditionVO">
         SELECT w.id AS workation_id,
@@ -44,8 +55,7 @@
                   JOIN user_survey_answers usa ON usa.survey_id = us.id
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
-                 WHERE us.user_id = w.user_id
-                   AND us.workation_id = w.id
+                 WHERE us.id = <include refid="latestSurveyId"/>
                    AND sq.question_code = 'Q1'
                  ORDER BY usa.id DESC LIMIT 1) AS priority_option_code,
                (SELECT so.option_name
@@ -53,8 +63,7 @@
                   JOIN user_survey_answers usa ON usa.survey_id = us.id
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
-                 WHERE us.user_id = w.user_id
-                   AND us.workation_id = w.id
+                 WHERE us.id = <include refid="latestSurveyId"/>
                    AND sq.question_code = 'Q1'
                  ORDER BY usa.id DESC LIMIT 1) AS priority_option_name,
                (SELECT GROUP_CONCAT(so.option_code SEPARATOR ',')
@@ -62,8 +71,7 @@
                   JOIN user_survey_answers usa ON usa.survey_id = us.id
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
-                 WHERE us.user_id = w.user_id
-                   AND us.workation_id = w.id
+                 WHERE us.id = <include refid="latestSurveyId"/>
                    AND sq.question_code = 'Q3'
                  ORDER BY usa.id DESC LIMIT 3) AS selected_activity_codes,
                (SELECT GROUP_CONCAT(so.option_name SEPARATOR ',')
@@ -71,8 +79,7 @@
                   JOIN user_survey_answers usa ON usa.survey_id = us.id
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
-                 WHERE us.user_id = w.user_id
-                   AND us.workation_id = w.id
+                 WHERE us.id = <include refid="latestSurveyId"/>
                    AND sq.question_code = 'Q3'
                  ORDER BY usa.id DESC LIMIT 3) AS selected_activity_names
           FROM workations w
