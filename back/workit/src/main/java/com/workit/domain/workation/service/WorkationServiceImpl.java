@@ -177,9 +177,12 @@ public class WorkationServiceImpl implements WorkationService {
 
         // 4) FK 제약 때문에 하위 데이터부터 삭제
         //    추천 이력은 워케이션이 사라지면 의미가 없으므로 함께 지운다
+        //
+        //    설문은 지우지 않는다. 사용자의 취향이라 워케이션보다 오래 살아야 하고,
+        //    지우면 다음 워케이션에서 추천을 받을 수 없다.
+        //    user_surveys.workation_id 는 ON DELETE SET NULL 로 연결만 끊긴다
         workationMapper.deleteExpensesByWorkationId(workationId);
         workationMapper.deleteBudgetsByWorkationId(workationId);
-        workationMapper.deleteSurveysByWorkationId(workationId);
         workationMapper.deleteRecommendationRequestsByWorkationId(workationId);
 
         workationMapper.deleteWorkation(workationId);

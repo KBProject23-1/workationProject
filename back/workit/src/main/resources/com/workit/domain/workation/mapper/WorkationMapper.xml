@@ -256,11 +256,6 @@
         WHERE workation_id = #{workationId}
     </delete>
 
-    <delete id="deleteSurveysByWorkationId">
-        DELETE FROM user_surveys
-        WHERE workation_id = #{workationId}
-    </delete>
-
     <!-- 결제 원본(transactions)은 삭제하지 않고 워케이션 연결만 끊는다 -->
     <update id="unlinkTransactions">
         UPDATE transactions

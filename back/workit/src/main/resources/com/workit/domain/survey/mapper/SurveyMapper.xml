@@ -46,11 +46,15 @@
          ORDER BY sq.id ASC, so.id ASC
     </select>
 
+    <!--
+        설문은 사용자당 1회다. 워케이션 조건을 걸지 않는다.
+        워케이션마다 다시 받으면 두 번째부터 같은 문항을 또 답해야 한다.
+        workationId 파라미터는 호출부 시그니처를 유지하려고 남겨 둔 것이고 쓰지 않는다.
+    -->
     <select id="countSurveyByUserAndWorkation" resultType="int">
         SELECT COUNT(*)
           FROM user_surveys
          WHERE user_id = #{userId}
-           AND workation_id = #{workationId}
     </select>
 
     <insert id="insertUserSurvey" parameterType="com.workit.domain.survey.vo.UserSurveyVO"
@@ -72,8 +76,7 @@
         SELECT id, user_id, workation_id, created_at, updated_at
           FROM user_surveys
          WHERE user_id = #{userId}
-           AND workation_id = #{workationId}
-         ORDER BY created_at DESC, id DESC
+         ORDER BY updated_at DESC, id DESC
          LIMIT 1
     </select>
 

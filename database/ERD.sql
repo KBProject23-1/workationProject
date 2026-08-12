@@ -636,15 +636,18 @@ CREATE TABLE `user_surveys`
 (
     `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
     `user_id`      BIGINT    NOT NULL,
-    `workation_id` BIGINT    NOT NULL COMMENT '워케이션 고유 번호(PK)',
+    `workation_id` BIGINT    NULL COMMENT '설문을 작성한 워케이션. 삭제되면 NULL 로 연결만 끊고 답변은 남긴다',
     `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT FOREIGN KEY (user_id)
         REFERENCES users (id),
+    -- 설문은 사용자의 취향이라 워케이션보다 오래 산다.
+    -- CASCADE 면 첫 워케이션을 삭제할 때 설문과 답변이 함께 사라져
+    -- 다음 워케이션에서 추천을 받을 수 없다.
     CONSTRAINT FOREIGN KEY (workation_id)
         REFERENCES workations (id)
-        ON DELETE CASCADE
+        ON DELETE SET NULL
         ON UPDATE CASCADE
 );
 

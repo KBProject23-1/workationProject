@@ -72,7 +72,6 @@ public interface WorkationMapper {
     // 하위 데이터 삭제
     int deleteExpensesByWorkationId(@Param("workationId") Long workationId);
     int deleteBudgetsByWorkationId(@Param("workationId") Long workationId);
-    int deleteSurveysByWorkationId(@Param("workationId") Long workationId);
 
     // 결제 원본은 보존하고 워케이션 연결만 해제
     int unlinkTransactions(@Param("workationId") Long workationId);
