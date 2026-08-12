@@ -11,6 +11,7 @@ public class OfficeCandidateVO {
 
     private Long merchantId;
     private String name;
+    private String category;
     private String address;
     private String thumbnailUrl;
     private Long price;
@@ -24,4 +25,3 @@ public class OfficeCandidateVO {
     private Long collabReviewCount;
     private Boolean bookmarked;
 }
-

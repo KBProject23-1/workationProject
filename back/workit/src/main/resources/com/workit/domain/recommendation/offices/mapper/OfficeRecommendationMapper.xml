@@ -1,3 +1,5 @@
+
+
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
@@ -44,10 +46,70 @@
         LIMIT 1
     </select>
 
+    <select id="selectAccommodationReferenceCandidates"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeCandidateVO">
+        SELECT m.id           AS merchant_id,
+               m.name,
+               m.category,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.latitude,
+               m.longitude,
+               m.rating,
+               CAST(COUNT(rw.review_id) AS UNSIGNED) AS review_count,
+               NULL AS noise_level,
+               COALESCE(CAST(SUM(CASE WHEN rw.atmosphere = 'QUIET' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS quiet_review_count,
+               COALESCE(CAST(SUM(CASE WHEN rw.atmosphere = 'OPEN' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS open_review_count,
+               COALESCE(CAST(SUM(CASE WHEN rw.atmosphere = 'COLLAB' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS collab_review_count,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM bookmarks b
+                       WHERE b.users_id = #{userId}
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END AS bookmarked,
+               rd.reservation_distance
+          FROM merchants m
+          JOIN (
+            SELECT rp.merchant_id,
+                   MIN(ABS(DATEDIFF(r.start_date, #{workationStartDate}))) AS reservation_distance
+              FROM reservations r
+              JOIN reservation_products rp
+                ON rp.id = r.product_id
+             WHERE r.user_id = #{userId}
+               AND r.workation_id = #{workationId}
+               AND r.status IN ('CONFIRMED', 'COMPLETED')
+             GROUP BY rp.merchant_id
+          ) rd
+            ON rd.merchant_id = m.id
+          LEFT JOIN reviews rw
+                 ON rw.merchant_id = m.id
+                AND rw.status = 'ACTIVE'
+         WHERE m.region_id = #{regionId}
+           AND m.category = 'ACCOMMODATION'
+         GROUP BY m.id,
+                  m.name,
+                  m.category,
+                  m.address,
+                  m.thumbnail_url,
+                  m.price,
+                  m.latitude,
+                  m.longitude,
+                  m.rating,
+                  rd.reservation_distance
+         ORDER BY rd.reservation_distance ASC,
+                  m.id ASC
+    </select>
+
     <select id="selectOfficeCandidates"
             resultType="com.workit.domain.recommendation.offices.vo.OfficeCandidateVO">
         SELECT m.id           AS merchant_id,
                m.name,
+               m.category,
                m.address,
                m.thumbnail_url,
                m.price,
@@ -89,6 +151,7 @@
         )
         GROUP BY m.id,
                  m.name,
+                 m.category,
                  m.address,
                  m.thumbnail_url,
                  m.price,

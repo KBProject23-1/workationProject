@@ -18,15 +18,15 @@ public class OfficeRecommendationCandidateResponseDTO {
 
     public static OfficeRecommendationCandidateResponseDTO from(OfficeCandidateVO officeCandidate) {
         if (officeCandidate == null) {
-            return new OfficeRecommendationCandidateResponseDTO(null, null, "OFFICE", null, null, false);
+            return new OfficeRecommendationCandidateResponseDTO(null, null, null, null, null, false);
         }
         return new OfficeRecommendationCandidateResponseDTO(
                 officeCandidate.getMerchantId(),
                 officeCandidate.getName(),
-                "OFFICE",
+                officeCandidate.getCategory(),
                 officeCandidate.getLatitude(),
                 officeCandidate.getLongitude(),
-                false
+                officeCandidate.getCategory() != null
         );
     }
 }

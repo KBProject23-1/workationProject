@@ -7,6 +7,7 @@ import com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO;
 import com.workit.domain.recommendation.activities.vo.RecommendationRequestVO;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface ActivityRecommendationMapper {
@@ -15,6 +16,11 @@ public interface ActivityRecommendationMapper {
                                                @Param("workationId") Long workationId);
 
     List<ActivityCandidateVO> selectActivities(@Param("regionId") Long regionId);
+
+    List<ActivityCandidateVO> selectReferencePlaceCandidates(@Param("userId") Long userId,
+                                                           @Param("workationId") Long workationId,
+                                                           @Param("regionId") Long regionId,
+                                                           @Param("workationStartDate") LocalDate workationStartDate);
 
     RecommendationMerchantVO selectActivityReferenceMerchant(@Param("merchantId") Long merchantId,
                                                            @Param("regionId") Long regionId);
