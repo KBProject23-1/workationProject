@@ -19,7 +19,7 @@ import java.time.Duration;
 // 규칙:
 // - RedisTemplate 은 기존 RedisConfig 의 String/String 템플릿 재사용 (중복 생성 금지)
 // - Mock 인증 세션만 보관 — 금융 거래/회원 원본 데이터 저장 금지
-// - MockPassSession 은 개인정보(name/생년월일/휴대폰)를 AES-256 암호화본으로만 저장한다
+// - MockPassSession 은 개인정보(name/생년월일/휴대폰/CI)를 AES-256 암호화본으로만 저장한다
 @Repository
 public class RedisMockPassStore implements MockPassStore {
 
@@ -65,6 +65,24 @@ public class RedisMockPassStore implements MockPassStore {
         } catch (IOException e) {
             // 손상된 값은 없는 것으로 간주 (Redis 내부 데이터)
             return null;
+        }
+    }
+
+    @Override
+    public void markUsed(String identityVerificationId) {
+        String json = redisTemplate.opsForValue().get(KEY_PREFIX + identityVerificationId);
+        if (json == null) {
+            // 세션 없음(사용 전 만료/삭제) — 처리할 대상이 없다 (no-op)
+            return;
+        }
+        try {
+            MockPassSession session = OBJECT_MAPPER.readValue(json, MockPassSession.class);
+            session.setUsed(true);
+            // used=true 반영 후 동일 TTL 로 재저장 — 1회성 인증이므로 TTL 갱신은 문제되지 않는다
+            redisTemplate.opsForValue().set(KEY_PREFIX + identityVerificationId,
+                    OBJECT_MAPPER.writeValueAsString(session), ttl);
+        } catch (IOException e) {
+            throw new IllegalStateException("Mock PASS 세션 사용 완료 처리에 실패했습니다.", e);
         }
     }
 

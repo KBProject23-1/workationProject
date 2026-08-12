@@ -14,15 +14,13 @@ import org.springframework.stereotype.Component;
 // - 실연동 구현(PortOneIdentityVerificationProvider)으로 교체 시 Service 코드는 수정하지 않는다
 //
 // Mock 세션 연동 (백엔드가 인증 상태 관리):
-//   MockPassService( POST /api/v1/auth/pass → OTP 검증 → VERIFIED )가 발급한
-//   Redis(mock:pass:{identityVerificationId}) 세션 중 status == VERIFIED 인 경우에만 인증 성공으로 간주한다.
-//   - 프론트가 인증 ID 를 임의 생성/입력하거나, 흐름을 건너뛰어 VERIFIED 를 우회할 수 없다.
-//   - name / phoneNumber 는 Mock 세션에 저장된 사용자 입력값(Service 에서 AES 암호화)을 복호화해 반환한다.
+//   MockPassService(POST /api/v1/auth/pass) 가 생성한 Redis(mock:pass:{identityVerificationId}) 세션 중
+//   status == VERIFIED && used == false 인 경우에만 인증 성공으로 간주한다.
+//   - identityVerificationId 는 백엔드가 발급하므로 프론트가 임의 생성/입력하거나 흐름을 우회할 수 없다
+//   - name / phoneNumber / CI 는 Mock 세션에 저장된 값(Service 에서 AES 암호화)을
+//     복호화해 반환한다 — CI 는 MockPassService 가 발급 시점에 생성한 결정값을 그대로 사용한다
 @Component
 public class MockIdentityVerificationProvider implements IdentityVerificationProvider {
-
-    /** Mock CI 접두사 — 실제 CI 가 아니며 개인정보가 아님 */
-    private static final String MOCK_CI_PREFIX = "MOCK-CI-";
 
     private final MockPassStore mockPassStore;
 
@@ -38,16 +36,23 @@ public class MockIdentityVerificationProvider implements IdentityVerificationPro
             throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
         }
 
-        // Mock PASS 세션 조회 — VERIFIED 상태여야만 인증 성공으로 인정한다
-        // (세션 없음 / PENDING / FAILED / CANCELLED → 모두 유효하지 않은 인증)
+        // Mock PASS 세션 조회 — VERIFIED 이고 사용 완료(used)가 아닌 세션만 인정한다
+        // (세션 없음/TTL 만료/PENDING/used == true → 모두 유효하지 않은 인증)
+        // 개인정보 필드가 누락된 비정상 세션도 유효하지 않은 인증으로 처리한다 (500 방지)
         MockPassSession session = mockPassStore.find(id);
-        if (session == null || !MockPassStatus.VERIFIED.name().equals(session.getStatus())) {
+        if (session == null
+                || !MockPassStatus.VERIFIED.name().equals(session.getStatus())
+                || session.isUsed()
+                || session.getEncryptedCi() == null
+                || session.getEncryptedName() == null
+                || session.getEncryptedPhone() == null) {
             throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
         }
 
         // 개인정보 복호화는 Service/Provider Layer 에서만 수행한다 (Controller/Mapper 금지)
+        // - 휴대폰 번호/이름/CI 는 MockPassServiceImpl 이 검증 후 AES 암호화 저장하므로 결정적이다
         return IdentityVerificationResult.builder()
-                .ci(MOCK_CI_PREFIX + id)
+                .ci(PersonalDataCipher.decrypt(session.getEncryptedCi()))
                 .name(PersonalDataCipher.decrypt(session.getEncryptedName()))
                 .phoneNumber(PersonalDataCipher.decrypt(session.getEncryptedPhone()))
                 .build();

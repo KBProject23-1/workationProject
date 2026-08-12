@@ -10,11 +10,11 @@ import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.request.VerifyIdentityRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
-import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
+import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
@@ -89,22 +89,28 @@ public class AuthController {
                 result.isAvailable() ? "사용 가능한 이메일입니다." : "이미 사용 중인 이메일입니다.");
     }
 
-    // 1.3 PASS 본인인증 검증 및 회원 중복 체크 (회원가입 1단계)
+    // 1.2-1 회원가입 본인인증 검증 및 회원 중복 체크
     // - docs: 본인인증 검증 및 회원 중복 체크 (POST /api/v1/auth/signup/verify-identity)
-    // - 비로그인 공개 API: 회원가입 화면에서 PASS 인증 완료 후 호출
+    // - 비로그인 공개 API: PASS 인증(POST /auth/pass) 완료 후 계정정보 입력 전에 호출
+    // - Service 에서 PASS 세션 검증/CI hash 중복 가입 조회를 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 조회/복호화 금지)
+    // - 동일 휴대폰(CI) 가입 회원: 409 DUPLICATE_USER, 인증 세션 무효: 400 INVALID_VERIFICATION_ID
     @PostMapping("/signup/verify-identity")
-    public ResponseEntity<CommonResponse<IdentityVerificationResponseDTO>> verifyIdentityPost(
+    public ResponseEntity<CommonResponse<VerifyIdentityResponseDTO>> verifyIdentityPost(
             @RequestBody VerifyIdentityRequestDTO request) {
 
         return GlobalResponseFactory.success(
-                authService.verifyIdentity(request.getIdentityVerificationId()),
+                authService.verifyIdentityForSignup(request.getIdentityVerificationId()),
                 "본인인증 성공. 가입을 진행합니다.");
     }
 
-    // 1.4 최종 회원가입 완료 (회원가입 2단계 — DB 최종 저장 + 자동 로그인)
+    // 1.3 최종 회원가입 완료 (DB 최종 저장 + 자동 로그인)
     // - docs: 최종 회원가입 완료(DB 최종 저장) (POST /api/v1/auth/signup)
-    // - 비로그인 공개 API: 본인인증(verify-identity)과 이메일 중복 확인(check-email) 완료 후 호출
-    // - Controller 에는 비즈니스 로직 없음 — Service 에서 JWT 검증/Redis 조회/중복 검증/DB 저장/토큰 발급 수행
+    // - 비로그인 공개 API: PASS 인증(POST /auth/pass)과 이메일 중복 확인(check-email) 완료 후 호출
+    // - body: { identityVerificationId, email, password, agreedTermsIds }
+    //   identityVerificationId 는 백엔드가 발급한 값 — Service 가 Redis(mock:pass:{id}) 세션에서
+    //   인증 정보(name/phoneNumber/CI)를 복원·검증한 뒤 DB 저장/토큰 발급을 수행한다
+    // - Controller 에는 비즈니스 로직 없음 — Service 에서 Redis 조회/중복 검증/DB 저장/토큰 발급 수행
     // - 자동 로그인(knowledge.md Signup Flow): Service 가 발급한 Access/Refresh Token 을
     //   HttpOnly Cookie 로 내려준다 — 프론트는 별도 로그인 API 를 호출하지 않는다
     @PostMapping("/signup")

@@ -9,23 +9,16 @@ import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
-import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
+import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 
 public interface AuthService {
 
     /** 필수/선택 약관 목록 조회 */
     TermsListResponseDTO getTermsList();
-
-    /**
-     * PASS 본인인증 결과 검증
-     * Provider 검증 → CI SHA-256 중복 체크 → 임시 데이터 Redis 저장 →
-     * 회원가입 전용 임시 JWT(identityToken)/name 반환
-     */
-    IdentityVerificationResponseDTO verifyIdentity(String identityVerificationId);
 
     /**
      * 회원가입 이메일 중복 확인
@@ -35,22 +28,40 @@ public interface AuthService {
     EmailAvailabilityResponseDTO checkEmailAvailability(String email);
 
     /**
+     * 회원가입 본인인증 검증 및 회원 중복 체크 (docs: POST /api/v1/auth/signup/verify-identity)
+     *
+     * PASS 인증(POST /auth/pass) 완료 후 계정정보 입력 전에 호출한다.
+     *
+     * 흐름:
+     *   1. 요청 값 검증 — null/빈 값 → INVALID_VERIFICATION_ID(400)
+     *   2. PASS 본인인증 결과 검증 → CI 추출 (Provider 실패 시 INVALID_VERIFICATION_ID)
+     *   3. CI SHA-256 hash 변환 → user_auth.identity_ci_hash 기준 중복 가입 조회
+     *      - 동일 휴대폰(CI) 으로 이미 가입한 회원이 있으면 409 DUPLICATE_USER — 가입 진행 차단
+     *   4. 중복 없음 → 화면 표시용 name 반환 (identityVerificationId 는 signup 에서 재사용)
+     *
+     * @param identityVerificationId PASS 인증 후 발급받은 고유 ID (없으면 null)
+     * @return 화면 표시용 이름 (개인정보 미포함)
+     */
+    VerifyIdentityResponseDTO verifyIdentityForSignup(String identityVerificationId);
+
+    /**
      * 최종 회원가입 완료 + 자동 로그인 (Access/Refresh Token 발급)
      *
      * 흐름:
-     *   1. identityToken(회원가입 전용 JWT) 검증 — 서명/만료(sub == signup-verification)
-     *   2. JWT 에서 temporaryUserKey 추출 → Redis(signup:verification:{key}) 임시 인증 데이터 조회
+     *   1. Mock PASS 인증 세션 검증 — identityVerificationId 로 Redis(mock:pass:{id}) 조회
+     *      (세션 없음/TTL 만료/status != VERIFIED/used == true → INVALID_VERIFICATION_ID)
+     *   2. 세션에서 name / phoneNumber / CI 복원 (AES 복호화)
      *   3. CI / 이메일 중복 재검증 (Race Condition 방지)
      *   4. users → user_auth → user_profile insert (동일 트랜잭션)
      *      - user_profile.nickname 은 서버가 기본값(워케이너{userId}) 자동 생성 (닉네임 입력 기능 제거)
      *   5. 전자지갑 생성
-     *   6. 회원가입 완료 후 Redis 임시 데이터 삭제
+     *   6. 회원가입 완료 후 Mock PASS 세션 사용 완료 처리 (used=true — 1회성)
      *   7. 자동 로그인 — Access Token / Refresh Token 발급, Refresh Session Redis 저장
      *
      * (knowledge.md Signup Flow: 회원가입 완료 시 Access Token/Refresh Token 발급 후
      *  HttpOnly Cookie 로 설정 — 별도 로그인 API 를 다시 호출하지 않는다)
      *
-     * @param request 회원가입 요청 (identityToken, email, password, agreedTermsIds)
+     * @param request 회원가입 요청 (identityVerificationId, email, password, agreedTermsIds)
      * @return 회원가입 완료 응답 (userId, name, token_info) + 쿠키용 refreshToken
      */
     LoginResponseDTO signup(SignupRequestDTO request);

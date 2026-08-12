@@ -10,10 +10,10 @@ import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
 import com.workit.domain.auth.dto.request.SignupRequestDTO;
 import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
 import com.workit.domain.auth.dto.response.FindIdResponseDTO;
-import com.workit.domain.auth.dto.response.IdentityVerificationResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.exception.BusinessException;
@@ -88,17 +88,6 @@ class AuthControllerTest {
 
     // ---------- Stub 헬퍼 (Mockito when / doThrow) ----------
 
-    /** 본인인증 성공 Stub — Service 검증 결과와 무관하게 Controller 전달값만 검증 */
-    private void stubVerifyIdentitySuccess() {
-        when(authService.verifyIdentity(any()))
-                .thenReturn(IdentityVerificationResponseDTO.of("encrypted-identity-token", "홍길동"));
-    }
-
-    /** 본인인증 실패 Stub — Service 가 지정 에러를 던진다 */
-    private void stubVerifyIdentityError(AuthErrorCode errorCode) {
-        doThrow(new BusinessException(errorCode)).when(authService).verifyIdentity(any());
-    }
-
     /** 이메일 중복 확인 Stub — available 여부 지정 */
     private void stubCheckEmail(boolean available) {
         when(authService.checkEmailAvailability(any()))
@@ -113,6 +102,17 @@ class AuthControllerTest {
     /** 회원가입 실패 Stub — Service 가 지정 에러를 던진다 */
     private void stubSignupError(AuthErrorCode errorCode) {
         doThrow(new BusinessException(errorCode)).when(authService).signup(any(SignupRequestDTO.class));
+    }
+
+    /** 본인인증 검증(회원가입) 성공 Stub — Service 가 화면 표시용 이름을 반환한다 */
+    private void stubVerifyIdentitySuccess() {
+        when(authService.verifyIdentityForSignup(any()))
+                .thenReturn(VerifyIdentityResponseDTO.of("홍길동"));
+    }
+
+    /** 본인인증 검증(회원가입) 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubVerifyIdentityError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).verifyIdentityForSignup(any());
     }
 
     /** 회원가입 성공 Stub — Service 가 자동 로그인 결과(userId/name/token_info/refreshToken)를 반환한다 */
@@ -190,131 +190,6 @@ class AuthControllerTest {
     /** 비밀번호 재설정 2단계 실패 Stub — Service 가 지정 에러를 던진다 */
     private void stubPasswordResetError(AuthErrorCode errorCode) {
         doThrow(new BusinessException(errorCode)).when(authService).resetPassword(any(PasswordResetRequestDTO.class));
-    }
-
-    // ---------- PASS 본인인증 검증 ----------
-
-    @Test
-    @DisplayName("본인인증 검증 성공 - 200 + SUCCESS + identityToken/name 반환")
-    void verifyIdentity_success() throws Exception {
-        // Given — Service 는 인증 성공 결과를 반환한다
-        stubVerifyIdentitySuccess();
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identityVerificationId\":\"imp_ver_1234567890\"}"))
-                .andExpect(status().isOk())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("SUCCESS", json.get("status").asText());
-        assertEquals("본인인증 성공. 가입을 진행합니다.", json.get("message").asText());
-
-        // 성공 응답에는 errorCode 가 없어야 한다 (CommonResponse NON_NULL)
-        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
-
-        JsonNode data = json.get("data");
-        assertNotNull(data);
-        assertEquals("encrypted-identity-token", data.get("identityToken").asText());
-        assertEquals("홍길동", data.get("name").asText());
-
-        // Service 가 인증 ID 를 그대로 전달받았는지 확인
-        verify(authService).verifyIdentity("imp_ver_1234567890");
-    }
-
-    @Test
-    @DisplayName("유효하지 않은 인증 ID - 400 + INVALID_VERIFICATION_ID")
-    void verifyIdentity_invalidId() throws Exception {
-        // Given — Service 는 유효하지 않은 인증 ID 를 거부한다
-        stubVerifyIdentityError(AuthErrorCode.INVALID_VERIFICATION_ID);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identityVerificationId\":\"invalid\"}"))
-                .andExpect(status().isBadRequest())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
-    }
-
-    @Test
-    @DisplayName("빈 identityVerificationId - 400 + INVALID_VERIFICATION_ID")
-    void verifyIdentity_blankId() throws Exception {
-        // Given — Service 는 빈 인증 ID 를 거부한다
-        stubVerifyIdentityError(AuthErrorCode.INVALID_VERIFICATION_ID);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identityVerificationId\":\"\"}"))
-                .andExpect(status().isBadRequest())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
-    }
-
-    @Test
-    @DisplayName("identityVerificationId 누락 - 400 + INVALID_VERIFICATION_ID")
-    void verifyIdentity_missingId() throws Exception {
-        // Given — Service 는 누락된 인증 ID 를 거부한다
-        stubVerifyIdentityError(AuthErrorCode.INVALID_VERIFICATION_ID);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
-    }
-
-    @Test
-    @DisplayName("중복 가입 - 409 + DUPLICATE_USER")
-    void verifyIdentity_duplicateUser() throws Exception {
-        // Given — Service 는 중복 가입을 거부한다
-        stubVerifyIdentityError(AuthErrorCode.DUPLICATE_USER);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identityVerificationId\":\"imp_ver_9999999999\"}"))
-                .andExpect(status().isConflict())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("DUPLICATE_USER", json.get("errorCode").asText());
-        assertEquals("이미 가입된 회원입니다. 로그인을 진행해주세요.", json.get("message").asText());
-    }
-
-    @Test
-    @DisplayName("잘못된 JSON 본문 - 400 (공통 형식 오류)")
-    void verifyIdentity_malformedBody() throws Exception {
-        // When — JSON 파싱 실패는 Service 호출 전에 차단된다
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("not-json"))
-                .andExpect(status().isBadRequest())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertFalse(json.get("errorCode").isNull());
     }
 
     // ---------- 회원가입 이메일 중복 확인 ----------
@@ -459,17 +334,86 @@ class AuthControllerTest {
         return sb.toString();
     }
 
+    // ---------- 회원가입 본인인증 검증 및 회원 중복 체크 ----------
+
+    @Test
+    @DisplayName("본인인증 검증 성공 - 200 + SUCCESS + 화면 표시용 name 반환")
+    void verifyIdentity_success() throws Exception {
+        // Given — Service 가 화면 표시용 이름을 반환한다
+        stubVerifyIdentitySuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("본인인증 성공. 가입을 진행합니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("홍길동", data.get("name").asText());
+
+        // Service 가 인증 ID 를 그대로 전달받았는지 확인
+        verify(authService).verifyIdentityForSignup("imp_ver_9876543210");
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - 동일 휴대폰(CI) 중복 가입 → 409 + DUPLICATE_USER")
+    void verifyIdentity_duplicateUser() throws Exception {
+        // Given — Service 는 동일 휴대폰(CI) 으로 이미 가입한 회원을 거부한다
+        stubVerifyIdentityError(AuthErrorCode.DUPLICATE_USER);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_1234567890\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_USER", json.get("errorCode").asText());
+        assertEquals("이미 가입된 회원입니다. 로그인을 진행해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - 유효하지 않은 인증 세션 → 400 + INVALID_VERIFICATION_ID")
+    void verifyIdentity_invalidVerificationId() throws Exception {
+        // Given — Service 는 존재하지 않거나 만료/사용 완료된 인증 세션을 거부한다
+        stubVerifyIdentityError(AuthErrorCode.INVALID_VERIFICATION_ID);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
+    }
+
     // ---------- 최종 회원가입 완료 ----------
 
-    /** 필수 약관(1, 2) 전체 동의 기본 본문 생성 */
-    private String signupBody(String identityToken, String email) {
-        return signupBody(identityToken, email, ",\"agreedTermsIds\":[1,2]");
+    /** 필수 약관(1, 2) 전체 동의 기본 본문 생성 — identityVerificationId 는 백엔드 발급 값 */
+    private String signupBody(String identityVerificationId, String email) {
+        return signupBody(identityVerificationId, email, ",\"agreedTermsIds\":[1,2]");
     }
 
     /** agreedTermsIds JSON 조각(빈 문자열이면 누락)을 지정하는 본문 생성 */
-    private String signupBody(String identityToken, String email,
+    private String signupBody(String identityVerificationId, String email,
                               String agreedTermsIdsJson) {
-        return "{\"identityToken\":\"" + identityToken
+        return "{\"identityVerificationId\":\"" + identityVerificationId
                 + "\",\"email\":\"" + email
                 + "\",\"password\":\"password123!\""
                 + agreedTermsIdsJson + "}";
@@ -484,7 +428,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com")))
+                        .content(signupBody("valid-id", "new@example.com")))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -520,61 +464,23 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("회원가입 완료 - JWT 만료 (401 + EXPIRED_SIGNUP_TOKEN)")
-    void signup_expiredToken() throws Exception {
-        // Given — Service 는 만료된 JWT 를 거부한다
-        stubSignupError(AuthErrorCode.EXPIRED_SIGNUP_TOKEN);
+    @DisplayName("회원가입 완료 - 유효하지 않은 인증 세션 (400 + INVALID_VERIFICATION_ID)")
+    void signup_invalidVerificationId() throws Exception {
+        // Given — Service 는 존재하지 않거나 만료/사용 완료된 인증 세션을 거부한다
+        stubSignupError(AuthErrorCode.INVALID_VERIFICATION_ID);
 
-        // When
+        // When — 임의의(백엔드 미발급) identityVerificationId
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("expired-token", "new@example.com")))
-                .andExpect(status().isUnauthorized())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("EXPIRED_SIGNUP_TOKEN", json.get("errorCode").asText());
-        assertEquals("본인인증 유효 시간이 만료되었습니다. 인증을 다시 진행해 주세요.", json.get("message").asText());
-    }
-
-    @Test
-    @DisplayName("회원가입 완료 - JWT 위변조 (400 + INVALID_SIGNUP_TOKEN)")
-    void signup_tamperedToken() throws Exception {
-        // Given — Service 는 위변조된 JWT 를 거부한다
-        stubSignupError(AuthErrorCode.INVALID_SIGNUP_TOKEN);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("tampered-token", "new@example.com")))
+                        .content(signupBody("invalid-id", "new@example.com")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
         // Then
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
-        assertEquals("INVALID_SIGNUP_TOKEN", json.get("errorCode").asText());
-    }
-
-    @Test
-    @DisplayName("회원가입 완료 - Redis 임시 데이터 없음 (400 + SIGNUP_VERIFICATION_NOT_FOUND)")
-    void signup_verificationNotFound() throws Exception {
-        // Given — Service 는 Redis 임시 데이터가 없음을 거부한다
-        stubSignupError(AuthErrorCode.SIGNUP_VERIFICATION_NOT_FOUND);
-
-        // When
-        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("no-redis-token", "new@example.com")))
-                .andExpect(status().isBadRequest())
-                .andReturn();
-
-        // Then
-        JsonNode json = parse(result);
-        assertEquals("ERROR", json.get("status").asText());
-        assertEquals("SIGNUP_VERIFICATION_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
     }
 
     @Test
@@ -586,7 +492,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("dup-ci-token", "new@example.com")))
+                        .content(signupBody("dup-ci-id", "new@example.com")))
                 .andExpect(status().isConflict())
                 .andReturn();
 
@@ -605,7 +511,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "used@example.com")))
+                        .content(signupBody("valid-id", "used@example.com")))
                 .andExpect(status().isConflict())
                 .andReturn();
 
@@ -625,7 +531,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", buildLongEmail(255))))
+                        .content(signupBody("valid-id", buildLongEmail(255))))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -664,7 +570,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com",
+                        .content(signupBody("valid-id", "new@example.com",
                                 ",\"agreedTermsIds\":[1,2,3]")))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -692,7 +598,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com", "")))
+                        .content(signupBody("valid-id", "new@example.com", "")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -712,7 +618,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com",
+                        .content(signupBody("valid-id", "new@example.com",
                                 ",\"agreedTermsIds\":[1,2,99]")))
                 .andExpect(status().isBadRequest())
                 .andReturn();
@@ -733,7 +639,7 @@ class AuthControllerTest {
         // When
         MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(signupBody("valid-token", "new@example.com",
+                        .content(signupBody("valid-id", "new@example.com",
                                 ",\"agreedTermsIds\":[1]")))
                 .andExpect(status().isBadRequest())
                 .andReturn();

@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -34,6 +35,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 // MockPassController API 테스트
 // - MockPassService 를 Mockito @Mock 으로 주입한다 (Controller 계층 검증에 집중)
+// - 요청 본문은 { name, phoneNumber } 만 받고 (identityVerificationId 없음),
+//   응답은 백엔드가 발급한 identityVerificationId/status 만 내려준다 (개인정보 미포함)
 // - json-path 의존성 없이 Jackson ObjectMapper 로 응답 JSON 을 검증한다 (AuthControllerTest 와 동일 방식)
 @ExtendWith(MockitoExtension.class)
 class MockPassControllerTest {
@@ -56,17 +59,16 @@ class MockPassControllerTest {
     }
 
     @Test
-    @DisplayName("인증 완료 등록 성공 - 200 + SUCCESS + status VERIFIED/name 반환")
+    @DisplayName("본인인증 성공 - 200 + SUCCESS + 백엔드 발급 identityVerificationId/status 반환 (name 미포함)")
     void complete_success() throws Exception {
-        // Given — Service 가 VERIFIED 세션 등록 결과를 반환한다
+        // Given — Service 가 백엔드에서 생성한 인증 ID 를 발급한다
         when(mockPassService.complete(any(MockPassCompleteRequestDTO.class)))
-                .thenReturn(MockPassStatusResponseDTO.of("mock-12345678", "VERIFIED", "홍길동"));
+                .thenReturn(MockPassStatusResponseDTO.of("550e8400-e29b-41d4-a716-446655440000", "VERIFIED"));
 
-        // When
+        // When — 요청 본문은 이름/휴대폰 번호만 포함한다 (identityVerificationId 전송 금지)
         MvcResult result = mockMvc.perform(post("/api/v1/auth/pass")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identityVerificationId\":\"mock-12345678\",\"name\":\"홍길동\","
-                                + "\"phoneNumber\":\"01012345678\"}"))
+                        .content("{\"name\":\"홍길동\",\"phoneNumber\":\"01012345678\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -78,11 +80,12 @@ class MockPassControllerTest {
 
         JsonNode data = json.get("data");
         assertNotNull(data);
-        assertEquals("mock-12345678", data.get("identityVerificationId").asText());
+        assertEquals("550e8400-e29b-41d4-a716-446655440000", data.get("identityVerificationId").asText());
         assertEquals("VERIFIED", data.get("status").asText());
-        assertEquals("홍길동", data.get("name").asText());
+        // 개인정보(name/phoneNumber 등)는 응답에 포함되지 않는다
+        assertNull(data.get("name"));
 
-        // Service 가 완료 등록 요청을 전달받았는지 확인
+        // Service 가 인증 요청을 전달받았는지 확인
         verify(mockPassService).complete(any(MockPassCompleteRequestDTO.class));
     }
 
@@ -93,11 +96,10 @@ class MockPassControllerTest {
         doThrow(new BusinessException(AuthErrorCode.INVALID_PASS_REQUEST))
                 .when(mockPassService).complete(any(MockPassCompleteRequestDTO.class));
 
-        // When
+        // When — 이름 누락
         MvcResult result = mockMvc.perform(post("/api/v1/auth/pass")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"identityVerificationId\":\"mock-12345678\",\"name\":\"\","
-                                + "\"phoneNumber\":\"01012345678\"}"))
+                        .content("{\"name\":\"\",\"phoneNumber\":\"01012345678\"}"))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
@@ -109,23 +111,23 @@ class MockPassControllerTest {
     }
 
     @Test
-    @DisplayName("identityVerificationId 누락 - 400 + INVALID_VERIFICATION_ID")
-    void complete_missingId() throws Exception {
-        // Given — Service 가 누락된 인증 ID 를 거부한다
-        doThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID))
+    @DisplayName("휴대폰 형식 오류 - 400 + INVALID_PASS_REQUEST")
+    void complete_invalidPhone() throws Exception {
+        // Given — Service 가 휴대폰 형식 오류를 거부한다
+        doThrow(new BusinessException(AuthErrorCode.INVALID_PASS_REQUEST))
                 .when(mockPassService).complete(any(MockPassCompleteRequestDTO.class));
 
-        // When
+        // When — 하이픈 포함 휴대폰 번호
         MvcResult result = mockMvc.perform(post("/api/v1/auth/pass")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"홍길동\",\"phoneNumber\":\"01012345678\"}"))
+                        .content("{\"name\":\"홍길동\",\"phoneNumber\":\"010-1234-5678\"}"))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
         // Then
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
-        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("INVALID_PASS_REQUEST", json.get("errorCode").asText());
     }
 
     @Test
