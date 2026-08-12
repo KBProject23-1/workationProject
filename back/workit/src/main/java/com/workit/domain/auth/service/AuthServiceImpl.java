@@ -281,7 +281,8 @@ public class AuthServiceImpl implements AuthService {
 
         // 10. 자동 로그인 — Access Token / Refresh Token 발급 (knowledge.md Signup Flow: 회원가입 완료 후 자동 로그인)
         //    - login() 과 동일한 응답 구조 — Refresh Token 원문이 아닌 SHA-256 hash 를 Redis 에 저장한다
-        LoginResponseDTO response = createLoginResponse(userId, verificationData.getEncryptedName());
+        //    - 회원가입 자동 로그인은 PIN 등록 유도 대상이 아니므로 pinSetupRequired=false
+        LoginResponseDTO response = createLoginResponse(userId, verificationData.getEncryptedName(), false);
 
         // 11. Refresh Session 은 DB 커밋 확정 후(afterCommit)에만 Redis 저장한다
         //    - knowledge.md: "회원가입 DB Transaction이 성공한 이후 인증 Session 및 Cookie 발급"
@@ -301,14 +302,17 @@ public class AuthServiceImpl implements AuthService {
      * - Payload: sub(userId), role, tokenType, iat, exp — 개인정보 없음 (knowledge.md JWT Rules)
      * - name 은 Service Layer 에서만 복호화 (Controller/Mapper 금지)
      * - refreshToken 은 JSON 본문에 포함하지 않고 Controller 가 HttpOnly Cookie 로만 내려준다
+     * - pinSetupRequired: 기기 최초 로그인 여부 (user_device 에 deviceId 미등록) — 로그인 화면 PIN 등록 유도 분기용
+     *   (signup 자동 로그인은 이번 응답에서 PIN 등록 유도 대상이 아니므로 false)
      */
-    private LoginResponseDTO createLoginResponse(Long userId, String nameEncrypt) {
+    private LoginResponseDTO createLoginResponse(Long userId, String nameEncrypt, boolean pinSetupRequired) {
         String accessToken = jwtTokenProvider.createAccessToken(userId);
         String refreshToken = jwtTokenProvider.createRefreshToken(userId);
         long refreshTtlSeconds = jwtTokenProvider.getRefreshTokenExpirationSeconds();
         return LoginResponseDTO.builder()
                 .userId(userId)
                 .name(PersonalDataCipher.decrypt(nameEncrypt))
+                .pinSetupRequired(pinSetupRequired)
                 .tokenInfo(LoginResponseDTO.TokenInfo.of(
                         GRANT_TYPE_BEARER,
                         accessToken,
@@ -447,7 +451,11 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 4. JWT 발급 + 응답 생성 (JwtTokenProvider 재사용 — Payload: sub(userId), role, tokenType, iat, exp)
-        LoginResponseDTO response = createLoginResponse(loginUser.getId(), loginUser.getNameEncrypt());
+        //    - pinSetupRequired: PASSWORD 로그인 + deviceId 전달 시 user_device 등록 여부로 판별
+        //      (기기 최초 로그인 → true → 프론트에서 PIN 등록 화면 유도. PIN 로그인은 등록 기기에서만 성공하므로 항상 false)
+        boolean pinSetupRequired = (loginType == LoginType.PASSWORD && !isBlank(request.getDeviceId()))
+                && authMapper.countByUserIdAndDeviceId(loginUser.getId(), request.getDeviceId()) == 0;
+        LoginResponseDTO response = createLoginResponse(loginUser.getId(), loginUser.getNameEncrypt(), pinSetupRequired);
 
         // 5. Refresh Token Redis 저장 (knowledge.md Refresh Token Security)
         //    - 원문이 아닌 SHA-256 hash 저장 — key: refresh:token:{userId}, TTL: refresh 만료와 동일
