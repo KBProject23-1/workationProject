@@ -1182,6 +1182,8 @@ class AuthServiceImplTest {
         assertNotNull(result);
         assertEquals(501L, result.getUserId().longValue());
         assertEquals("홍길동", result.getName());
+        // deviceId 미전달 → 기기 등록 여부를 판별하지 않으므로 pinSetupRequired=false
+        assertFalse(result.isPinSetupRequired());
 
         // token_info (snake_case JSON 직렬화는 Controller 테스트에서 확인)
         LoginResponseDTO.TokenInfo tokenInfo = result.getTokenInfo();
@@ -1252,6 +1254,42 @@ class AuthServiceImplTest {
     }
 
     @Test
+    @DisplayName("PASSWORD 로그인 - deviceId 미등록(기기 최초) → pinSetupRequired=true")
+    void login_passwordFirstDevice_pinSetupRequired() {
+        // Given — email_hash 로 조회되는 ACTIVE 회원 + 해당 deviceId 는 user_device 에 미등록
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(501L, "device-uuid-new")).thenReturn(0);
+
+        // When — 기기 최초 로그인 (아직 PIN 미등록 기기)
+        LoginResponseDTO result = authService.login(
+                loginRequest("PASSWORD", "user@example.com", "password123!", null, "device-uuid-new"));
+
+        // Then — PIN 등록 유도 플래그 true
+        assertNotNull(result);
+        assertTrue(result.isPinSetupRequired());
+        verify(authMapper).countByUserIdAndDeviceId(501L, "device-uuid-new");
+    }
+
+    @Test
+    @DisplayName("PASSWORD 로그인 - deviceId 등록(기존 기기) → pinSetupRequired=false")
+    void login_passwordRegisteredDevice_pinSetupNotRequired() {
+        // Given — email_hash 로 조회되는 ACTIVE 회원 + 해당 deviceId 는 user_device 에 등록됨
+        registerLoginUser(501L, "user@example.com", "01034567890",
+                "password123!", "123456", "device-uuid-1", "ACTIVE");
+        when(authMapper.countByUserIdAndDeviceId(501L, "device-uuid-1")).thenReturn(1);
+
+        // When — 기존 기기 로그인
+        LoginResponseDTO result = authService.login(
+                loginRequest("PASSWORD", "user@example.com", "password123!", null, "device-uuid-1"));
+
+        // Then — PIN 등록 불필요
+        assertNotNull(result);
+        assertFalse(result.isPinSetupRequired());
+        verify(authMapper).countByUserIdAndDeviceId(501L, "device-uuid-1");
+    }
+
+    @Test
     @DisplayName("PASSWORD 실패 - 잘못된 password → INVALID_CREDENTIALS + 토큰/Redis 저장 없음")
     void login_passwordWrongPassword_throws() {
         // Given — 등록된 회원 (password: password123!)
@@ -1294,6 +1332,8 @@ class AuthServiceImplTest {
         // Then
         assertNotNull(result);
         assertEquals(501L, result.getUserId().longValue());
+        // PIN 로그인은 등록된 기기에서만 성공하므로 pinSetupRequired 는 항상 false
+        assertFalse(result.isPinSetupRequired());
         // 성공 시 실패 횟수 초기화
         assertEquals(0, loginFailCounter.getCount(501L));
         assertEquals(sha256(result.getRefreshToken()), savedRefreshTokens.get(501L));

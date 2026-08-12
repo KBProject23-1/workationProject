@@ -133,6 +133,7 @@ class AuthControllerTest {
                 .thenReturn(LoginResponseDTO.builder()
                         .userId(501L)
                         .name("홍길동")
+                        .pinSetupRequired(false)
                         .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
                         .refreshToken("refresh-token-jwt")
                         .refreshTokenMaxAgeSeconds(1209600)
@@ -785,6 +786,8 @@ class AuthControllerTest {
         assertNotNull(data);
         assertEquals(501, data.get("userId").asInt());
         assertEquals("홍길동", data.get("name").asText());
+        // 기기 최초 로그인 여부 — stub 은 기존 기기(등록 완료)로 false
+        assertFalse(data.get("pinSetupRequired").asBoolean());
 
         // token_info 는 docs 스펙대로 snake_case 필드명을 사용한다
         JsonNode tokenInfo = data.get("token_info");

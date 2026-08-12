@@ -28,6 +28,14 @@ public class LoginResponseDTO {
     /** 회원 이름 (user_profile 아님 — users.name_encrypt 복호화 값) */
     private String name;
 
+    /**
+     * 기기 최초 로그인 여부 — user_device 에 해당 deviceId 가 등록되어 있지 않으면 true
+     * - 로그인 화면에서 PIN 등록 유도 분기용 (docs: 로그인 성공 후 deviceId 기반 기기 확인 → PIN 등록 안내)
+     * - PASSWORD 로그인에서 deviceId 를 함께 받은 경우에만 판별 (deviceId 미전달 시 false)
+     * - PIN 로그인은 등록된 기기에서만 성공하므로 항상 false
+     */
+    private boolean pinSetupRequired;
+
     /** Access Token 정보 (token_info) */
     @JsonProperty("token_info")
     private TokenInfo tokenInfo;
