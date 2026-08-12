@@ -175,11 +175,11 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             throw new BusinessException(OfficeRecommendationErrorCode.WORKATION_NOT_FOUND);
         }
 
-        List<OfficeCandidateVO> candidates = recommendationMapper.selectOfficeCandidates(
+        List<OfficeCandidateVO> candidates = recommendationMapper.selectAccommodationReferenceCandidates(
                 userId,
+                workation.getId(),
                 workation.getRegionId(),
-                workation.getStartDate(),
-                workation.getEndDate()
+                workation.getStartDate()
         );
         if (candidates == null) {
             candidates = new ArrayList<>();

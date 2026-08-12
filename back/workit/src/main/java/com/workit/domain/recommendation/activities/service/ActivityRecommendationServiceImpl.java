@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -214,7 +215,13 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
             throw new BusinessException(ActivityRecommendationErrorCode.WORKATION_NOT_FOUND);
         }
 
-        List<ActivityCandidateVO> candidates = activityRecommendationMapper.selectActivities(condition.getRegionId());
+        LocalDate workationStartDate = workation.getStartDate();
+        List<ActivityCandidateVO> candidates = activityRecommendationMapper.selectReferencePlaceCandidates(
+                userId,
+                workation.getId(),
+                condition.getRegionId(),
+                workationStartDate
+        );
         if (candidates == null) {
             candidates = new ArrayList<>();
         }
