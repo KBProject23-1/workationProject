@@ -13,6 +13,7 @@ import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.SignupResponseDTO;
 import com.workit.domain.auth.dto.response.TermsListResponseDTO;
 import com.workit.domain.auth.dto.response.TermsResponseDTO;
 import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
@@ -108,9 +109,6 @@ public class AuthServiceImpl implements AuthService {
      */
     private static final int DEVICE_MAX_LENGTH = 100;
 
-    /** OAuth2 관례 토큰 인증 방식 (token_info.grant_type) */
-    private static final String GRANT_TYPE_BEARER = "Bearer";
-
     @Override
     @Transactional(readOnly = true)
     public TermsListResponseDTO getTermsList() {
@@ -175,7 +173,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    public LoginResponseDTO signup(SignupRequestDTO request) {
+    public SignupResponseDTO signup(SignupRequestDTO request) {
 
         // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
         validateSignupRequest(request);
@@ -257,67 +255,39 @@ public class AuthServiceImpl implements AuthService {
         //    - 트랜잭션 롤백 시 세션이 미사용으로 남아 사용자가 동일 인증으로 재시도할 수 있다.
         markMockPassSessionUsedAfterCommit(identityVerificationId);
 
-        // 9. 자동 로그인 — Access Token / Refresh Token 발급 (knowledge.md Signup Flow: 회원가입 완료 후 자동 로그인)
-        //    - login() 과 동일한 응답 구조 — Refresh Token 원문이 아닌 SHA-256 hash 를 Redis 에 저장한다
-        //    - 회원가입 자동 로그인은 PIN 등록 유도 대상이 아니므로 pinSetupRequired=false
-        LoginResponseDTO response = createLoginResponse(userId,
-                PersonalDataCipher.encrypt(verificationResult.getName()), false);
+        // 9. 회원가입 완료 — 토큰을 발급하지 않는다 (자동 로그인 제거)
+        //    - 변경 정책: 회원가입 완료 후 로그인 화면(/login)으로 이동해 다시 로그인한다.
+        //    - Access/Refresh Token 발급, Refresh Session 저장, Cookie 설정을 하지 않는다.
+        //    - 응답은 userId/name 만 반환한다 (완료 화면의 로그인 아이디 안내용).
 
-        // 10. Refresh Session 은 DB 커밋 확정 후(afterCommit)에만 Redis 저장한다
-        //    - knowledge.md: "회원가입 DB Transaction이 성공한 이후 인증 Session 및 Cookie 발급"
-        //      / "DB Transaction과 Redis 작업은 동일한 Transaction으로 간주하지 않는다"
-        //    - DB 커밋 전에 저장하면 롤백 시 고아 Refresh Session 이 남고, Redis 장애가 DB 롤백을 유발한다
-        saveRefreshSessionAfterCommit(userId, response.getRefreshToken(),
-                response.getRefreshTokenMaxAgeSeconds());
+        // 10. Audit 로그 — userId 만 기록 (개인정보 원문 로그 출력 금지 — knowledge.md)
+        log.info("회원가입 완료 - userId={}", userId);
 
-        // 11. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지 — knowledge.md)
-        log.info("회원가입 완료 + 자동 로그인 - userId={}", userId);
-
-        return response;
+        return SignupResponseDTO.of(userId, verificationResult.getName());
     }
 
     /**
-     * 로그인/회원가입(자동 로그인) 공통 — Access/Refresh Token 발급 + LoginResponseDTO 생성
+     * 로그인 공통 — Access/Refresh Token 발급 + LoginResponseDTO 생성
      * - Payload: sub(userId), role, tokenType, iat, exp — 개인정보 없음 (knowledge.md JWT Rules)
      * - name 은 Service Layer 에서만 복호화 (Controller/Mapper 금지)
-     * - refreshToken 은 JSON 본문에 포함하지 않고 Controller 가 HttpOnly Cookie 로만 내려준다
+     * - accessToken/refreshToken 은 JSON 본문에 포함하지 않는다. Controller 가
+     *   accessToken / refreshToken HttpOnly Cookie 로만 내려주고, Cookie Max-Age 는 각 토큰 만료와 동일하다.
      * - pinSetupRequired: 기기 최초 로그인 여부 (user_device 에 deviceId 미등록) — 로그인 화면 PIN 등록 유도 분기용
-     *   (signup 자동 로그인은 이번 응답에서 PIN 등록 유도 대상이 아니므로 false)
      */
     private LoginResponseDTO createLoginResponse(Long userId, String nameEncrypt, boolean pinSetupRequired) {
         String accessToken = jwtTokenProvider.createAccessToken(userId);
         String refreshToken = jwtTokenProvider.createRefreshToken(userId);
+        long accessTtlSeconds = jwtTokenProvider.getAccessTokenExpirationSeconds();
         long refreshTtlSeconds = jwtTokenProvider.getRefreshTokenExpirationSeconds();
         return LoginResponseDTO.builder()
                 .userId(userId)
                 .name(PersonalDataCipher.decrypt(nameEncrypt))
                 .pinSetupRequired(pinSetupRequired)
-                .tokenInfo(LoginResponseDTO.TokenInfo.of(
-                        GRANT_TYPE_BEARER,
-                        accessToken,
-                        jwtTokenProvider.getAccessTokenExpirationSeconds()))
+                .accessToken(accessToken)
+                .accessTokenMaxAgeSeconds(accessTtlSeconds)
                 .refreshToken(refreshToken)
                 .refreshTokenMaxAgeSeconds(refreshTtlSeconds)
                 .build();
-    }
-
-    /**
-     * DB 트랜잭션이 커밋된 후(afterCommit)에만 Refresh Session 을 Redis 저장한다.
-     * - 회원가입 DB 커밋 실패 시 고아 Refresh Session 이 남지 않도록 보장한다
-     *   (deleteVerificationDataAfterCommit 패턴과 동일 — knowledge.md: Redis 는 DB Transaction 과 분리)
-     * - 실제 트랜잭션 밖(단위 테스트 등)에서는 즉시 저장한다.
-     */
-    private void saveRefreshSessionAfterCommit(Long userId, String refreshToken, long ttlSeconds) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    refreshTokenStore.save(userId, sha256Hex(refreshToken), ttlSeconds);
-                }
-            });
-        } else {
-            refreshTokenStore.save(userId, sha256Hex(refreshToken), ttlSeconds);
-        }
     }
 
     /**
@@ -325,7 +295,7 @@ public class AuthServiceImpl implements AuthService {
      * - 회원가입 전체 과정이 하나의 트랜잭션 — 하나라도 실패하면 전부 롤백된다
      *
      * @param verificationResult Mock PASS 세션에서 복원한 인증 정보 (name/phoneNumber/CI)
-     * @return 생성된 userId (자동 로그인 토큰 발급에 사용)
+     * @return 생성된 userId (회원가입 응답에 사용)
      */
     private Long insertUserWithAuthAndProfile(IdentityVerificationResult verificationResult,
                                               String ciHash,
@@ -506,12 +476,12 @@ public class AuthServiceImpl implements AuthService {
         //    - userId 는 민감정보가 아니며, JWT/개인정보 원문은 로그에 포함하지 않는다
         log.info("Refresh Token 재발급 성공 - userId={}", userId);
 
-        // 8. 응답 생성 — token_info 는 로그인과 동일 구조, refreshToken 은 쿠키 전용
+        // 8. 응답 생성 — accessToken/refreshToken 은 JSON 본문에 포함하지 않는다.
+        //    Controller 가 accessToken / refreshToken HttpOnly Cookie 로만 내려주고,
+        //    Cookie Max-Age 는 각 토큰 만료와 동일하다 (Rotation 으로 신규 발급된 값).
         return RefreshTokenResponseDTO.builder()
-                .tokenInfo(LoginResponseDTO.TokenInfo.of(
-                        GRANT_TYPE_BEARER,
-                        accessToken,
-                        jwtTokenProvider.getAccessTokenExpirationSeconds()))
+                .accessToken(accessToken)
+                .accessTokenMaxAgeSeconds(jwtTokenProvider.getAccessTokenExpirationSeconds())
                 .refreshToken(newRefreshToken)
                 .refreshTokenMaxAgeSeconds(refreshTtlSeconds)
                 .build();

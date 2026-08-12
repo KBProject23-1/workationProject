@@ -13,6 +13,7 @@ import com.workit.domain.auth.dto.response.FindIdResponseDTO;
 import com.workit.domain.auth.dto.response.LoginResponseDTO;
 import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
 import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.SignupResponseDTO;
 import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
@@ -29,6 +30,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.DefaultCsrfToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -115,26 +118,21 @@ class AuthControllerTest {
         doThrow(new BusinessException(errorCode)).when(authService).verifyIdentityForSignup(any());
     }
 
-    /** 회원가입 성공 Stub — Service 가 자동 로그인 결과(userId/name/token_info/refreshToken)를 반환한다 */
+    /** 회원가입 성공 Stub — Service 가 가입 완료 결과(userId/name)를 반환한다 (토큰 미발급) */
     private void stubSignupSuccess() {
         when(authService.signup(any(SignupRequestDTO.class)))
-                .thenReturn(LoginResponseDTO.builder()
-                        .userId(501L)
-                        .name("홍길동")
-                        .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
-                        .refreshToken("refresh-token-jwt")
-                        .refreshTokenMaxAgeSeconds(1209600)
-                        .build());
+                .thenReturn(SignupResponseDTO.of(501L, "홍길동"));
     }
 
-    /** 로그인 성공 Stub — Service 가 userId/name/token_info/refreshToken 을 반환한다 */
+    /** 로그인 성공 Stub — Service 가 userId/name/accessToken/refreshToken 을 반환한다 */
     private void stubLoginSuccess() {
         when(authService.login(any(LoginRequestDTO.class)))
                 .thenReturn(LoginResponseDTO.builder()
                         .userId(501L)
                         .name("홍길동")
                         .pinSetupRequired(false)
-                        .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "access-token-jwt", 900))
+                        .accessToken("access-token-jwt")
+                        .accessTokenMaxAgeSeconds(900)
                         .refreshToken("refresh-token-jwt")
                         .refreshTokenMaxAgeSeconds(1209600)
                         .build());
@@ -145,11 +143,12 @@ class AuthControllerTest {
         doThrow(new BusinessException(errorCode)).when(authService).login(any(LoginRequestDTO.class));
     }
 
-    /** 재발급 성공 Stub — Service 가 신규 token_info/refreshToken 을 반환한다 */
+    /** 재발급 성공 Stub — Service 가 신규 accessToken/refreshToken 을 반환한다 */
     private void stubRefreshSuccess() {
         when(authService.refreshAccessToken(any()))
                 .thenReturn(RefreshTokenResponseDTO.builder()
-                        .tokenInfo(LoginResponseDTO.TokenInfo.of("Bearer", "new-access-token-jwt", 900))
+                        .accessToken("new-access-token-jwt")
+                        .accessTokenMaxAgeSeconds(900)
                         .refreshToken("new-refresh-token-jwt")
                         .refreshTokenMaxAgeSeconds(1209600)
                         .build());
@@ -334,6 +333,46 @@ class AuthControllerTest {
         return sb.toString();
     }
 
+    // ---------- CSRF Token 발급 ----------
+
+    @Test
+    @DisplayName("CSRF 토큰 발급 - 200 + SUCCESS + data.csrfToken (XSRF-TOKEN Cookie 값과 동일)")
+    void csrf_success() throws Exception {
+        // Given — CsrfFilter 가 request attribute 에 원문 토큰을 저장한 상태를 재현한다
+        CsrfToken csrfToken = new DefaultCsrfToken("X-XSRF-TOKEN", "_csrf", "csrf-token-abc123");
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/csrf")
+                        .requestAttr(CsrfToken.class.getName(), csrfToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — data.csrfToken 으로 프론트가 X-XSRF-TOKEN Header 에 사용할 값을 받는다
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("CSRF 토큰이 발급되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertEquals("csrf-token-abc123", json.get("data").get("csrfToken").asText());
+    }
+
+    @Test
+    @DisplayName("CSRF 토큰 발급 - CsrfFilter 미적용(attribute 없음) → data.csrfToken null")
+    void csrf_noTokenAttribute() throws Exception {
+        // Given — Controller 단독 호출(standaloneSetup)이라 CsrfFilter 가 attribute 를 저장하지 않는다
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/csrf"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — 실패가 아니라 정상 응답 (실제 운영에서는 CsrfFilter 가 항상 토큰을 저장한다)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertTrue(data.get("csrfToken") == null || data.get("csrfToken").isNull());
+    }
+
     // ---------- 회원가입 본인인증 검증 및 회원 중복 체크 ----------
 
     @Test
@@ -420,9 +459,9 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("회원가입 완료 성공 - 200 + SUCCESS + userId/name/token_info + Access/Refresh Cookie 발급")
+    @DisplayName("회원가입 완료 성공 - 200 + SUCCESS + userId/name 반환 + 토큰/Cookie 미발급")
     void signup_success() throws Exception {
-        // Given — Service 는 가입 + 자동 로그인 결과를 반환한다
+        // Given — Service 는 가입 완료 결과를 반환한다 (토큰 미발급 — 자동 로그인 없음)
         stubSignupSuccess();
 
         // When
@@ -438,26 +477,17 @@ class AuthControllerTest {
         assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
 
-        // 자동 로그인 응답 — login 과 동일 구조 (userId/name/token_info)
+        // 회원가입 응답 — userId/name 만 반환 (자동 로그인 없음)
         JsonNode data = json.get("data");
         assertNotNull(data);
         assertEquals(501, data.get("userId").asInt());
         assertEquals("홍길동", data.get("name").asText());
-        JsonNode tokenInfo = data.get("token_info");
-        assertNotNull(tokenInfo);
-        assertEquals("Bearer", tokenInfo.get("grant_type").asText());
-        assertEquals("access-token-jwt", tokenInfo.get("access_token").asText());
-        assertEquals(900, tokenInfo.get("access_token_expires_in").asInt());
-        // Refresh Token 은 JSON 본문에 포함되지 않는다 (HttpOnly Cookie 로만 전달)
-        assertTrue(data.get("refreshToken") == null);
+        // token_info 는 발급하지 않는다 (토큰 미발급)
+        assertTrue(data.get("token_info") == null);
 
-        // Set-Cookie — ACCESS_TOKEN(자동 로그인) + refreshToken(HttpOnly)
-        String allCookies = String.join(" ", result.getResponse().getHeaders("Set-Cookie"));
-        assertTrue(allCookies.contains("ACCESS_TOKEN=access-token-jwt"), "ACCESS_TOKEN 쿠키: " + allCookies);
-        assertTrue(allCookies.contains("refreshToken=refresh-token-jwt"), "refreshToken 쿠키: " + allCookies);
-        assertTrue(allCookies.contains("HttpOnly"), "HttpOnly 속성: " + allCookies);
-        assertTrue(allCookies.contains("Path=/"), "Path 속성: " + allCookies);
-        assertTrue(allCookies.contains("Max-Age=1209600"), "Max-Age 속성: " + allCookies);
+        // Set-Cookie 가 없어야 한다 (Access/Refresh Token Cookie 미발급)
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "회원가입 응답에는 토큰 Cookie 가 없어야 한다");
 
         // Service 가 가입 요청을 전달받았는지 확인
         verify(authService).signup(any(SignupRequestDTO.class));
@@ -562,9 +592,9 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("회원가입 완료 - agreedTermsIds 포함 정상 요청 (200 + SUCCESS + 자동 로그인)")
+    @DisplayName("회원가입 완료 - agreedTermsIds 포함 정상 요청 (200 + SUCCESS + 토큰/Cookie 미발급)")
     void signup_withAgreedTerms_success() throws Exception {
-        // Given — Service 는 가입 + 자동 로그인 결과를 반환한다
+        // Given — Service 는 가입 완료 결과를 반환한다 (토큰 미발급)
         stubSignupSuccess();
 
         // When
@@ -580,10 +610,10 @@ class AuthControllerTest {
         assertEquals("SUCCESS", json.get("status").asText());
         assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
-        // 자동 로그인 — data + ACCESS_TOKEN Cookie 발급
+        // 토큰 미발급 — data(userId/name) 만 반환, Set-Cookie 없음
         assertNotNull(json.get("data"));
-        String allCookies = String.join(" ", result.getResponse().getHeaders("Set-Cookie"));
-        assertTrue(allCookies.contains("ACCESS_TOKEN=access-token-jwt"), "ACCESS_TOKEN 쿠키: " + allCookies);
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "회원가입 응답에는 토큰 Cookie 가 없어야 한다");
 
         // Service 가 가입 요청을 전달받았는지 확인
         verify(authService).signup(any(SignupRequestDTO.class));
@@ -670,7 +700,7 @@ class AuthControllerTest {
     // ---------- 통합 로그인 ----------
 
     @Test
-    @DisplayName("PASSWORD 로그인 성공 - 200 + SUCCESS + userId/name/token_info + Set-Cookie(HttpOnly)")
+    @DisplayName("PASSWORD 로그인 성공 - 200 + SUCCESS + userId/name/pinSetupRequired + accessToken/refreshToken Set-Cookie(HttpOnly)")
     void login_password_success() throws Exception {
         // Given — Service 는 로그인 성공 결과를 반환한다
         stubLoginSuccess();
@@ -695,25 +725,35 @@ class AuthControllerTest {
         // 기기 최초 로그인 여부 — stub 은 기존 기기(등록 완료)로 false
         assertFalse(data.get("pinSetupRequired").asBoolean());
 
-        // token_info 는 docs 스펙대로 snake_case 필드명을 사용한다
-        JsonNode tokenInfo = data.get("token_info");
-        assertNotNull(tokenInfo);
-        assertEquals("Bearer", tokenInfo.get("grant_type").asText());
-        assertEquals("access-token-jwt", tokenInfo.get("access_token").asText());
-        assertEquals(900, tokenInfo.get("access_token_expires_in").asInt());
+        // Cookie 기반 인증 — Response Body 에 JWT 가 절대 포함되지 않는다
+        // (accessToken/refreshToken/token_info 모두 @JsonIgnore — JSON 에 존재하면 안 된다)
+        assertTrue(data.get("token_info") == null, "token_info 는 JSON 에 없어야 한다");
+        assertTrue(data.get("accessToken") == null, "accessToken 은 JSON 에 없어야 한다");
+        assertTrue(data.get("access_token") == null, "access_token 은 JSON 에 없어야 한다");
+        assertTrue(data.get("refreshToken") == null, "refreshToken 은 JSON 에 없어야 한다");
+        assertTrue(data.get("refresh_token") == null, "refresh_token 은 JSON 에 없어야 한다");
 
-        // Refresh Token 은 JSON 본문에 포함되지 않는다 (HttpOnly Cookie 로만 전달)
-        assertTrue(data.get("refreshToken") == null);
+        // Set-Cookie 2개 — accessToken + refreshToken (과제 스펙: HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "로그인 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
 
-        // Set-Cookie (과제 스펙: refreshToken=...; Max-Age=1209600; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
-        String setCookie = result.getResponse().getHeader("Set-Cookie");
-        assertNotNull(setCookie);
-        assertTrue(setCookie.contains("refreshToken=refresh-token-jwt"), "쿠키명/값: " + setCookie);
-        assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
-        assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
-        assertTrue(setCookie.contains("Max-Age=1209600"), "Max-Age 속성: " + setCookie);
-        assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
-        assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+        String accessCookie = setCookies.stream()
+                .filter(c -> c.startsWith("accessToken=")).findFirst().orElseThrow();
+        assertTrue(accessCookie.contains("accessToken=access-token-jwt"), "쿠키명/값: " + accessCookie);
+        assertTrue(accessCookie.contains("Max-Age=900"), "Access Token Cookie Max-Age: " + accessCookie);
+        assertTrue(accessCookie.contains("HttpOnly"), "HttpOnly 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Path=/"), "Path 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Secure"), "Secure 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("SameSite=Lax"), "SameSite 속성: " + accessCookie);
+
+        String refreshCookie = setCookies.stream()
+                .filter(c -> c.startsWith("refreshToken=")).findFirst().orElseThrow();
+        assertTrue(refreshCookie.contains("refreshToken=refresh-token-jwt"), "쿠키명/값: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Max-Age=1209600"), "Refresh Token Cookie Max-Age: " + refreshCookie);
+        assertTrue(refreshCookie.contains("HttpOnly"), "HttpOnly 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Path=/"), "Path 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Secure"), "Secure 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("SameSite=Lax"), "SameSite 속성: " + refreshCookie);
     }
 
     @Test
@@ -892,7 +932,7 @@ class AuthControllerTest {
     // ---------- 로그인 토큰 재발급 ----------
 
     @Test
-    @DisplayName("재발급 성공 - 200 + SUCCESS + token_info + 신규 Refresh Token Set-Cookie")
+    @DisplayName("재발급 성공 - 200 + SUCCESS + data null + 신규 accessToken/refreshToken Set-Cookie(HttpOnly)")
     void refresh_success() throws Exception {
         // Given — Service 는 재발급 성공 결과를 반환한다
         stubRefreshSuccess();
@@ -909,25 +949,31 @@ class AuthControllerTest {
         assertEquals("액세스 토큰이 성공적으로 재발급되었습니다.", json.get("message").asText());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
 
-        // docs 스펙: data.token_info.{grant_type, access_token, access_token_expires_in}
-        JsonNode tokenInfo = json.get("data").get("token_info");
-        assertNotNull(tokenInfo);
-        assertEquals("Bearer", tokenInfo.get("grant_type").asText());
-        assertEquals("new-access-token-jwt", tokenInfo.get("access_token").asText());
-        assertEquals(900, tokenInfo.get("access_token_expires_in").asInt());
+        // Cookie 기반 인증 — Response Body 에 JWT 가 절대 포함되지 않는다 (data = null)
+        assertTrue(json.get("data") == null || json.get("data").isNull(),
+                "재발급 응답 본문에는 JWT 가 없어야 한다 (data null)");
 
-        // 신규 Refresh Token 은 JSON 본문에 포함되지 않는다 (HttpOnly Cookie 로만 전달 — Rotation)
-        assertTrue(json.get("data").get("refreshToken") == null);
+        // Set-Cookie 2개 — 신규 accessToken + 신규 refreshToken (Rotation, login 과 동일 속성)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "재발급 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
 
-        // Rotation 으로 갱신된 Refresh Token Cookie (login 과 동일 속성)
-        String setCookie = result.getResponse().getHeader("Set-Cookie");
-        assertNotNull(setCookie);
-        assertTrue(setCookie.contains("refreshToken=new-refresh-token-jwt"), "쿠키명/값: " + setCookie);
-        assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
-        assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
-        assertTrue(setCookie.contains("Max-Age=1209600"), "Max-Age 속성: " + setCookie);
-        assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
-        assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+        String accessCookie = setCookies.stream()
+                .filter(c -> c.startsWith("accessToken=")).findFirst().orElseThrow();
+        assertTrue(accessCookie.contains("accessToken=new-access-token-jwt"), "쿠키명/값: " + accessCookie);
+        assertTrue(accessCookie.contains("Max-Age=900"), "Access Token Cookie Max-Age: " + accessCookie);
+        assertTrue(accessCookie.contains("HttpOnly"), "HttpOnly 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Path=/"), "Path 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Secure"), "Secure 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("SameSite=Lax"), "SameSite 속성: " + accessCookie);
+
+        String refreshCookie = setCookies.stream()
+                .filter(c -> c.startsWith("refreshToken=")).findFirst().orElseThrow();
+        assertTrue(refreshCookie.contains("refreshToken=new-refresh-token-jwt"), "쿠키명/값: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Max-Age=1209600"), "Refresh Token Cookie Max-Age: " + refreshCookie);
+        assertTrue(refreshCookie.contains("HttpOnly"), "HttpOnly 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Path=/"), "Path 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Secure"), "Secure 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("SameSite=Lax"), "SameSite 속성: " + refreshCookie);
     }
 
     @Test
@@ -970,7 +1016,7 @@ class AuthControllerTest {
     // ---------- 로그아웃 ----------
 
     @Test
-    @DisplayName("로그아웃 성공 - 200 + SUCCESS + Refresh Token Cookie 즉시 만료(Max-Age=0)")
+    @DisplayName("로그아웃 성공 - 200 + SUCCESS + Access/Refresh Token Cookie 즉시 만료(Max-Age=0)")
     void logout_success() throws Exception {
         // Given — Service 는 정상 로그아웃을 허용한다 (void — 별도 Stub 불필요)
 
@@ -987,15 +1033,21 @@ class AuthControllerTest {
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
         assertTrue(json.get("data") == null || json.get("data").isNull());
 
-        // Set-Cookie (docs: refreshToken=; Max-Age=0; HttpOnly; Path=/; SameSite=None; Secure)
-        String setCookie = result.getResponse().getHeader("Set-Cookie");
-        assertNotNull(setCookie);
-        assertTrue(setCookie.contains("refreshToken="), "쿠키명/값: " + setCookie);
-        assertTrue(setCookie.contains("Max-Age=0"), "Max-Age 속성: " + setCookie);
-        assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
-        assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
-        assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
-        assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+        // Set-Cookie 2개 — accessToken + refreshToken 모두 즉시 만료 (docs: Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "로그아웃 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
+        for (String setCookie : setCookies) {
+            assertTrue(setCookie.contains("="), "쿠키명/값: " + setCookie);
+            assertTrue(setCookie.contains("Max-Age=0"), "Max-Age 속성: " + setCookie);
+            assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
+            assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
+            assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
+            assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+        }
+        assertTrue(setCookies.stream().anyMatch(c -> c.startsWith("accessToken=")),
+                "accessToken Cookie 가 포함되어야 한다: " + setCookies);
+        assertTrue(setCookies.stream().anyMatch(c -> c.startsWith("refreshToken=")),
+                "refreshToken Cookie 가 포함되어야 한다: " + setCookies);
 
         // Service 가 Refresh Token 을 전달받았는지 확인
         verify(authService).logout("valid-refresh-token-jwt");
