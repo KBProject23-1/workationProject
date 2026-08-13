@@ -70,6 +70,8 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
     private static final BigDecimal SCORE_DENOMINATOR = BigDecimal.valueOf(100);
     private static final BigDecimal EARTH_RADIUS_METER = BigDecimal.valueOf(6371000);
     private static final String RECOMMENDATION_MEAL_TYPE = "LUNCH";
+    private static final String PRIORITY_QUESTION_CODE = "PRIORITY_FACTOR";
+    private static final String OFFICE_ENVIRONMENT_QUESTION_CODE = "OFFICE_ENVIRONMENT";
     private static final String CURSOR_RANKING_KEY = "ranking";
     private static final String CURSOR_RESULT_ID_KEY = "recommendationResultId";
 
@@ -209,25 +211,36 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         if (requestVO == null
                 || !RecommendationType.OFFICE.name().equals(requestVO.getRecommendationType())
                 || !hasSavedRecommendationResult(requestVO.getId())) {
-            OfficeRecommendationCreateRequestDTO createRequest = new OfficeRecommendationCreateRequestDTO();
-            createRequest.setWorkationId(workation.getId());
-            createRequest.setSize(size);
-            RecommendationListResponseDTO<OfficeRecommendationResultItemResponseDTO> createdResponse =
-                    createOfficeRecommendation(userId, createRequest);
-            if (createdResponse != null) {
-                return createdResponse;
+            if (referenceMerchantId == null) {
+                OfficeRecommendationCreateRequestDTO createRequest = new OfficeRecommendationCreateRequestDTO();
+                createRequest.setWorkationId(workation.getId());
+                createRequest.setSize(size);
+                return createOfficeRecommendation(userId, createRequest);
             }
 
-            requestVO = recommendationMapper.selectLatestRecommendationRequestByUser(
+            List<OfficeCandidateVO> candidates = recommendationMapper.selectAccommodationReferenceCandidates(
                     userId,
                     workation.getId(),
-                    referenceMerchantId
+                    workation.getRegionId(),
+                    workation.getStartDate()
             );
-        }
+            OfficeCandidateVO selectedCandidate = candidates == null
+                    ? null
+                    : candidates.stream()
+                    .filter(candidate -> referenceMerchantId.equals(candidate.getMerchantId()))
+                    .findFirst()
+                    .orElse(null);
+            if (selectedCandidate == null) {
+                throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            }
 
-        if (requestVO == null || !RecommendationType.OFFICE.name().equals(requestVO.getRecommendationType())
-                || !hasSavedRecommendationResult(requestVO.getId())) {
-            throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            OfficeReferenceMerchantVO reference = new OfficeReferenceMerchantVO();
+            reference.setMerchantId(selectedCandidate.getMerchantId());
+            reference.setMerchantName(selectedCandidate.getName());
+            reference.setLatitude(selectedCandidate.getLatitude());
+            reference.setLongitude(selectedCandidate.getLongitude());
+            return createOfficeRecommendationByReference(
+                    userId, workation, reference, OfficeReferenceType.USER_SELECTED, size);
         }
 
         return toCommon(buildOfficeRecommendationResponse(userId, requestVO, cursor, size));
@@ -308,11 +321,11 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             OfficeReferenceType referenceType,
             Integer size) {
         List<OfficeSurveyAnswerVO> surveyAnswers = loadSurveyAnswers(userId, workation.getId());
-        String q1Code = extractQ1Code(surveyAnswers);
-        Set<String> q2Codes = extractQ2Codes(surveyAnswers);
+        String priorityCode = extractPriorityCode(surveyAnswers);
+        Set<String> environmentCodes = extractOfficeEnvironmentCodes(surveyAnswers);
 
-        OfficePriorityType priority = resolvePriority(q1Code);
-        Set<OfficeAtmosphereType> atmospheres = resolveAtmospheres(q2Codes);
+        OfficePriorityType priority = resolvePriority(priorityCode);
+        Set<OfficeAtmosphereType> atmospheres = resolveAtmospheres(environmentCodes);
 
         BigDecimal officeBudget = loadWorkBudget(workation.getId());
         BigDecimal budgetPerDay = calculateDailyBudget(officeBudget, workation.getStartDate(), workation.getEndDate());
@@ -874,9 +887,9 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         return answers;
     }
 
-    private String extractQ1Code(List<OfficeSurveyAnswerVO> answers) {
+    private String extractPriorityCode(List<OfficeSurveyAnswerVO> answers) {
         for (OfficeSurveyAnswerVO answer : answers) {
-            if ("Q1".equals(answer.getQuestionCode())
+            if (PRIORITY_QUESTION_CODE.equals(answer.getQuestionCode())
                     && StringUtils.hasText(answer.getOptionCode())) {
                 return answer.getOptionCode().trim();
             }
@@ -884,9 +897,9 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
         throw new BusinessException(OfficeRecommendationErrorCode.RECOMMENDATION_CONDITION_NOT_READY);
     }
 
-    private Set<String> extractQ2Codes(List<OfficeSurveyAnswerVO> answers) {
+    private Set<String> extractOfficeEnvironmentCodes(List<OfficeSurveyAnswerVO> answers) {
         Set<String> codes = answers.stream()
-                .filter(a -> "Q2".equals(a.getQuestionCode()))
+                .filter(a -> OFFICE_ENVIRONMENT_QUESTION_CODE.equals(a.getQuestionCode()))
                 .map(OfficeSurveyAnswerVO::getOptionCode)
                 .filter(StringUtils::hasText)
                 .map(String::trim)

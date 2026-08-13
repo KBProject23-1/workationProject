@@ -70,7 +70,7 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public RecommendationListResponseDTO<AccommodationRecommendationResponseDTO.Item> findAccommodationRecommendation(Long userId,
                                                                                 Long referenceMerchantId,
                                                                                 String cursor,
@@ -78,7 +78,22 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
         RecommendationRequestVO request = recommendationMapper.selectLatestAccommodationRequest(userId,
                 referenceMerchantId);
         if (request == null) {
-            throw new BusinessException(AccommodationRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            AccommodationConditionVO condition = getReadyCondition(userId);
+            RecommendationMerchantVO reference;
+            ReferenceType referenceType;
+
+            if (referenceMerchantId == null) {
+                reference = recommendationMapper.selectConfirmedOffice(userId, condition.getWorkationId());
+                referenceType = reference == null ? ReferenceType.REGION_ONLY : ReferenceType.AUTO_MERCHANT;
+            } else {
+                reference = recommendationMapper.selectOfficeInRegion(referenceMerchantId, condition.getRegionId());
+                if (reference == null) {
+                    throw new BusinessException(AccommodationRecommendationErrorCode.REFERENCE_MERCHANT_NOT_FOUND);
+                }
+                referenceType = ReferenceType.USER_SELECTED;
+            }
+
+            return toCommon(createRecommendation(userId, condition, reference, referenceType));
         }
         return toCommon(findPage(request, cursor, normalizeSize(size)));
     }

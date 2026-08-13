@@ -24,7 +24,7 @@
         JOIN survey_options so ON so.id = usa.option_id
         JOIN survey_questions q ON q.id = so.question_id
         WHERE usa.survey_id = #{surveyId}
-        AND q.question_code IN ('Q1', 'Q2')
+        AND q.question_code IN ('PRIORITY_FACTOR', 'OFFICE_ENVIRONMENT')
     </select>
 
     <select id="selectAccommodationReference"
