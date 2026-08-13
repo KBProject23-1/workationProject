@@ -67,8 +67,9 @@
 
     <!--
         프로필 수정 - user_profile 부분 수정 (PATCH: 전달된 값만 UPDATE).
-        - <set> + <if>: nickname/companyName 중 null 이 아닌 필드만 UPDATE 문에 포함된다
-          (PATCH 특성 반영 — 미전달 필드는 기존 값 유지)
+        - <set> + <if>: nickname 은 null 이 아닌 필드만, company_name 은 updateCompanyName=true 일 때만
+          UPDATE 문에 포함된다 (PATCH 특성 반영 — 미전달 필드는 기존 값 유지)
+        - companyName 이 요청에 포함되면 updateCompanyName=true 가 되어 값(또는 null → NULL/삭제)으로 저장된다
         - Service Layer 에서 검증/trim 후 전달 (Mapper 에서 검증 금지)
         - updated_at 은 DB ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신
         - 동시 요청으로 인한 nickname UNIQUE 충돌은 DuplicateKeyException → 409 매핑 (Service)
@@ -80,7 +81,7 @@
             <if test="nickname != null">
                 nickname = #{nickname},
             </if>
-            <if test="companyName != null">
+            <if test="updateCompanyName">
                 company_name = #{companyName},
             </if>
         </set>

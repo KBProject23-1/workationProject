@@ -25,8 +25,15 @@ public class UserProfileVO {
     /** 닉네임 (UNIQUE) */
     private String nickname;
 
-    /** 소속 회사명 (선택) */
+    /** 소속 회사명 (선택) — 수정 시 null 이면 NULL(삭제) 저장 */
     private String companyName;
+
+    /**
+     * company_name UPDATE 포함 여부 (프로필 수정 전용)
+     * - false: company_name 은 UPDATE 문에서 제외 (기존 값 유지 — PATCH 부분 수정)
+     * - true: companyName 값(또는 null → NULL)으로 저장
+     */
+    private boolean updateCompanyName;
 
     /** 프로필 생성 일시 */
     private LocalDateTime createdAt;

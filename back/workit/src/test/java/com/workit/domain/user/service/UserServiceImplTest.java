@@ -20,8 +20,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -360,13 +362,14 @@ class UserServiceImplTest {
         // When
         userService.updateProfile(501L, request);
 
-        // Then — nickname 만 전달되어 동적 UPDATE (companyName 은 null → XML <if> 로 제외)
+        // Then — nickname 만 전달되어 동적 UPDATE (companyName 은 미전달 → XML <if> 로 제외)
         ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
         verify(userMapper).updateUserProfile(captor.capture());
         UserProfileVO saved = captor.getValue();
         assertEquals(501L, saved.getUserId());
         assertEquals("새로운닉네임", saved.getNickname());
         assertNull(saved.getCompanyName());
+        assertFalse(saved.isUpdateCompanyName());
     }
 
     @Test
@@ -382,13 +385,14 @@ class UserServiceImplTest {
         // When
         userService.updateProfile(501L, request);
 
-        // Then — companyName 만 전달되어 동적 UPDATE (nickname 은 null → XML <if> 로 제외)
+        // Then — companyName 만 전달되어 동적 UPDATE (nickname 은 미전달 → XML <if> 로 제외)
         ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
         verify(userMapper).updateUserProfile(captor.capture());
         UserProfileVO saved = captor.getValue();
         assertEquals(501L, saved.getUserId());
         assertNull(saved.getNickname());
         assertEquals("구글코리아", saved.getCompanyName());
+        assertTrue(saved.isUpdateCompanyName());
     }
 
     @Test
@@ -405,12 +409,36 @@ class UserServiceImplTest {
         // When
         userService.updateProfile(501L, request);
 
-        // Then — trim 후 두 필드 모두 전달
+        // Then — trim 후 두 필드 모두 전달 (companyName 은 UPDATE 포함)
         ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
         verify(userMapper).updateUserProfile(captor.capture());
         UserProfileVO saved = captor.getValue();
         assertEquals("새닉네임", saved.getNickname());
         assertEquals("구글코리아", saved.getCompanyName());
+        assertTrue(saved.isUpdateCompanyName());
+    }
+
+    @Test
+    @DisplayName("프로필 수정 성공 - companyName 삭제(null/빈 값 전달) → NULL 저장 + update 호출")
+    void updateProfile_clearCompanyName() {
+        // Given — 프로필 등록 완료 회원 (기존 companyName: 6인조테크)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
+        when(userMapper.updateUserProfile(any(UserProfileVO.class))).thenReturn(1);
+
+        // When — nickname 없이 companyName 만 명시적 null(빈 값) 전달 (소속 회사 삭제)
+        ProfileUpdateRequestDTO request = new ProfileUpdateRequestDTO();
+        request.setCompanyName("");
+
+        userService.updateProfile(501L, request);
+
+        // Then — company_name = NULL 로 저장되도록 updateCompanyName=true + companyName null 전달
+        ArgumentCaptor<UserProfileVO> captor = ArgumentCaptor.forClass(UserProfileVO.class);
+        verify(userMapper).updateUserProfile(captor.capture());
+        UserProfileVO saved = captor.getValue();
+        assertEquals(501L, saved.getUserId());
+        assertNull(saved.getNickname());
+        assertNull(saved.getCompanyName());
+        assertTrue(saved.isUpdateCompanyName());
     }
 
     @Test
@@ -561,14 +589,15 @@ class UserServiceImplTest {
         when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithProfile());
 
         ProfileUpdateRequestDTO nullRequest = new ProfileUpdateRequestDTO();
-        ProfileUpdateRequestDTO blankRequest = new ProfileUpdateRequestDTO();
-        blankRequest.setNickname("   ");
-        blankRequest.setCompanyName("");
+        // 공백 nickname 만 전달 (companyName 미전달) — 수정 대상 필드 없음
+        ProfileUpdateRequestDTO blankNicknameRequest = new ProfileUpdateRequestDTO();
+        blankNicknameRequest.setNickname("   ");
 
         // When & Then — 모두 INVALID_PROFILE_REQUEST (PATCH: 최소 1개 필드 필요)
+        //   ※ companyName 은 null/빈 값 전달도 삭제 요청으로 수정 대상이므로 이 케이스에 포함되지 않는다
         assertThrows(BusinessException.class, () -> userService.updateProfile(501L, null));
         assertThrows(BusinessException.class, () -> userService.updateProfile(501L, nullRequest));
-        assertThrows(BusinessException.class, () -> userService.updateProfile(501L, blankRequest));
+        assertThrows(BusinessException.class, () -> userService.updateProfile(501L, blankNicknameRequest));
 
         // Then — 저장 Mapper 미호출
         verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
