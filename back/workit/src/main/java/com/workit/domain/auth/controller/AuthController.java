@@ -2,6 +2,7 @@ package com.workit.domain.auth.controller;
 
 import com.workit.domain.auth.dto.request.FindIdRequestDTO;
 import com.workit.domain.auth.dto.request.LoginRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordCheckIdRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
 import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
 import com.workit.domain.auth.dto.request.PinResetRequestDTO;
@@ -277,6 +278,23 @@ public class AuthController {
         return GlobalResponseFactory.success(
                 authService.findId(request.getIdentityVerificationId()),
                 "가입된 이메일을 찾았습니다.");
+    }
+
+    // 1.8-1 비밀번호 재설정 사전 단계 - 아이디 존재 확인
+    // - docs: 비밀번호 재설정 - 아이디 존재 확인 (POST /api/v1/auth/password/check-id)
+    // - 비로그인 공개 API: 비밀번호 찾기 첫 화면에서 입력한 아이디가 DB 에 있는지 확인
+    // - Service 에서 loginId(이메일/휴대폰) hash 기준 회원 조회를 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 조회 금지)
+    // - 회원 없음/비활성: USER_NOT_FOUND(404), 값 누락: INVALID_PASSWORD_RESET_REQUEST(400)
+    // - 존재하면 200 SUCCESS — 프론트가 PASS 본인인증 단계로 진행한다
+    @PostMapping("/password/check-id")
+    public ResponseEntity<CommonResponse<Void>> passwordCheckIdPost(
+            @RequestBody PasswordCheckIdRequestDTO request) {
+
+        authService.checkPasswordResetId(request.getLoginId());
+
+        return GlobalResponseFactory.success(
+                null, "비밀번호를 재설정할 수 있는 계정입니다.");
     }
 
     // 1.9 비밀번호 재설정 1단계 - 본인 확인 및 인증 토큰 발급

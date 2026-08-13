@@ -1,5 +1,7 @@
 package com.workit.domain.auth.service;
 
+import java.time.Duration;
+
 // 비밀번호 재설정 임시 토큰 저장소 인터페이스
 //
 // 비밀번호 재설정 1단계(verify)에서 발급한 passwordResetToken(UUID)과
@@ -38,4 +40,12 @@ public interface PasswordResetTokenStore {
 
     /** 토큰 삭제 — 비밀번호 변경 완료 또는 흐름 무효 시 1회성 폐기 */
     void delete(String passwordResetToken);
+
+    /**
+     * 저장소가 적용하는 토큰 TTL (기본 5분)
+     * - 만료 시각(expiresAt) 계산용 — TTL 정책은 저장소가 소유하므로 Service 가 하드코딩하지 않는다
+     *
+     * @return 발급 토큰의 유효 시간
+     */
+    Duration getTtl();
 }

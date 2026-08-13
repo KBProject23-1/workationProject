@@ -46,6 +46,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -250,6 +252,8 @@ class AuthServiceImplTest {
             savedPasswordResetTokens.remove(invocation.getArgument(0));
             return null;
         }).when(passwordResetTokenStore).delete(anyString());
+        // TTL 은 저장소가 소유하는 정책 — expiresAt 계산용으로 기본값(5분)을 Stub 한다
+        lenient().when(passwordResetTokenStore.getTtl()).thenReturn(Duration.ofMinutes(5));
 
         // users PK 자동 증가 흉내 — insertUser 호출 시 id 를 채운다 (기존 Fake Mapper 대체)
         lenient().when(authMapper.insertUser(any(UserVO.class)))
@@ -1759,10 +1763,15 @@ class AuthServiceImplTest {
                 passwordVerifyRequest("user@example.com", "imp_ver_9876543210"));
 
         // Then — UUID 토큰 발급 + Redis(password:reset:{token})에 userId 매핑 저장
-        // (TTL 5분은 저장소가 설정값으로 내부 적용 — Service 는 TTL 을 알지 못한다)
+        // (TTL 5분은 저장소가 설정값으로 내부 적용 — Service 는 expiresAt 계산을 위해 저장소 TTL 을 조회한다)
         assertNotNull(result);
         assertNotNull(result.getPasswordResetToken());
         assertFalse(result.getPasswordResetToken().trim().isEmpty());
+
+        // expiresAt 은 now + 저장소 TTL(5분) — 프론트 카운트다운 표시 기준 시각
+        long expectedExpiresAt = Instant.now().plus(Duration.ofMinutes(5)).toEpochMilli();
+        assertTrue(Math.abs(result.getExpiresAt() - expectedExpiresAt) < 2000,
+                "expiresAt 은 now + 5분(저장소 TTL) 이어야 한다");
 
         ArgumentCaptor<String> tokenCaptor = ArgumentCaptor.forClass(String.class);
         verify(passwordResetTokenStore).save(tokenCaptor.capture(), eq(501L));
@@ -1848,6 +1857,33 @@ class AuthServiceImplTest {
     }
 
     @Test
+    @DisplayName("재설정 토큰 발급 - PASS 인증 이름이 가입 이름과 불일치 → VERIFICATION_FAILED (400)")
+    void passwordVerify_nameMismatch_throws() {
+        // Given — CI 는 일치하지만(같은 휴대폰 = 같은 CI) PASS 인증에 입력한 이름이 가입 시 이름과 다르다
+        //         (Mock CI 는 휴대폰 번호 기반이므로 이름이 달라도 CI 는 일치 — 이름 대조로 차단)
+        when(identityVerificationProvider.verify("imp_ver_9876543210"))
+                .thenReturn(mockProviderResult("imp_ver_9876543210")); // PASS 인증 이름 = "홍길동"
+        LoginUserVO user = new LoginUserVO();
+        user.setId(501L);
+        user.setStatus("ACTIVE");
+        user.setNameEncrypt(PersonalDataCipher.encrypt("김철수")); // 가입 시 등록 이름 = "김철수"
+        user.setPasswordHash(PasswordEncryptor.encode("password123!"));
+        user.setIdentityCiHash(sha256("MOCK-CI-imp_ver_9876543210"));
+        // 이메일 loginId 로 요청하므로 email_hash 조회 경로만 Stub 한다
+        when(authMapper.findUserByEmailHash(sha256("user@example.com"))).thenReturn(user);
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.verifyPasswordReset(
+                        passwordVerifyRequest("user@example.com", "imp_ver_9876543210")));
+
+        // Then
+        assertEquals(AuthErrorCode.VERIFICATION_FAILED, ex.getErrorCode());
+        // 이름 불일치 시 토큰이 발급되지 않아야 한다
+        assertTrue(savedPasswordResetTokens.isEmpty());
+    }
+
+    @Test
     @DisplayName("재설정 토큰 발급 - PASS 인증 실패 → INVALID_VERIFICATION_ID (Provider 예외 전파)")
     void passwordVerify_invalidVerification_throws() {
         // Given — 회원은 존재하지만 Provider 가 인증 실패를 던진다
@@ -1882,6 +1918,77 @@ class AuthServiceImplTest {
 
         // 요청 값 검증 실패 시 Provider 호출 없이 차단된다
         verify(identityVerificationProvider, never()).verify(any());
+    }
+
+    // ---------- 비밀번호 재설정 사전 단계 (아이디 존재 확인) ----------
+
+    @Test
+    @DisplayName("아이디 존재 확인 성공 - ACTIVE 회원은 PASS 인증 단계로 진행 가능 (예외 없음)")
+    void checkPasswordResetId_success() {
+        // Given — 이메일 loginId 로 ACTIVE 회원 조회
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+
+        // When & Then — 예외 없이 통과 (200 SUCCESS)
+        authService.checkPasswordResetId("user@example.com");
+
+        // 이메일 원문이 아니라 email_hash 로만 조회했는지 확인
+        verify(authMapper).findUserByEmailHash(sha256("user@example.com"));
+        verify(authMapper, never()).findUserByPhoneHash(anyString());
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 성공 - 휴대폰 loginId 는 하이픈 제거 후 phone_hash 로 조회")
+    void checkPasswordResetId_phoneLoginId_success() {
+        // Given — 휴대폰 loginId 로 ACTIVE 회원 조회
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "ACTIVE");
+
+        // When — 하이픈 포함 휴대폰 번호로 요청
+        authService.checkPasswordResetId("010-3456-7890");
+
+        // Then — phone_number_encrypt(원문)이 아니라 phone_hash 로만 조회
+        verify(authMapper).findUserByPhoneHash(sha256("01034567890"));
+        verify(authMapper, never()).findUserByEmailHash(anyString());
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - 미가입 아이디 → USER_NOT_FOUND (404)")
+    void checkPasswordResetId_userNotFound_throws() {
+        // When — Mock 조회 결과 null (미가입)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.checkPasswordResetId("unknown@example.com"));
+
+        // Then — 아이디 입력 화면에서 재확인 안내 (404)
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - 탈퇴(WITHDRAWN) 회원 → USER_NOT_FOUND (계정 존재 여부 노출 방지)")
+    void checkPasswordResetId_withdrawnUser_throws() {
+        // Given — 탈퇴 상태 회원
+        registerPasswordResetUser(501L, "user@example.com", "01034567890",
+                sha256("MOCK-CI-imp_ver_9876543210"), "WITHDRAWN");
+
+        // When
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.checkPasswordResetId("user@example.com"));
+
+        // Then — 탈퇴 회원도 USER_NOT_FOUND 로 통일
+        assertEquals(AuthErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - loginId 누락 → INVALID_PASSWORD_RESET_REQUEST (400)")
+    void checkPasswordResetId_blankLoginId_throws() {
+        // When & Then — null/빈 값 모두 차단
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> authService.checkPasswordResetId(null));
+        assertEquals(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST, nullEx.getErrorCode());
+
+        BusinessException blankEx = assertThrows(BusinessException.class,
+                () -> authService.checkPasswordResetId("   "));
+        assertEquals(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST, blankEx.getErrorCode());
     }
 
     // ---------- 비밀번호 재설정 2단계 (비밀번호 변경) ----------

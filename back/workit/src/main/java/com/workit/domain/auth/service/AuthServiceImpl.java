@@ -44,6 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -581,6 +582,36 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    // SELECT 만 수행하므로 읽기 전용 트랜잭션 (checkEmailAvailability 와 동일)
+    @Transactional(readOnly = true)
+    public void checkPasswordResetId(String loginId) {
+
+        // 1. 요청 값 검증 — loginId 누락 → INVALID_PASSWORD_RESET_REQUEST(400)
+        //    (verifyPasswordReset 과 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
+        if (isBlank(loginId)) {
+            throw new BusinessException(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST);
+        }
+
+        // 2. loginId(이메일 또는 휴대폰) 기준 회원 조회 — loginByPassword 와 동일한 판별 규칙 재사용
+        //    - 개인정보 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md: 검색용 hash)
+        //    - 회원 없음 → USER_NOT_FOUND(404) — 아이디 입력 화면에서 재확인 안내
+        LoginUserVO user = findUserByLoginId(loginId);
+        if (user == null) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 사용자 상태 확인 — ACTIVE 만 비밀번호 재설정 허용
+        //    - 탈퇴(WITHDRAWN)/차단(BLOCKED) 등 비활성 회원은 계정 존재 여부를 노출하지 않고
+        //      USER_NOT_FOUND(404) 로 처리 (findId/verifyPasswordReset 과 동일 정책)
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 4. Audit 로그 — userId 만 기록 (개인정보 원문 로그 출력 금지)
+        log.info("비밀번호 재설정 아이디 확인 성공 - userId={}", user.getId());
+    }
+
+    @Override
     // DB 는 SELECT 만 수행하고 Redis 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
     // 별도 @Transactional 을 사용하지 않는다 (login 과 동일 — Redis 는 DB 트랜잭션에 참여하지 않음)
     public PasswordVerifyResponseDTO verifyPasswordReset(PasswordVerifyRequestDTO request) {
@@ -615,6 +646,15 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
         }
 
+        // 4-1. PASS 인증 이름과 가입 이름 일치 확인 — Mock CI 는 휴대폰 번호 기반(MOCK-CI-{sha256(phone)})
+        //      이므로 휴대폰 번호를 알면 이름이 달라도 CI 가 일치한다. 계정 소유자 본인 확인을 위해
+        //      PASS 인증에 입력된 이름과 가입 시 등록된 이름(users.name_encrypt 복호화)을 함께 대조한다.
+        //      - 이름 불일치 → VERIFICATION_FAILED(400) (docs — 원인 비노출)
+        String registeredName = PersonalDataCipher.decrypt(user.getNameEncrypt());
+        if (!registeredName.equals(result.getName())) {
+            throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
+        }
+
         // 5. 사용자 상태 확인 — ACTIVE 만 비밀번호 재설정 허용
         //    - 탈퇴(WITHDRAWN)/차단(BLOCKED) 등 비활성 회원은 계정 존재 여부를 노출하지 않고
         //      USER_NOT_FOUND(404) 로 처리 (findId/refreshAccessToken 과 동일 정책)
@@ -629,10 +669,14 @@ public class AuthServiceImpl implements AuthService {
         String passwordResetToken = UUID.randomUUID().toString();
         passwordResetTokenStore.save(passwordResetToken, user.getId());
 
+        // 6-1. 만료 시각(expiresAt) 계산 — 프론트 5분 카운트다운 표시용
+        //      - TTL 은 저장소가 소유하므로 저장소에서 조회해 계산한다 (Service 하드코딩 금지)
+        long expiresAt = Instant.now().plus(passwordResetTokenStore.getTtl()).toEpochMilli();
+
         // 7. Audit 로그 — userId 만 기록 (토큰/개인정보 원문 로그 출력 금지)
         log.info("비밀번호 재설정 토큰 발급 - userId={}", user.getId());
 
-        return PasswordVerifyResponseDTO.of(passwordResetToken);
+        return PasswordVerifyResponseDTO.of(passwordResetToken, expiresAt);
     }
 
     @Override

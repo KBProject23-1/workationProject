@@ -63,4 +63,9 @@ public class RedisPasswordResetTokenStore implements PasswordResetTokenStore {
     public void delete(String passwordResetToken) {
         redisTemplate.delete(KEY_PREFIX + passwordResetToken);
     }
+
+    @Override
+    public Duration getTtl() {
+        return ttl;
+    }
 }
