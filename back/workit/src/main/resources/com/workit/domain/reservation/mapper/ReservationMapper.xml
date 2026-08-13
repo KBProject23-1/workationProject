@@ -123,6 +123,31 @@
         FOR UPDATE
     </select>
 
+    <!-- 예약 상품 존재 여부와 날짜 범위 규칙 확인을 위한 세부 유형 조회 -->
+    <select id="selectReservationProductDetailType"
+            resultType="com.workit.domain.reservation.vo.ReservationProductDetailType">
+        SELECT product_detail_type
+        FROM reservation_products
+        WHERE id = #{productId}
+    </select>
+
+    <!-- 예약 상품의 날짜별 재고 읽기 전용 조회 -->
+    <select id="selectDailyInventories" resultMap="reservationDailyInventoryMap">
+        SELECT id, inventory_date, remaining_capacity, is_available
+        FROM product_daily_inventories
+        WHERE product_id = #{productId}
+          AND inventory_date &gt;= #{startDate}
+        <choose>
+            <when test="includeEndDate">
+                AND inventory_date &lt;= #{endDate}
+            </when>
+            <otherwise>
+                AND inventory_date &lt; #{endDate}
+            </otherwise>
+        </choose>
+        ORDER BY inventory_date ASC
+    </select>
+
     <!-- 결제와 재고 검증을 통과한 확정 예약 저장 -->
     <insert id="insertReservation"
             parameterType="com.workit.domain.reservation.vo.ReservationCreateVO"
@@ -343,6 +368,9 @@
     <sql id="reservationListWhere">
         <!-- 로그인 사용자 소유 예약으로 제한하고 전달받은 모든 상태를 IN 조건으로 조회 -->
         WHERE r.user_id = #{userId}
+        <if test="workationId != null">
+          AND r.workation_id = #{workationId}
+        </if>
           AND r.status IN
         <foreach collection="statuses" item="status" open="(" separator="," close=")">
             #{status}

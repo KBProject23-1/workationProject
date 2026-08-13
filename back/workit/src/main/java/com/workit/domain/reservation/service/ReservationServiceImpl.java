@@ -1,11 +1,13 @@
 package com.workit.domain.reservation.service;
 
 import com.workit.domain.reservation.dto.request.ReservationCreateRequestDTO;
+import com.workit.domain.reservation.dto.request.ReservationProductAvailabilityRequestDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancelResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCreateResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
+import com.workit.domain.reservation.dto.response.ReservationProductAvailabilityResponseDTO;
 import com.workit.domain.reservation.exception.ReservationErrorCode;
 import com.workit.domain.reservation.mapper.ReservationMapper;
 import com.workit.domain.reservation.vo.ReservationCategory;
@@ -27,6 +29,7 @@ import com.workit.domain.payment.service.PaymentService;
 import com.workit.exception.BusinessException;
 import com.workit.global.dto.PageResponseDTO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,8 +42,10 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -59,6 +64,10 @@ public class ReservationServiceImpl implements ReservationService {
 
     private final ReservationMapper reservationMapper;
     private final PaymentService paymentService;
+
+    // 프론트 기기 식별자 연동 전 로컬 예약 결제 테스트용 임시값
+    @Value("${reservation.dev-default-device-id:}")
+    private String devDefaultDeviceId;
 
 
 //  예약 상태가 CONFIRMED인 예약 중 이용이 끝난 예약을 COMPLETED로 변경
@@ -257,12 +266,13 @@ public class ReservationServiceImpl implements ReservationService {
     @Transactional(readOnly = true)
     public PageResponseDTO<ReservationListItemResponseDTO> findReservationList(
             Long userId,
+            Long workationId,
             List<ReservationStatus> statuses,
             ReservationCategory category,
             int page,
             int size) {
 
-        validateRequest(userId, statuses, page, size);
+        validateRequest(userId, workationId, statuses, page, size);
 
         // 같은 상태가 여러 번 전달돼도 SQL IN 조건에는 한 번만 포함
         List<ReservationStatus> distinctStatuses = new ArrayList<>(new LinkedHashSet<>(statuses));
@@ -271,6 +281,7 @@ public class ReservationServiceImpl implements ReservationService {
         // 목록과 동일한 사용자·상태·카테고리 조건으로 전체 건수를 조회
         long totalElements = reservationMapper.countReservationList(
                 userId,
+                workationId,
                 distinctStatuses,
                 category
         );
@@ -286,6 +297,7 @@ public class ReservationServiceImpl implements ReservationService {
         List<ReservationListItemResponseDTO> content = reservationMapper
                 .selectReservationList(
                         userId,
+                        workationId,
                         distinctStatuses,
                         category,
                         offset,
@@ -297,6 +309,46 @@ public class ReservationServiceImpl implements ReservationService {
                 .collect(Collectors.toList());
 
         return PageResponseDTO.of(content, page, size, totalElements);
+    }
+
+    // 예약 상품의 날짜별 남은 재고와 예약 가능 여부 조회
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReservationProductAvailabilityResponseDTO>
+    findReservationProductAvailabilities(
+            Long productId,
+            ReservationProductAvailabilityRequestDTO request) {
+
+        validateAvailabilityRequest(productId, request);
+
+        ReservationProductDetailType productDetailType =
+                reservationMapper.selectReservationProductDetailType(productId);
+        if (productDetailType == null) {
+            throw new BusinessException(ReservationErrorCode.RESERVATION_PRODUCT_NOT_FOUND);
+        }
+
+        boolean includeEndDate = productDetailType != ReservationProductDetailType.ROOM;
+        validateAvailabilityPeriod(request, productDetailType);
+
+        List<ReservationDailyInventoryVO> inventories =
+                reservationMapper.selectDailyInventories(
+                        productId,
+                        request.getStartDate(),
+                        request.getEndDate(),
+                        includeEndDate
+                );
+
+        Map<LocalDate, ReservationDailyInventoryVO> inventoryByDate = new HashMap<>();
+        for (ReservationDailyInventoryVO inventory : inventories) {
+            inventoryByDate.put(inventory.getInventoryDate(), inventory);
+        }
+
+        return createAvailabilityResponses(
+                request.getStartDate(),
+                request.getEndDate(),
+                includeEndDate,
+                inventoryByDate
+        );
     }
 
 //    사용자 예약 상세 정보 조회
@@ -583,7 +635,17 @@ public class ReservationServiceImpl implements ReservationService {
         );
         paymentRequest.setCardId(request.getCardId());
         paymentRequest.setPinNumber(request.getPinNumber());
+        paymentRequest.setDeviceId(findPaymentDeviceId(request.getDeviceId()));
+        paymentRequest.setIdempotencyKey(request.getIdempotencyKey());
         return paymentRequest;
+    }
+
+    // 요청값을 우선하고 비어 있을 때만 로컬 테스트용 기기 식별자를 사용하는 선택값
+    private String findPaymentDeviceId(String deviceId) {
+        if (deviceId != null && !deviceId.trim().isEmpty()) {
+            return deviceId;
+        }
+        return devDefaultDeviceId;
     }
 
     // 생성일과 전역 예약 PK를 조합해 WR-yyyyMMdd-000001 형식의 예약번호 생성
@@ -633,12 +695,17 @@ public class ReservationServiceImpl implements ReservationService {
     // 필수 조회 조건과 페이징 범위를 검증
     private void validateRequest(
             Long userId,
+            Long workationId,
             List<ReservationStatus> statuses,
             int page,
             int size) {
 
         if (userId == null || userId < 1) {
             throw new IllegalArgumentException("사용자 정보가 올바르지 않습니다.");
+        }
+
+        if (workationId != null && workationId < 1) {
+            throw new BusinessException(ReservationErrorCode.INVALID_RESERVATION_REQUEST);
         }
 
         if (statuses == null || statuses.isEmpty() || statuses.contains(null)) {
@@ -656,5 +723,63 @@ public class ReservationServiceImpl implements ReservationService {
         if (page > Integer.MAX_VALUE / size) {
             throw new IllegalArgumentException("요청한 페이지 범위가 너무 큽니다.");
         }
+    }
+
+    // 예약 상품과 날짜별 재고 조회 필수값 검증
+    private void validateAvailabilityRequest(
+            Long productId,
+            ReservationProductAvailabilityRequestDTO request) {
+
+        if (productId == null || productId < 1) {
+            throw new BusinessException(ReservationErrorCode.INVALID_RESERVATION_REQUEST);
+        }
+
+        if (request == null
+                || request.getStartDate() == null
+                || request.getEndDate() == null
+                || request.getStartDate().isAfter(request.getEndDate())) {
+
+            throw new BusinessException(ReservationErrorCode.INVALID_RESERVATION_DATE);
+        }
+    }
+
+    // 숙소는 체크아웃 날짜를 제외하고 공유오피스는 종료일을 포함하는 기간 검증
+    private void validateAvailabilityPeriod(
+            ReservationProductAvailabilityRequestDTO request,
+            ReservationProductDetailType productDetailType) {
+
+        if (productDetailType == ReservationProductDetailType.ROOM
+                && !request.getStartDate().isBefore(request.getEndDate())) {
+
+            throw new BusinessException(ReservationErrorCode.INVALID_RESERVATION_DATE);
+        }
+    }
+
+    // 재고가 등록되지 않은 대상 날짜를 예약 불가 상태로 보완한 응답 목록
+    private List<ReservationProductAvailabilityResponseDTO> createAvailabilityResponses(
+            LocalDate startDate,
+            LocalDate endDate,
+            boolean includeEndDate,
+            Map<LocalDate, ReservationDailyInventoryVO> inventoryByDate) {
+
+        List<ReservationProductAvailabilityResponseDTO> responses = new ArrayList<>();
+        LocalDate currentDate = startDate;
+
+        while (currentDate.isBefore(endDate)) {
+            responses.add(ReservationProductAvailabilityResponseDTO.from(
+                    currentDate,
+                    inventoryByDate.get(currentDate)
+            ));
+            currentDate = currentDate.plusDays(1);
+        }
+
+        if (includeEndDate) {
+            responses.add(ReservationProductAvailabilityResponseDTO.from(
+                    endDate,
+                    inventoryByDate.get(endDate)
+            ));
+        }
+
+        return responses;
     }
 }
