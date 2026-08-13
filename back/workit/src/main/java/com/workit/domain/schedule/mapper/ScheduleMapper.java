@@ -5,6 +5,7 @@ import com.workit.domain.schedule.vo.ScheduleVO;
 import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface ScheduleMapper {
@@ -14,6 +15,11 @@ public interface ScheduleMapper {
     // 소유자 조건이 SQL 에 있어 남의 일정은 조회되지 않는다. 없으면 null
     ScheduleVO selectScheduleById(@Param("scheduleId") Long scheduleId,
                                   @Param("userId") Long userId);
+
+    int updateSchedule(@Param("scheduleId") Long scheduleId,
+                       @Param("workationId") Long workationId,
+                       @Param("userId") Long userId,
+                       @Param("scheduledAt") LocalDateTime scheduledAt);
 
     int deleteSchedule(@Param("scheduleId") Long scheduleId,
                        @Param("workationId") Long workationId,

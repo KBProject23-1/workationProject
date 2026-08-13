@@ -1,6 +1,7 @@
 package com.workit.domain.schedule.service;
 
 import com.workit.domain.schedule.dto.request.ScheduleCreateRequestDTO;
+import com.workit.domain.schedule.dto.request.ScheduleUpdateRequestDTO;
 import com.workit.domain.schedule.dto.response.ScheduleDayResponseDTO;
 import com.workit.domain.schedule.dto.response.ScheduleDetailResponseDTO;
 import com.workit.domain.schedule.dto.response.ScheduleItemResponseDTO;
@@ -137,6 +138,37 @@ public class ScheduleServiceImpl implements ScheduleService {
             throw new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND);
         }
         return ScheduleDetailResponseDTO.from(vo);
+    }
+
+    // =====================================================================================
+    // 일정 시각 수정
+    // =====================================================================================
+
+    @Override
+    @Transactional
+    public ScheduleDetailResponseDTO modifySchedule(Long userId, Long workationId, Long scheduleId,
+                                                    ScheduleUpdateRequestDTO dto) {
+
+        WorkationVO workation = ownershipValidator.getOwnedActive(userId, workationId, "일정을 수정");
+
+        if (dto.getScheduledAt() == null) {
+            throw new BusinessException(ScheduleErrorCode.SCHEDULED_AT_REQUIRED);
+        }
+        validateWithinPeriod(dto.getScheduledAt().toLocalDate(), workation);
+
+        // 존재 여부를 UPDATE 결과로 판정하면 안 된다.
+        // 같은 시각으로 다시 저장하면 MySQL 이 0행을 반환해 없는 일정으로 오인한다
+        ScheduleVO existing = scheduleMapper.selectScheduleById(scheduleId, userId);
+
+        if (existing == null || !workationId.equals(existing.getWorkationId())) {
+            throw new BusinessException(ScheduleErrorCode.SCHEDULE_NOT_FOUND);
+        }
+
+        scheduleMapper.updateSchedule(scheduleId, workationId, userId, dto.getScheduledAt());
+        log.info("일정 수정 - workationId: {}, scheduleId: {}, scheduledAt: {}",
+                workationId, scheduleId, dto.getScheduledAt());
+
+        return getSchedule(userId, scheduleId);
     }
 
     // =====================================================================================

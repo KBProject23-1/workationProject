@@ -1,6 +1,7 @@
 package com.workit.domain.schedule.service;
 
 import com.workit.domain.schedule.dto.request.ScheduleCreateRequestDTO;
+import com.workit.domain.schedule.dto.request.ScheduleUpdateRequestDTO;
 import com.workit.domain.schedule.dto.response.ScheduleDetailResponseDTO;
 import com.workit.domain.schedule.dto.response.ScheduleListResponseDTO;
 
@@ -18,6 +19,10 @@ public interface ScheduleService {
 
     // 일정 상세
     ScheduleDetailResponseDTO getSchedule(Long userId, Long scheduleId);
+
+    // 일정 시각 수정
+    ScheduleDetailResponseDTO modifySchedule(Long userId, Long workationId, Long scheduleId,
+                                             ScheduleUpdateRequestDTO dto);
 
     // 일정 삭제
     void removeSchedule(Long userId, Long workationId, Long scheduleId);

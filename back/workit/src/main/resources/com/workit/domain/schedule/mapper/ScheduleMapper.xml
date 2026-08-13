@@ -33,6 +33,17 @@
          WHERE s.id = #{scheduleId}
     </select>
 
+    <!-- 시각만 바꾼다. 가맹점 변경은 지원하지 않는다 -->
+    <update id="updateSchedule">
+        UPDATE schedules s
+          JOIN workations w
+            ON w.id = s.workation_id
+           AND w.user_id = #{userId}
+           SET s.scheduled_at = #{scheduledAt}
+         WHERE s.id = #{scheduleId}
+           AND s.workation_id = #{workationId}
+    </update>
+
     <delete id="deleteSchedule">
         DELETE s
           FROM schedules s
