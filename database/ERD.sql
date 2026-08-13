@@ -686,6 +686,46 @@ CREATE TABLE `user_survey_answers`
 );
 
 
+-- =========================================================================================
+-- 음식점·여가 활동 방문 계획
+--
+-- 예약이 아니라 개인 일정이다. 결제도 재고도 없고 사용자가 시간만 정해 둔다.
+-- 숙소·공유오피스는 reservations 에 있고, 스케줄러가 두 곳을 합쳐 보여준다.
+--
+-- 워케이션이 사라지면 그 일정은 의미가 없으므로 함께 삭제한다.
+-- 예약(결제 이력)이나 설문(사용자 취향)과 달리 남길 이유가 없다.
+--
+-- 장소 이름·주소·썸네일은 merchants 에서 조인해 가져온다.
+-- 음식점과 여가 구분도 merchants.category 로 알 수 있어 별도 컬럼을 두지 않는다.
+-- =========================================================================================
+
+CREATE TABLE `schedules`
+(
+    `id`           BIGINT    NOT NULL AUTO_INCREMENT COMMENT '일정 고유번호(PK)',
+    `workation_id` BIGINT    NOT NULL COMMENT '워케이션 고유번호(FK)',
+    `merchant_id`  BIGINT    NOT NULL COMMENT '가맹점 고유번호(FK). RESTAURANT 또는 ACTIVITY 만 허용',
+    `scheduled_at` DATETIME  NOT NULL COMMENT '방문 예정 일시',
+    `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록 일시',
+    `updated_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP COMMENT '수정 일시',
+
+    PRIMARY KEY (`id`),
+
+    -- 스케줄러는 기간으로 조회한다. 워케이션 안에서 날짜 범위를 훑는 형태다
+    KEY `IX_SCHEDULES_WORKATION_SCHEDULED_AT` (`workation_id`, `scheduled_at`),
+
+    CONSTRAINT `FK_SCHEDULES_WORKATION`
+        FOREIGN KEY (`workation_id`) REFERENCES `workations` (`id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+
+    CONSTRAINT `FK_SCHEDULES_MERCHANT`
+        FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='음식점·여가 활동 방문 계획 테이블';
+
+
 -- 1. 예약 가능 상품 테이블
 CREATE TABLE `reservation_products`
 (
