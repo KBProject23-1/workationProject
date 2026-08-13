@@ -347,6 +347,26 @@ class UserControllerTest {
     }
 
     @Test
+    @DisplayName("프로필 수정 성공 - companyName 명시적 null 전달 (소속 회사 삭제 → NULL 저장)")
+    void updateProfile_clearCompanyName() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + companyName 을 null 로 전달 (삭제 요청)
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"companyName\":null}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        // Controller 는 userId 와 요청을 Service 로 위임만 한다 (DB 접근/검증 금지)
+        verify(userService).updateProfile(eq(501L), any(ProfileUpdateRequestDTO.class));
+    }
+
+    @Test
     @DisplayName("프로필 수정 - 잘못된 요청(수정 필드 없음) → 400 + INVALID_PROFILE_REQUEST")
     void updateProfile_invalidRequest() throws Exception {
         // Given — JWT 인증된 로그인 사용자 + Service 가 요청 검증 실패를 거부한다

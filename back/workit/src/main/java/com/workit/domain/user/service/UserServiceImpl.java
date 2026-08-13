@@ -140,10 +140,13 @@ public class UserServiceImpl implements UserService {
         }
 
         // 3. 요청 값 검증 — 수정 대상 필드 최소 1개, nickname 길이, companyName 길이 → INVALID_PROFILE_REQUEST(400)
-        //    - PATCH 방식: nickname 또는 companyName 중 하나만 전달 가능
+        //    - PATCH 방식: nickname 또는 companyName 중 전달된 것만 수정
+        //    - companyName 은 null/빈 값 전달도 수정 대상 (소속 회사 삭제 → NULL 저장)
         //    - name/phoneNumber/email 은 요청에서 받지 않는다 (DTO 에 미존재 — 개인정보 수정 금지)
         String nickname = validateUpdateRequest(request);
+        // null/빈 문자열은 NULL 저장(삭제) 요청으로 정규화 — 실제 UPDATE 여부는 updateCompanyName 으로 판단
         String companyName = isBlank(request.getCompanyName()) ? null : request.getCompanyName().trim();
+        boolean updateCompanyName = request.isCompanyNameProvided();
 
         // 4. nickname 중복 확인 (nickname 변경 요청이 있는 경우에만)
         //    - 기존 nickname 과 동일하면 허용 (본인 유지)
@@ -153,7 +156,8 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException(UserErrorCode.DUPLICATE_NICKNAME);
         }
 
-        // 5. 전달된 필드만 동적 UPDATE — null 필드는 Mapper XML <if> 로 UPDATE 문에서 제외된다
+        // 5. 전달된 필드만 동적 UPDATE — updateCompanyName/nickname null 여부를 Mapper XML <if> 로 판단한다
+        //    - companyName 이 요청에 포함되면 값(또는 NULL)으로 저장, 미포함이면 기존 값 유지
         //    - name/phoneNumber/email 은 수정 대상이 아니며 기존 PASS 인증 정보 유지
         //    - 사전 중복 체크(SELECT)와 실제 UPDATE 사이의 Race Condition 은
         //      DB UNIQUE 제약(nickname)이 최종 방어선 — DuplicateKeyException → 409 로 변환
@@ -161,6 +165,7 @@ public class UserServiceImpl implements UserService {
         userProfile.setUserId(userId);
         userProfile.setNickname(nickname);
         userProfile.setCompanyName(companyName);
+        userProfile.setUpdateCompanyName(updateCompanyName);
         try {
             int updated = userMapper.updateUserProfile(userProfile);
             // 조회(SELECT)와 수정(UPDATE) 사이 프로필이 소실된 경우(이론적) — 안전장치
@@ -190,10 +195,11 @@ public class UserServiceImpl implements UserService {
         }
 
         boolean hasNickname = !isBlank(request.getNickname());
-        boolean hasCompanyName = !isBlank(request.getCompanyName());
+        // companyName 은 null/빈 값(삭제 요청)도 수정 대상으로 본다 — 요청 본문 포함 여부 기준
+        boolean hasCompanyName = request.isCompanyNameProvided();
 
         // PATCH: 수정 대상 필드가 최소 하나 이상 존재해야 함
-        //   (둘 다 null/빈 값이면 수정할 내용이 없음 → 400)
+        //   (nickname 미전달 + companyName 미전달이면 수정할 내용이 없음 → 400)
         if (!hasNickname && !hasCompanyName) {
             throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
         }
@@ -202,7 +208,9 @@ public class UserServiceImpl implements UserService {
         if (hasNickname && request.getNickname().trim().length() > NICKNAME_MAX_LENGTH) {
             throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
         }
-        if (hasCompanyName && request.getCompanyName().trim().length() > COMPANY_NAME_MAX_LENGTH) {
+        // null/빈 값(삭제 요청)은 길이 검증 제외 — 값이 있는 경우에만 VARCHAR(100) 검증
+        if (hasCompanyName && !isBlank(request.getCompanyName())
+                && request.getCompanyName().trim().length() > COMPANY_NAME_MAX_LENGTH) {
             throw new BusinessException(UserErrorCode.INVALID_PROFILE_REQUEST);
         }
 
