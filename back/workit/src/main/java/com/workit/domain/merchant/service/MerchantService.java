@@ -5,6 +5,7 @@ import com.workit.domain.merchant.dto.MerchantListResponseDTO;
 import com.workit.domain.merchant.dto.MerchantDetailResponseDTO;
 import com.workit.domain.merchant.dto.MerchantDetailCommonResponseDTO;
 
+import com.workit.domain.merchant.vo.MerchantSearchCondition;
 import com.workit.domain.merchant.vo.MerchantSortType;
 import java.time.LocalDate;
 
@@ -12,16 +13,7 @@ public interface MerchantService {
 
     MerchantListResponseDTO<MerchantItemResponseDTO> findMerchants(
             Long userId,
-            String category,
-            LocalDate checkInDate,
-            LocalDate checkOutDate,
-            Integer headcount,
-            Long minPrice,
-            Long maxPrice,
-            MerchantSortType sort,
-            String cursor,
-            int size,
-            Long regionId
+            MerchantSearchCondition condition
     );
 
     MerchantDetailResponseDTO findAccommodationProducts(

@@ -6,6 +6,7 @@ import com.workit.domain.recommendation.common.service.ReferencePlaceSearchServi
 import com.workit.domain.recommendation.common.vo.ReferencePlaceCandidateVO;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
+import com.workit.security.CurrentUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
@@ -25,14 +26,21 @@ public class ReferencePlaceSearchController {
 
     private final ReferencePlaceSearchService referencePlaceSearchService;
 
+    // type 을 주면 그 추천의 기준이 될 수 있는 업종으로 좁힌다.
+    // 지역은 진행 중인 워케이션에서 서버가 가져오므로 받지 않는다
     @GetMapping("/reference-place-search")
     public ResponseEntity<CommonResponse<ReferencePlaceCandidateListResponseDTO>> search(
-            @RequestParam("keyword") String keyword) {
+            @CurrentUser Long userId,
+            @RequestParam("keyword") String keyword,
+            @RequestParam(value = "type", required = false) String recommendationType,
+            @RequestParam(value = "size", required = false) Integer size) {
         if (!StringUtils.hasText(keyword)) {
             return GlobalResponseFactory.success(new ReferencePlaceCandidateListResponseDTO(Collections.emptyList()));
         }
 
-        List<ReferencePlaceCandidateVO> candidates = referencePlaceSearchService.searchReferencePlaceCandidates(keyword);
+        List<ReferencePlaceCandidateVO> candidates =
+                referencePlaceSearchService.searchReferencePlaceCandidates(
+                        userId, keyword, recommendationType, size);
         return GlobalResponseFactory.success(
                 new ReferencePlaceCandidateListResponseDTO(
                         candidates.stream()

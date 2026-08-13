@@ -27,6 +27,12 @@
         LEFT JOIN offices o
                ON o.merchant_id = m.id
               AND m.category = 'OFFICE'
+        LEFT JOIN restaurants rt
+               ON rt.merchant_id = m.id
+              AND m.category = 'RESTAURANT'
+        LEFT JOIN activities ac
+               ON ac.merchant_id = m.id
+              AND m.category = 'ACTIVITY'
         LEFT JOIN reviews r
                ON r.merchant_id = m.id
                AND r.status = 'ACTIVE'
@@ -40,6 +46,14 @@
                 AND m.category = 'OFFICE'
                 AND o.merchant_id IS NOT NULL
             </when>
+            <when test="category == 'RESTAURANT'">
+                AND m.category = 'RESTAURANT'
+                AND rt.merchant_id IS NOT NULL
+            </when>
+            <when test="category == 'ACTIVITY'">
+                AND m.category = 'ACTIVITY'
+                AND ac.merchant_id IS NOT NULL
+            </when>
             <otherwise>
                 AND (
                     (
@@ -49,6 +63,14 @@
                     OR (
                         m.category = 'OFFICE'
                         AND o.merchant_id IS NOT NULL
+                    )
+                    OR (
+                        m.category = 'RESTAURANT'
+                        AND rt.merchant_id IS NOT NULL
+                    )
+                    OR (
+                        m.category = 'ACTIVITY'
+                        AND ac.merchant_id IS NOT NULL
                     )
                 )
             </otherwise>
@@ -65,8 +87,14 @@
             AND m.price &lt;= #{maxPrice}
         </if>
 
+        <!--
+            날짜·인원 조건은 재고가 있는 숙소와 공유오피스에만 건다.
+            음식점과 여가는 예약이 아니라 일정이라 재고가 없다
+        -->
         <if test="checkInDate != null and checkOutDate != null">
-            AND EXISTS (
+            AND (
+            m.category NOT IN ('ACCOMMODATION', 'OFFICE')
+            OR EXISTS (
                 SELECT 1
                 FROM reservation_products rp
                 INNER JOIN product_daily_inventories pdi
@@ -76,18 +104,22 @@
                     (
                         m.category = 'ACCOMMODATION'
                         AND rp.product_detail_type = 'ROOM'
+                        <!--
+                            객실 수용 인원 × 객실 수로 판정한다.
+                            예약 생성(ReservationServiceImpl.validateHeadcount)과 같은 식이다
+                        -->
                         <if test="headcount != null">
-                            AND rp.max_headcount &gt;= #{headcount}
+                            AND rp.max_headcount * #{roomCount} &gt;= #{headcount}
                         </if>
                     )
                     OR (
                         m.category = 'OFFICE'
-                        AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM', 'PRIVATE_OFFICE')
+                        AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM')
                         <if test="headcount != null">
                             AND (
+                            <!-- 좌석은 1인 1석이라 남은 좌석 수만 본다 -->
                             (
                                 rp.product_detail_type = 'OFFICE_SEAT'
-                                AND rp.max_headcount &gt;= #{headcount}
                                 AND pdi.remaining_capacity &gt;= #{headcount}
                             )
                             OR (
@@ -122,13 +154,13 @@
                     END
                        AND MIN(CASE WHEN pdi.is_available = 1
                            AND (
+                               <!-- remaining_capacity 는 남은 객실 수라 인원이 아니라 객실 수와 비교한다 -->
                                (m.category = 'ACCOMMODATION'
-                                   AND pdi.remaining_capacity &gt;= #{headcount})
+                                   AND pdi.remaining_capacity &gt;= #{roomCount})
                                OR
                                (m.category = 'OFFICE'
                                    AND (
                                        (rp.product_detail_type = 'OFFICE_SEAT'
-                                           AND rp.max_headcount &gt;= #{headcount}
                                            AND pdi.remaining_capacity &gt;= #{headcount})
                                        OR (rp.product_detail_type != 'OFFICE_SEAT'
                                            AND rp.max_headcount &gt;= #{headcount}
@@ -138,6 +170,46 @@
                            ) THEN 1 ELSE 0 END) = 1
                 </if>
             )
+            )
+        </if>
+
+        <!-- 유형별 상세 필터. 해당 업종이 아닌 행은 그대로 통과시킨다 -->
+        <if test="accommodationType != null">
+            AND (m.category &lt;&gt; 'ACCOMMODATION' OR a.accommodation_type = #{accommodationType})
+        </if>
+        <if test="noiseLevel != null">
+            AND (m.category &lt;&gt; 'OFFICE' OR o.noise_level = #{noiseLevel})
+        </if>
+        <if test="foodType != null">
+            AND (m.category &lt;&gt; 'RESTAURANT' OR rt.food_type = #{foodType})
+        </if>
+        <if test="priceLevel != null">
+            AND (m.category &lt;&gt; 'RESTAURANT' OR rt.price_level &lt;= #{priceLevel})
+        </if>
+        <if test="activityType != null">
+            AND (m.category &lt;&gt; 'ACTIVITY' OR ac.activity_type = #{activityType})
+        </if>
+
+        <!--
+            커서 조건은 GROUP BY 앞에 둔다.
+            뒤에 두면 GROUP BY 의 마지막 항목과 붙어 하나의 불리언 식으로 해석되어
+            조건이 걸리지 않고 그룹 기준만 망가진다
+        -->
+        <if test="cursorValue != null and cursorMerchantId != null">
+            <choose>
+                <when test="sort == 'PRICE_ASC'">
+                    AND (m.price &gt; #{cursorValue}
+                         OR (m.price = #{cursorValue} AND m.id &gt; #{cursorMerchantId}))
+                </when>
+                <when test="sort == 'PRICE_DESC'">
+                    AND (m.price &lt; #{cursorValue}
+                         OR (m.price = #{cursorValue} AND m.id &lt; #{cursorMerchantId}))
+                </when>
+                <otherwise>
+                    AND (m.rating &lt; #{cursorValue}
+                         OR (m.rating = #{cursorValue} AND m.id &lt; #{cursorMerchantId}))
+                </otherwise>
+            </choose>
         </if>
 
         GROUP BY m.id,
@@ -149,31 +221,13 @@
                  m.rating
 
         <choose>
-            <when test="sort == 'RATING_DESC'">
-                <if test="cursorValue != null and cursorMerchantId != null">
-                    AND (
-                    m.rating &lt; #{cursorValue}
-                    OR (
-                    m.rating = #{cursorValue}
-                    AND m.id &lt; #{cursorMerchantId}
-                    )
-                    )
-                </if>
-                ORDER BY m.rating DESC,
-                         m.id DESC
-            </when>
             <when test="sort == 'PRICE_ASC'">
-                <if test="cursorValue != null and cursorMerchantId != null">
-                    AND (
-                    m.price &gt; #{cursorValue}
-                    OR (
-                    m.price = #{cursorValue}
-                    AND m.id &gt; #{cursorMerchantId}
-                    )
-                    )
-                </if>
                 ORDER BY m.price ASC,
                          m.id ASC
+            </when>
+            <when test="sort == 'PRICE_DESC'">
+                ORDER BY m.price DESC,
+                         m.id DESC
             </when>
             <otherwise>
                 ORDER BY m.rating DESC,
@@ -320,7 +374,7 @@
         FROM reservation_products rp
         INNER JOIN offices o ON o.merchant_id = #{merchantId}
         WHERE rp.merchant_id = o.merchant_id
-          AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM', 'PRIVATE_OFFICE')
+          AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM')
         ORDER BY rp.id ASC
     </select>
 
@@ -340,7 +394,7 @@
                 ON pdi.product_id = rp.id
         </if>
         WHERE rp.merchant_id = o.merchant_id
-          AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM', 'PRIVATE_OFFICE')
+          AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM')
           <if test="guestCount != null">
             AND rp.max_headcount >= #{guestCount}
           </if>

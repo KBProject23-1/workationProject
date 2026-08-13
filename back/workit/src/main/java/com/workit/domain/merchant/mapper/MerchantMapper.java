@@ -21,8 +21,14 @@ public interface MerchantMapper {
             @Param("checkOutDate") LocalDate checkOutDate,
             @Param("requiredDateCount") Integer requiredDateCount,
             @Param("headcount") Integer headcount,
+            @Param("roomCount") Integer roomCount,
             @Param("minPrice") Long minPrice,
             @Param("maxPrice") Long maxPrice,
+            @Param("accommodationType") String accommodationType,
+            @Param("noiseLevel") String noiseLevel,
+            @Param("foodType") String foodType,
+            @Param("priceLevel") Integer priceLevel,
+            @Param("activityType") String activityType,
             @Param("sort") String sort
     );
 
