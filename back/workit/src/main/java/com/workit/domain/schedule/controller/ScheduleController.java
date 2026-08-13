@@ -1,6 +1,7 @@
 package com.workit.domain.schedule.controller;
 
 import com.workit.domain.schedule.dto.request.ScheduleCreateRequestDTO;
+import com.workit.domain.schedule.dto.request.ScheduleUpdateRequestDTO;
 import com.workit.domain.schedule.dto.response.ScheduleDetailResponseDTO;
 import com.workit.domain.schedule.dto.response.ScheduleListResponseDTO;
 import com.workit.domain.schedule.service.ScheduleService;
@@ -58,6 +59,18 @@ public class ScheduleController {
             @PathVariable("scheduleId") Long scheduleId) {
 
         return GlobalResponseFactory.success(scheduleService.getSchedule(userId, scheduleId));
+    }
+
+    // 일정 시각 수정. 가맹점은 바꾸지 않는다
+    @PatchMapping("/{scheduleId}")
+    public ResponseEntity<CommonResponse<ScheduleDetailResponseDTO>> scheduleModify(
+            @CurrentUser Long userId,
+            @PathVariable("workationId") Long workationId,
+            @PathVariable("scheduleId") Long scheduleId,
+            @RequestBody ScheduleUpdateRequestDTO dto) {
+
+        return GlobalResponseFactory.success(
+                scheduleService.modifySchedule(userId, workationId, scheduleId, dto));
     }
 
     // 일정 삭제. 예약과 달리 결제가 없어 상태 전이 없이 바로 지운다
