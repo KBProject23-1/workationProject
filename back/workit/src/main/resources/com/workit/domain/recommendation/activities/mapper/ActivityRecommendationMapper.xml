@@ -56,7 +56,7 @@
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
                  WHERE us.id = <include refid="latestSurveyId"/>
-                   AND sq.question_code = 'Q1'
+                   AND sq.question_code = 'PRIORITY_FACTOR'
                  ORDER BY usa.id DESC LIMIT 1) AS priority_option_code,
                (SELECT so.option_name
                   FROM user_surveys us
@@ -64,7 +64,7 @@
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
                  WHERE us.id = <include refid="latestSurveyId"/>
-                   AND sq.question_code = 'Q1'
+                   AND sq.question_code = 'PRIORITY_FACTOR'
                  ORDER BY usa.id DESC LIMIT 1) AS priority_option_name,
                (SELECT GROUP_CONCAT(so.option_code SEPARATOR ',')
                   FROM user_surveys us
@@ -72,7 +72,7 @@
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
                  WHERE us.id = <include refid="latestSurveyId"/>
-                   AND sq.question_code = 'Q3'
+                   AND sq.question_code = 'ACTIVITY_PREFERENCE'
                  ORDER BY usa.id DESC LIMIT 3) AS selected_activity_codes,
                (SELECT GROUP_CONCAT(so.option_name SEPARATOR ',')
                   FROM user_surveys us
@@ -80,7 +80,7 @@
                   JOIN survey_options so ON so.id = usa.option_id
                   JOIN survey_questions sq ON sq.id = so.question_id
                  WHERE us.id = <include refid="latestSurveyId"/>
-                   AND sq.question_code = 'Q3'
+                   AND sq.question_code = 'ACTIVITY_PREFERENCE'
                  ORDER BY usa.id DESC LIMIT 3) AS selected_activity_names
           FROM workations w
          WHERE w.user_id = #{userId}

@@ -53,7 +53,7 @@ public class RestaurantRecommendationServiceImpl implements RestaurantRecommenda
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public RecommendationListResponseDTO<RestaurantRecommendationResponseDTO.Item> findRestaurantRecommendation(Long userId,
                                                                            Long referenceMerchantId,
                                                                            MealType mealType,
@@ -65,7 +65,22 @@ public class RestaurantRecommendationServiceImpl implements RestaurantRecommenda
         RecommendationRequestVO request = recommendationMapper.selectLatestRestaurantRequest(
                 userId, referenceMerchantId, mealType);
         if (request == null) {
-            throw new BusinessException(RestaurantRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
+            RestaurantConditionVO condition = getReadyRestaurantCondition(userId, mealType);
+            RestaurantReference reference;
+
+            if (referenceMerchantId == null) {
+                reference = resolveAutomaticRestaurantReference(userId, condition, mealType);
+            } else {
+                RecommendationMerchantVO selected = recommendationMapper.selectRestaurantReferenceMerchant(
+                        referenceMerchantId, condition.getRegionId());
+                if (selected == null) {
+                    throw new BusinessException(RestaurantRecommendationErrorCode.REFERENCE_MERCHANT_NOT_FOUND);
+                }
+                reference = new RestaurantReference(ReferenceType.USER_SELECTED, selected, null,
+                        selected.getLatitude(), selected.getLongitude());
+            }
+
+            return toCommon(createRestaurantRecommendation(userId, condition, mealType, reference));
         }
         return toCommon(findRestaurantPage(request, cursor, normalizeSize(size)));
     }

@@ -73,7 +73,7 @@ public class ActivityRecommendationServiceImpl implements ActivityRecommendation
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public RecommendationListResponseDTO<ActivityRecommendationResponseDTO.Item> findActivityRecommendation(Long userId,
                                                                        Long referenceMerchantId,
                                                                        String cursor,

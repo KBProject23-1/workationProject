@@ -44,25 +44,25 @@
                  JOIN user_survey_answers usa ON usa.survey_id = us.id
                  JOIN survey_options so ON so.id = usa.option_id
                  JOIN survey_questions sq ON sq.id = so.question_id
-                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'Q1'
+                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'PRIORITY_FACTOR'
                 ORDER BY usa.id DESC LIMIT 1) AS priority_option_code,
                (SELECT so.option_name FROM user_surveys us
                  JOIN user_survey_answers usa ON usa.survey_id = us.id
                  JOIN survey_options so ON so.id = usa.option_id
                  JOIN survey_questions sq ON sq.id = so.question_id
-                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'Q1'
+                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'PRIORITY_FACTOR'
                 ORDER BY usa.id DESC LIMIT 1) AS priority_option_name,
                (SELECT so.option_code FROM user_surveys us
                  JOIN user_survey_answers usa ON usa.survey_id = us.id
                  JOIN survey_options so ON so.id = usa.option_id
                  JOIN survey_questions sq ON sq.id = so.question_id
-                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'Q4'
+                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'MEAL_STYLE'
                 ORDER BY usa.id DESC LIMIT 1) AS meal_style_option_code,
                (SELECT so.option_name FROM user_surveys us
                  JOIN user_survey_answers usa ON usa.survey_id = us.id
                  JOIN survey_options so ON so.id = usa.option_id
                  JOIN survey_questions sq ON sq.id = so.question_id
-                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'Q4'
+                WHERE us.id = <include refid="latestSurveyId"/> AND sq.question_code = 'MEAL_STYLE'
                 ORDER BY usa.id DESC LIMIT 1) AS meal_style_option_name
           FROM workations w
          WHERE w.user_id = #{userId} AND w.status = 'ACTIVE'
