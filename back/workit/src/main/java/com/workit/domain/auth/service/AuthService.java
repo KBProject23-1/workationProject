@@ -133,6 +133,18 @@ public interface AuthService {
     FindIdResponseDTO findId(String identityVerificationId);
 
     /**
+     * 비밀번호 재설정 사전 단계 — 아이디 존재 확인
+     *
+     * 흐름:
+     *   1. 요청 값 검증 — null/빈 값 → INVALID_PASSWORD_RESET_REQUEST(400)
+     *   2. loginId(이메일/휴대폰) SHA-256 hash 로 회원 조회 → 없음/비활성(탈퇴/차단) → USER_NOT_FOUND(404)
+     *   3. 존재하면 200 SUCCESS — PASS 본인인증 단계로 진행
+     *
+     * @param loginId 로그인 ID (이메일 또는 하이픈 없는 휴대폰 번호)
+     */
+    void checkPasswordResetId(String loginId);
+
+    /**
      * 비밀번호 재설정 1단계 — 본인 확인 및 인증 토큰 발급
      *
      * 흐름:

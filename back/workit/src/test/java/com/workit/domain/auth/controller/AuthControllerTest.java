@@ -175,15 +175,21 @@ class AuthControllerTest {
         doThrow(new BusinessException(errorCode)).when(authService).findId(any());
     }
 
-    /** 비밀번호 재설정 1단계 성공 Stub — Service 가 passwordResetToken 을 반환한다 */
+    /** 비밀번호 재설정 1단계 성공 Stub — Service 가 passwordResetToken + expiresAt 을 반환한다 */
     private void stubPasswordVerifySuccess() {
         when(authService.verifyPasswordReset(any(PasswordVerifyRequestDTO.class)))
-                .thenReturn(PasswordVerifyResponseDTO.of("9f1d7c3a-82ab-4d32-a5dd-000000000000"));
+                .thenReturn(PasswordVerifyResponseDTO.of("9f1d7c3a-82ab-4d32-a5dd-000000000000",
+                        1782000000000L));
     }
 
     /** 비밀번호 재설정 1단계 실패 Stub — Service 가 지정 에러를 던진다 */
     private void stubPasswordVerifyError(AuthErrorCode errorCode) {
         doThrow(new BusinessException(errorCode)).when(authService).verifyPasswordReset(any(PasswordVerifyRequestDTO.class));
+    }
+
+    /** 비밀번호 재설정 사전 단계(아이디 존재 확인) 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPasswordCheckIdError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).checkPasswordResetId(any());
     }
 
     /** 비밀번호 재설정 2단계 실패 Stub — Service 가 지정 에러를 던진다 */
@@ -1182,10 +1188,11 @@ class AuthControllerTest {
                 json.get("message").asText());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
 
-        // docs: data.passwordResetToken (UUID)
+        // docs: data.passwordResetToken (UUID) + data.expiresAt (5분 TTL 만료 시각)
         JsonNode data = json.get("data");
         assertNotNull(data);
         assertEquals("9f1d7c3a-82ab-4d32-a5dd-000000000000", data.get("passwordResetToken").asText());
+        assertEquals(1782000000000L, data.get("expiresAt").asLong());
 
         // Service 가 요청 DTO 를 전달받았는지 확인
         verify(authService).verifyPasswordReset(any(PasswordVerifyRequestDTO.class));
@@ -1241,6 +1248,70 @@ class AuthControllerTest {
         MvcResult result = mockMvc.perform(post("/api/v1/auth/password/verify")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PASSWORD_RESET_REQUEST", json.get("errorCode").asText());
+    }
+
+    // ---------- 비밀번호 재설정 사전 단계 (아이디 존재 확인) ----------
+
+    @Test
+    @DisplayName("아이디 존재 확인 성공 - 200 + SUCCESS (data null)")
+    void passwordCheckId_success() throws Exception {
+        // Given — Service 는 존재하는 회원으로 판단한다 (void — 별도 Stub 불필요)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/check-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"user@example.com\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("비밀번호를 재설정할 수 있는 계정입니다.", json.get("message").asText());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // Service 가 loginId 를 전달받았는지 확인
+        verify(authService).checkPasswordResetId("user@example.com");
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - 미가입 아이디 → 404 + USER_NOT_FOUND")
+    void passwordCheckId_userNotFound() throws Exception {
+        // Given — Service 는 회원 없음을 거부한다
+        stubPasswordCheckIdError(AuthErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/check-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"unknown@example.com\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("해당 본인인증 정보로 가입된 계정이 존재하지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - 요청 값 누락 → 400 + INVALID_PASSWORD_RESET_REQUEST")
+    void passwordCheckId_invalidRequest() throws Exception {
+        // Given — Service 는 요청 값 누락을 거부한다
+        stubPasswordCheckIdError(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST);
+
+        // When — loginId 누락
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/check-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
                 .andExpect(status().isBadRequest())
                 .andReturn();
 
