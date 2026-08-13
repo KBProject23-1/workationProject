@@ -11,6 +11,7 @@ import com.workit.domain.reservation.vo.ReservationCreateWorkationVO;
 import com.workit.domain.reservation.vo.ReservationDailyInventoryVO;
 import com.workit.domain.reservation.vo.ReservationDetailVO;
 import com.workit.domain.reservation.vo.ReservationListItemVO;
+import com.workit.domain.reservation.vo.ReservationProductDetailType;
 import com.workit.domain.reservation.vo.ReservationStatus;
 import org.apache.ibatis.annotations.Param;
 
@@ -45,6 +46,19 @@ public interface ReservationMapper {
 
     // 상품의 예약 대상 일별 재고를 날짜 순서대로 잠금 조회
     List<ReservationDailyInventoryVO> selectDailyInventoriesForUpdate(
+            @Param("productId") Long productId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("includeEndDate") boolean includeEndDate
+    );
+
+    // 예약 상품의 세부 유형 조회
+    ReservationProductDetailType selectReservationProductDetailType(
+            @Param("productId") Long productId
+    );
+
+    // 예약 상품의 날짜별 재고 조회
+    List<ReservationDailyInventoryVO> selectDailyInventories(
             @Param("productId") Long productId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
@@ -99,9 +113,10 @@ public interface ReservationMapper {
     // 확정 예약의 취소 상태 변경
     int updateReservationStatusToCanceled(@Param("reservationId") Long reservationId);
 
-//    사용자·상태·카테고리 조건에 맞는 예약 목록 조회
+//    사용자·상태·카테고리 조건에 맞는 예약 목록(workation 필터 추가) 조회
     List<ReservationListItemVO> selectReservationList(
             @Param("userId") Long userId,
+            @Param("workationId") Long workationId,
             @Param("statuses") List<ReservationStatus> statuses,
             @Param("category") ReservationCategory category,
             @Param("offset") int offset,
@@ -109,9 +124,10 @@ public interface ReservationMapper {
             @Param("canceledOnly") boolean canceledOnly
     );
 
-//  목록 쿼리와 동일한 필터 조건으로 전체 예약 건수를 조회
+//  목록 쿼리와 동일한 필터(워케이션 필터 추가) 조건으로 전체 예약 건수를 조회
     long countReservationList(
             @Param("userId") Long userId,
+            @Param("workationId") Long workationId,
             @Param("statuses") List<ReservationStatus> statuses,
             @Param("category") ReservationCategory category
     );

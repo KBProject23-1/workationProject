@@ -63,13 +63,21 @@ public class ReservationController {
     @GetMapping
     public ResponseEntity<CommonResponse<PageResponseDTO<ReservationListItemResponseDTO>>> reservationList(
             @CurrentUser Long userId,
+            @RequestParam(value = "workationId", required = false) Long workationId,
             @RequestParam("status") List<ReservationStatus> statuses,
             @RequestParam(value = "category", required = false) ReservationCategory category,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size) {
 
         return GlobalResponseFactory.success(
-                reservationService.findReservationList(userId, statuses, category, page, size)
+                reservationService.findReservationList(
+                        userId,
+                        workationId,    // 워케이션 필터, null이면 전체
+                        statuses,
+                        category,
+                        page,
+                        size
+                )
         );
     }
 

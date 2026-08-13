@@ -20,4 +20,6 @@ public class ReservationCreateRequestDTO {
     private ReservationPaymentSourceType paymentSourceType;
     private Long cardId;
     private String pinNumber;
+    private String deviceId;
+    private String idempotencyKey;
 }

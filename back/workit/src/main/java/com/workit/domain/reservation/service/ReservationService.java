@@ -1,11 +1,13 @@
 package com.workit.domain.reservation.service;
 
 import com.workit.domain.reservation.dto.request.ReservationCreateRequestDTO;
+import com.workit.domain.reservation.dto.request.ReservationProductAvailabilityRequestDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancellationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCancelResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationCreateResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationDetailResponseDTO;
 import com.workit.domain.reservation.dto.response.ReservationListItemResponseDTO;
+import com.workit.domain.reservation.dto.response.ReservationProductAvailabilityResponseDTO;
 import com.workit.domain.reservation.vo.ReservationCategory;
 import com.workit.domain.reservation.vo.ReservationStatus;
 import com.workit.global.dto.PageResponseDTO;
@@ -31,14 +33,21 @@ public interface ReservationService {
     ReservationCancelResponseDTO saveReservationCancellation(Long userId, Long reservationId);
 
     /**
-     * 사용자 예약 목록을 상태와 카테고리 조건으로 페이징 조회한다.
+     * 사용자 예약 목록(워케이션 필터링 추가)을 상태와 카테고리 조건으로 페이징 조회한다.
      */
     PageResponseDTO<ReservationListItemResponseDTO> findReservationList(
             Long userId,
+            Long workationId,
             List<ReservationStatus> statuses,
             ReservationCategory category,
             int page,
             int size
+    );
+
+    // 예약 상품의 날짜별 남은 재고와 예약 가능 여부 조회
+    List<ReservationProductAvailabilityResponseDTO> findReservationProductAvailabilities(
+            Long productId,
+            ReservationProductAvailabilityRequestDTO request
     );
 
     /**
