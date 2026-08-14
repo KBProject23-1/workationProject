@@ -12,8 +12,6 @@ import org.springframework.util.StringUtils;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -21,16 +19,6 @@ public class ReferencePlaceSearchServiceImpl implements ReferencePlaceSearchServ
 
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 50;
-
-    // 추천 유형별로 기준 장소가 될 수 있는 업종.
-    // 각 추천 서비스가 기준 장소를 다시 검증하므로 여기서 미리 맞춰야
-    // 고를 수는 있는데 고르면 실패하는 상태가 생기지 않는다
-    private static final Map<String, List<String>> REFERENCE_CATEGORIES = Map.of(
-            "ACCOMMODATION", List.of("OFFICE"),
-            "OFFICE", List.of("ACCOMMODATION"),
-            "RESTAURANT", List.of("ACCOMMODATION", "OFFICE", "ACTIVITY"),
-            "ACTIVITY", List.of("ACCOMMODATION", "OFFICE")
-    );
 
     private final ReferencePlaceSearchMapper referencePlaceSearchMapper;
     private final WorkationMapper workationMapper;
@@ -51,16 +39,11 @@ public class ReferencePlaceSearchServiceImpl implements ReferencePlaceSearchServ
             return Collections.emptyList();
         }
 
-        List<String> categories = recommendationType == null
-                ? null
-                : REFERENCE_CATEGORIES.get(recommendationType.trim().toUpperCase(Locale.ROOT));
-
         return referencePlaceSearchMapper.selectReferencePlaceCandidatesByName(
                 keyword.trim(),
                 userId,
                 workation.getId(),
                 workation.getRegionId(),
-                categories,
                 normalizeSize(size));
     }
 

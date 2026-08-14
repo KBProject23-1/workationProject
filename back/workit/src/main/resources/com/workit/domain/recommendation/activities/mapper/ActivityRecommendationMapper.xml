@@ -124,11 +124,7 @@
                NULL AS difficulty,
                (rd.merchant_id IS NOT NULL) AS reserved
           FROM merchants m
-          <!--
-              LEFT JOIN 이어야 한다.
-              JOIN 으로 두면 예약이 없을 때 후보가 0건이 되어 기준 장소를 고를 수 없다
-          -->
-          LEFT JOIN (
+          JOIN (
             SELECT rp.merchant_id,
                    MIN(ABS(DATEDIFF(r.start_date, #{workationStartDate}))) AS reservation_distance
               FROM reservations r
@@ -136,7 +132,7 @@
                 ON rp.id = r.product_id
              WHERE r.user_id = #{userId}
                AND r.workation_id = #{workationId}
-               AND r.status = 'CONFIRMED'
+               AND r.status IN ('CONFIRMED', 'COMPLETED')
              GROUP BY rp.merchant_id
           ) rd
             ON rd.merchant_id = m.id
@@ -175,7 +171,6 @@
           FROM merchants m
          WHERE m.id = #{merchantId}
            AND m.region_id = #{regionId}
-           AND m.category IN ('ACCOMMODATION', 'OFFICE')
     </select>
 
     <insert id="insertRecommendationResults">
