@@ -25,7 +25,11 @@ public enum UserErrorCode implements ErrorCode {
 
     // 프로필 수정 - 프로필 미등록 사용자의 수정 시도 → 404
     // (최초 등록되지 않은 사용자는 수정 불가 — docs: 내 프로필 정보 수정)
-    PROFILE_NOT_FOUND(HttpStatus.NOT_FOUND, "등록된 프로필 정보가 없습니다. 프로필을 먼저 등록해주세요.");
+    PROFILE_NOT_FOUND(HttpStatus.NOT_FOUND, "등록된 프로필 정보가 없습니다. 프로필을 먼저 등록해주세요."),
+
+    // 회원 탈퇴 - 이미 탈퇴(WITHDRAWN) 처리된 회원의 재탈퇴 시도 → 409
+    // (knowledge.md: 409 CONFLICT - 상태 충돌 — 이미 탈퇴된 계정은 재탈퇴 불가)
+    USER_ALREADY_WITHDRAWN(HttpStatus.CONFLICT, "이미 탈퇴 처리된 회원입니다.");
 
     private final HttpStatus status;
     private final String message;

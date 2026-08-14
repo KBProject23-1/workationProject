@@ -88,4 +88,21 @@
         WHERE user_id = #{userId}
     </update>
 
+    <!--
+        회원 탈퇴 - users 상태 WITHDRAWN 전환 + deleted_at 기록 (Soft Delete).
+        - knowledge.md Withdrawal Policy: users.status = WITHDRAWN, deleted_at 에 탈퇴 시간 기록
+        - ERD 기준 deleted_at 은 NOT NULL(DEFAULT CURRENT_TIMESTAMP) — 탈퇴 시 NOW() 로 갱신한다
+        - status != 'WITHDRAWN' 조건: 이미 탈퇴된 회원은 갱신하지 않아 재탈퇴 방지
+          (조회-갱신 사이 동시 요청 Race Condition 최종 방어선 — 0 row 반환 시 Service 에서 처리)
+        - 금융 거래/결제/지갑 데이터는 삭제하지 않는다 (Mapper 는 users 테이블만 UPDATE)
+    -->
+    <update id="updateUserStatusToWithdrawn">
+        UPDATE users
+        SET status     = 'WITHDRAWN',
+            deleted_at = NOW(),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{userId}
+          AND status != 'WITHDRAWN'
+    </update>
+
 </mapper>

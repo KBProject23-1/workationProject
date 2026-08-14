@@ -198,6 +198,32 @@ public interface AuthService {
     void changePassword(Long userId, ChangePasswordRequestDTO request);
 
     /**
+     * 로그인 사용자의 현재 비밀번호 검증 — 민감 작업(회원 탈퇴 등) 본인 확인용
+     *
+     * 흐름:
+     *   1. JWT 로그인 사용자 조회 + 상태 확인 (users) — 없음/비활성 → USER_NOT_FOUND 404
+     *   2. user_auth.password_hash(BCrypt) 조회 — 없음 → USER_NOT_FOUND 404
+     *   3. 현재 비밀번호 BCrypt 검증 — 불일치 → AUTH_INVALID_PASSWORD 400
+     *
+     * changePassword 의 현재 비밀번호 검증과 동일한 로직을 공유한다 (중복 구현 금지)
+     *
+     * @param userId     JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param rawPassword 재확인할 현재 비밀번호 원문 (민감정보 — 로그 출력 금지)
+     */
+    void verifyCurrentPassword(Long userId, String rawPassword);
+
+    /**
+     * 로그인 사용자의 모든 Refresh Token 세션 revoke (회원 탈퇴 등 전체 세션 폐기)
+     *
+     * - Redis(refresh:token:{userId}) 삭제 — DB 커밋 확정 후(afterCommit) 수행
+     *   (Redis 는 DB 트랜잭션과 동일한 트랜잭션으로 취급하지 않는 기존 정책 — changePassword 와 동일)
+     * - Access Token 은 Stateless 이므로 만료까지 유지된다 (Access Token Blacklist 미사용)
+     *
+     * @param userId JWT 인증된 로그인 사용자 id
+     */
+    void revokeAllRefreshSessions(Long userId);
+
+    /**
      * PIN 번호 최초 설정 — 로그인 사용자의 기기(PIN) 등록
      *
      * 흐름:

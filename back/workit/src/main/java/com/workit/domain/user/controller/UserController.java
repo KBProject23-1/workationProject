@@ -4,14 +4,20 @@ import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
+import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.service.UserService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
 import com.workit.security.CurrentUser;
+import com.workit.security.JwtAuthenticationFilter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,14 +25,27 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-// User 도메인 컨트롤러 (회원 기본 정보 / 프로필 담당)
+import javax.servlet.http.HttpServletResponse;
+
+// User 도메인 컨트롤러 (회원 기본 정보 / 프로필 / 회원 탈퇴 담당)
 // - 로그인 사용자 전용 API: JWT 인증 필터 + @CurrentUser 로 userId 를 주입받는다
 //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
 // - Controller 는 요청 수신과 CommonResponse 반환만 담당 (DB 조회/복호화/저장 금지 — 전부 Service 책임)
+// - 인증 Cookie(accessToken/refreshToken) 만료 처리는 Controller 의 HTTP 책임
+//   (knowledge.md Controller Responsibility: HTTP Cookie 설정/삭제 허용)
 @RestController
 @RequestMapping("/api/v1/users")
 @Slf4j
 public class UserController {
+
+    /**
+     * Access Token Cookie 명 (docs: accessToken) — JwtAuthenticationFilter 의 Cookie 추출명과 동일해야 한다
+     * - 필터가 이 이름으로만 Access Token 을 추출하므로 이름이 어긋나면 인증이 동작하지 않는다
+     */
+    private static final String ACCESS_TOKEN_COOKIE_NAME = JwtAuthenticationFilter.ACCESS_TOKEN_COOKIE_NAME;
+
+    /** Refresh Token Cookie 명 (docs: refreshToken) — AuthController 의 로그아웃과 이름 통일 */
+    private static final String REFRESH_TOKEN_COOKIE_NAME = "refreshToken";
 
     private final UserService userService;
 
@@ -34,9 +53,20 @@ public class UserController {
     // Auth Domain 의 AuthService 로 위임한다 (knowledge.md: Auth Domain 책임 — User Domain 에 인증 로직 금지)
     private final AuthService authService;
 
-    public UserController(UserService userService, AuthService authService) {
+    /** 토큰 Cookie Secure 속성 (docs: 운영에서는 Secure) — Access/Refresh 공통 (로그아웃 Cookie 만료와 동일 속성) */
+    private final boolean cookieSecure;
+
+    /** 토큰 Cookie SameSite 속성 (과제 스펙: SameSite=Lax) — Access/Refresh 공통 (로그아웃 Cookie 만료와 동일 속성) */
+    private final String cookieSameSite;
+
+    public UserController(UserService userService,
+                          AuthService authService,
+                          @Value("${jwt.refresh-cookie-secure:true}") boolean cookieSecure,
+                          @Value("${jwt.refresh-cookie-samesite:Lax}") String cookieSameSite) {
         this.userService = userService;
         this.authService = authService;
+        this.cookieSecure = cookieSecure;
+        this.cookieSameSite = cookieSameSite;
     }
 
     // 1.1 내 프로필 조회
@@ -108,5 +138,53 @@ public class UserController {
 
         authService.changePassword(userId, request);
         return GlobalResponseFactory.success(null, "비밀번호가 성공적으로 변경되었습니다.");
+    }
+
+    // 1.5 회원 탈퇴 (로그인 사용자 전용)
+    // - docs: 회원 탈퇴 (DELETE /api/v1/users/me)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 현재 비밀번호 재확인 본인 인증/지갑 잔액 확인/Soft Delete(users.status = WITHDRAWN,
+    //   deleted_at 기록)/모든 Refresh Session revoke 는 UserService(withdraw) 에서 수행하고,
+    //   Auth/Password 검증·세션 revoke 는 AuthService 로 위임한다
+    // - Controller 는 요청 수신, Service 호출, 탈퇴 성공 후 인증 Cookie 만료 처리만 담당한다
+    //   (비밀번호 비교/DB/Redis/Transaction 금지 — knowledge.md Controller Responsibility)
+    // - Cookie 만료는 로그아웃(AuthController.logoutPost) 과 동일 패턴 — Max-Age=0
+    // - 비밀번호 불일치: AUTH_INVALID_PASSWORD(400), 잔액 잔존: WALLET_BALANCE_REMAINING(409),
+    //   이미 탈퇴: USER_ALREADY_WITHDRAWN(409), 회원 없음: USER_NOT_FOUND(404),
+    //   password 누락: COMMON_INVALID_REQUEST(400)
+    // - DELETE 상태 변경 메서드이므로 기존 CSRF 정책(X-XSRF-TOKEN Header 검증)이 그대로 적용된다
+    @DeleteMapping("/me")
+    public ResponseEntity<CommonResponse<Void>> withdraw(
+            @CurrentUser Long userId,
+            @RequestBody UserWithdrawalRequestDTO request,
+            HttpServletResponse servletResponse) {
+
+        userService.withdraw(userId, request);
+
+        // Access Token Cookie 즉시 만료 (docs: accessToken=; Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        // - Max-Age=0 으로 브라우저가 즉시 삭제 — 기존 Cookie 이름/HttpOnly/Secure/Path/SameSite 속성 유지
+        //   (logoutPost 의 Access Token Cookie 만료와 동일)
+        ResponseCookie expiredAccessCookie = ResponseCookie.from(ACCESS_TOKEN_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(0)
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredAccessCookie.toString());
+
+        // Refresh Token Cookie 즉시 만료 (docs: refreshToken=; Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        // - Max-Age=0 으로 브라우저가 즉시 삭제 — logoutPost 의 Refresh Token Cookie 만료와 동일
+        ResponseCookie expiredRefreshCookie = ResponseCookie.from(REFRESH_TOKEN_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(0)
+                .build();
+        servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredRefreshCookie.toString());
+
+        return GlobalResponseFactory.success(null, "회원탈퇴가 정상적으로 처리되었습니다.");
     }
 }
