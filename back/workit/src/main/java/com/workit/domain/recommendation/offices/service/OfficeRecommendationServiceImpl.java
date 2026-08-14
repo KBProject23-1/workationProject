@@ -218,27 +218,11 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
                 return createOfficeRecommendation(userId, createRequest);
             }
 
-            List<OfficeCandidateVO> candidates = recommendationMapper.selectAccommodationReferenceCandidates(
-                    userId,
-                    workation.getId(),
-                    workation.getRegionId(),
-                    workation.getStartDate()
-            );
-            OfficeCandidateVO selectedCandidate = candidates == null
-                    ? null
-                    : candidates.stream()
-                    .filter(candidate -> referenceMerchantId.equals(candidate.getMerchantId()))
-                    .findFirst()
-                    .orElse(null);
-            if (selectedCandidate == null) {
+            OfficeReferenceMerchantVO reference = recommendationMapper.selectReferenceMerchant(
+                    referenceMerchantId, workation.getRegionId());
+            if (reference == null) {
                 throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
             }
-
-            OfficeReferenceMerchantVO reference = new OfficeReferenceMerchantVO();
-            reference.setMerchantId(selectedCandidate.getMerchantId());
-            reference.setMerchantName(selectedCandidate.getName());
-            reference.setLatitude(selectedCandidate.getLatitude());
-            reference.setLongitude(selectedCandidate.getLongitude());
             return createOfficeRecommendationByReference(
                     userId, workation, reference, OfficeReferenceType.USER_SELECTED, size);
         }
@@ -281,29 +265,11 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
             throw new BusinessException(OfficeRecommendationErrorCode.WORKATION_NOT_FOUND);
         }
 
-        List<OfficeCandidateVO> availableCandidates = recommendationMapper.selectOfficeCandidates(
-                userId,
-                workation.getRegionId(),
-                workation.getStartDate(),
-                workation.getEndDate()
-        );
-
-        OfficeCandidateVO selectedCandidate = availableCandidates == null
-                ? null
-                : availableCandidates.stream()
-                .filter(candidate -> request.getReferenceMerchantId().equals(candidate.getMerchantId()))
-                .findFirst()
-                .orElse(null);
-
-        if (selectedCandidate == null) {
+        OfficeReferenceMerchantVO reference = recommendationMapper.selectReferenceMerchant(
+                request.getReferenceMerchantId(), workation.getRegionId());
+        if (reference == null) {
             throw new BusinessException(OfficeRecommendationErrorCode.INVALID_RECOMMENDATION_REQUEST);
         }
-
-        OfficeReferenceMerchantVO reference = new OfficeReferenceMerchantVO();
-        reference.setMerchantId(selectedCandidate.getMerchantId());
-        reference.setMerchantName(selectedCandidate.getName());
-        reference.setLatitude(selectedCandidate.getLatitude());
-        reference.setLongitude(selectedCandidate.getLongitude());
 
         return createOfficeRecommendationByReference(
                 userId,

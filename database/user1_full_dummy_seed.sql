@@ -5,7 +5,7 @@ USE workit;
 SET NAMES utf8mb4;
 
 SET @USER_ID := 1;
-SET @WORKATION_ID := 4;
+SET @WORKATION_ID := 10;
 
 -- -----------------------------------------------------------------------------
 -- region (요청 고정)
@@ -702,6 +702,65 @@ FROM merchants
 WHERE name = '한라 액티브 스파크'
 ON DUPLICATE KEY UPDATE
     activity_type = VALUES(activity_type);
+
+-- schedules
+-- 음식점·여가 방문 계획. 같은 시드를 다시 실행해도 동일 일정은 중복 생성하지 않는다.
+INSERT INTO schedules
+    (workation_id, merchant_id, scheduled_at, created_at, updated_at)
+SELECT
+    @WORKATION_ID,
+    m.id,
+    '2026-08-12 12:30:00',
+    '2026-08-12 06:10:00',
+    '2026-08-12 06:10:00'
+FROM merchants m
+WHERE m.name = '제주 해돋이 레스토랑'
+  AND m.category = 'RESTAURANT'
+  AND NOT EXISTS (
+      SELECT 1
+        FROM schedules s
+       WHERE s.workation_id = @WORKATION_ID
+         AND s.merchant_id = m.id
+         AND s.scheduled_at = '2026-08-12 12:30:00'
+  );
+
+INSERT INTO schedules
+    (workation_id, merchant_id, scheduled_at, created_at, updated_at)
+SELECT
+    @WORKATION_ID,
+    m.id,
+    '2026-08-13 18:00:00',
+    '2026-08-12 06:11:00',
+    '2026-08-12 06:11:00'
+FROM merchants m
+WHERE m.name = '한라 액티브 스파크'
+  AND m.category = 'ACTIVITY'
+  AND NOT EXISTS (
+      SELECT 1
+        FROM schedules s
+       WHERE s.workation_id = @WORKATION_ID
+         AND s.merchant_id = m.id
+         AND s.scheduled_at = '2026-08-13 18:00:00'
+  );
+
+INSERT INTO schedules
+    (workation_id, merchant_id, scheduled_at, created_at, updated_at)
+SELECT
+    @WORKATION_ID,
+    m.id,
+    '2026-08-14 15:00:00',
+    '2026-08-12 06:12:00',
+    '2026-08-12 06:12:00'
+FROM merchants m
+WHERE m.name = '제주 바람카페'
+  AND m.category = 'RESTAURANT'
+  AND NOT EXISTS (
+      SELECT 1
+        FROM schedules s
+       WHERE s.workation_id = @WORKATION_ID
+         AND s.merchant_id = m.id
+         AND s.scheduled_at = '2026-08-14 15:00:00'
+  );
 
 -- merchant_id 기반 규칙은 가맹점 seed 입력 후 반영
 -- user_category_rules

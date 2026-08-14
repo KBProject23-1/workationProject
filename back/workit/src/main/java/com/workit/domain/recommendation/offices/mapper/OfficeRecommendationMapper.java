@@ -29,6 +29,9 @@ public interface OfficeRecommendationMapper {
                                                                   @Param("regionId") Long regionId,
                                                                   @Param("workationStartDate") LocalDate workationStartDate);
 
+    OfficeReferenceMerchantVO selectReferenceMerchant(@Param("merchantId") Long merchantId,
+                                                      @Param("regionId") Long regionId);
+
     List<OfficeCandidateVO> selectOfficeCandidatesByMerchantIds(@Param("userId") Long userId,
                                                                 @Param("merchantIds") List<Long> merchantIds);
 

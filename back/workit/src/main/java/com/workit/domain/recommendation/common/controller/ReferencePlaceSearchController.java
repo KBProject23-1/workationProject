@@ -26,7 +26,7 @@ public class ReferencePlaceSearchController {
 
     private final ReferencePlaceSearchService referencePlaceSearchService;
 
-    // type 을 주면 그 추천의 기준이 될 수 있는 업종으로 좁힌다.
+    // type 은 기존 클라이언트 호환을 위해 받지만 검색 업종은 제한하지 않는다.
     // 지역은 진행 중인 워케이션에서 서버가 가져오므로 받지 않는다
     @GetMapping("/reference-place-search")
     public ResponseEntity<CommonResponse<ReferencePlaceCandidateListResponseDTO>> search(

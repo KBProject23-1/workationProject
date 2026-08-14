@@ -73,12 +73,7 @@
                (rd.merchant_id IS NOT NULL) AS reserved,
                rd.reservation_distance
           FROM merchants m
-          <!--
-              LEFT JOIN 이어야 한다.
-              JOIN 으로 두면 예약이 없을 때 후보가 0건이 되어 기준 장소를 고를 수 없다.
-              숙소·음식점 후보는 지역 전체를 주고 예약 여부는 정렬에만 쓴다
-          -->
-          LEFT JOIN (
+          JOIN (
             SELECT rp.merchant_id,
                    MIN(ABS(DATEDIFF(r.start_date, #{workationStartDate}))) AS reservation_distance
               FROM reservations r
@@ -108,6 +103,17 @@
          ORDER BY (rd.merchant_id IS NOT NULL) DESC,
                   rd.reservation_distance ASC,
                   m.id ASC
+    </select>
+
+    <select id="selectReferenceMerchant"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeReferenceMerchantVO">
+        SELECT m.id AS merchant_id,
+               m.name AS merchant_name,
+               m.latitude,
+               m.longitude
+          FROM merchants m
+         WHERE m.id = #{merchantId}
+           AND m.region_id = #{regionId}
     </select>
 
     <select id="selectOfficeCandidates"

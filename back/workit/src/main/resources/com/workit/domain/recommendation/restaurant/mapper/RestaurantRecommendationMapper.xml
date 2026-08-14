@@ -104,22 +104,32 @@
     <select id="selectRestaurantReferenceMerchant"
             resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
         SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.latitude, m.longitude
-          FROM merchants m
+         FROM merchants m
          WHERE m.id = #{merchantId} AND m.region_id = #{regionId}
-           AND m.category IN ('ACCOMMODATION', 'OFFICE', 'ACTIVITY')
     </select>
 
     <select id="selectRestaurantReferenceCandidates"
             resultType="com.workit.domain.recommendation.restaurant.vo.RecommendationMerchantVO">
         SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.latitude, m.longitude,
-               EXISTS (SELECT 1 FROM reservations r
-                       JOIN reservation_products rp ON rp.id = r.product_id
-                       WHERE r.user_id = #{userId} AND r.workation_id = #{workationId}
-                         AND r.status = 'CONFIRMED' AND rp.merchant_id = m.id) AS reserved
+               1 AS reserved
           FROM merchants m
          WHERE m.region_id = #{regionId}
            AND m.category IN ('ACCOMMODATION', 'OFFICE', 'ACTIVITY')
-         ORDER BY reserved DESC, m.category ASC, m.id ASC
+           AND (
+               (m.category IN ('ACCOMMODATION', 'OFFICE')
+                AND EXISTS (SELECT 1 FROM reservations r
+                            JOIN reservation_products rp ON rp.id = r.product_id
+                            WHERE r.user_id = #{userId}
+                              AND r.workation_id = #{workationId}
+                              AND r.status IN ('CONFIRMED', 'COMPLETED')
+                              AND rp.merchant_id = m.id))
+               OR
+               (m.category = 'ACTIVITY'
+                AND EXISTS (SELECT 1 FROM schedules s
+                            WHERE s.workation_id = #{workationId}
+                              AND s.merchant_id = m.id))
+           )
+         ORDER BY m.category ASC, m.id ASC
     </select>
 
     <insert id="insertRecommendationRequest"

@@ -7,8 +7,8 @@
     <!--
         기준 장소 검색.
 
-        지역과 업종을 걸지 않으면 다른 지역 가맹점이나 기준이 될 수 없는 업종이 섞여
-        고른 뒤에 REFERENCE_MERCHANT_NOT_FOUND 로 실패한다.
+        검색 결과는 추천 유형별 업종으로 제한하지 않고 DB의 모든 업종을 대상으로 한다.
+        지역은 진행 중인 워케이션 지역으로 제한한다.
         예약 여부는 후보 조회와 같은 방식으로 채워 목록에서 구분되게 한다.
     -->
     <select id="selectReferencePlaceCandidatesByName"
@@ -30,12 +30,6 @@
           FROM merchants m
          WHERE m.name LIKE CONCAT('%', #{keyword}, '%')
            AND m.region_id = #{regionId}
-        <if test="categories != null and categories.size() > 0">
-           AND m.category IN
-           <foreach collection="categories" item="category" open="(" separator="," close=")">
-               #{category}
-           </foreach>
-        </if>
          ORDER BY reserved DESC,
                   m.name ASC,
                   m.id ASC
