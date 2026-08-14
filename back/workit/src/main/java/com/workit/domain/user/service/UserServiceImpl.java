@@ -1,10 +1,21 @@
 package com.workit.domain.user.service;
 
+import com.workit.domain.auth.exception.AuthErrorCode;
+import com.workit.domain.auth.provider.IdentityVerificationProvider;
+import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.service.AuthService;
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
+import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
 import com.workit.domain.user.mapper.UserMapper;
@@ -14,6 +25,7 @@ import com.workit.domain.wallet.exception.WalletErrorCode;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
 import com.workit.exception.CommonErrorCode;
+import com.workit.global.util.EmailValidator;
 import com.workit.global.util.PersonalDataCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +34,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 // User 도메인 Service 구현체
 // - 검증/복호화/트랜잭션 경계는 전부 Service Layer 에서 수행 (Controller/Mapper 에서 금지)
@@ -38,6 +53,17 @@ public class UserServiceImpl implements UserService {
 
     // 지갑 잔액 조회는 Wallet 도메인 책임 — Service 위임 (WalletMapper 직접 호출 금지)
     private final WalletService walletService;
+
+    // Mock PASS 본인인증 결과 검증은 Auth 도메인 Provider 재사용 (knowledge.md: 중복 구현 금지)
+    // - identityVerificationId 검증/세션 상태(VERIFIED)/만료/사용 완료 판단을 Provider 에 위임한다
+    //   (AuthServiceImpl.signup/findId/resetPin 과 동일한 검증 로직 재사용)
+    private final IdentityVerificationProvider identityVerificationProvider;
+
+    // 이메일 인증번호 발급/임시 저장은 Mock Email Verification Service 위임 (docs: API 호출 구조)
+    // - 인증번호 생성 + [MOCK EMAIL] 로그 출력(개발 환경)은 EmailVerificationService 가 담당하고,
+    //   임시 저장/TTL/재발급 무효화는 내부적으로 EmailVerificationStore 가 담당한다
+    //   (실제 이메일 서비스 연동 시 구현체 교체 — UserService 는 인터페이스에만 의존)
+    private final EmailVerificationService emailVerificationService;
 
     /** 회원 서비스 이용 가능 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
@@ -197,6 +223,343 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    // SELECT 만 수행하므로 읽기 전용 트랜잭션 (verifyCurrentPassword/getMyProfile 과 동일)
+    // - 재인증 성공 정보를 DB/Redis/Session 등에 저장하지 않으므로 쓰기 트랜잭션이 필요 없다
+    @Transactional(readOnly = true)
+    public void verifyAccountPassword(Long userId, AccountPasswordVerifyRequestDTO request) {
+
+        // 1. 요청 값 검증 — password 필수 (null/빈 값/공백 → 400)
+        //    (javax.validation 미사용 환경 → Service Layer 에서 수행 — withdraw 와 동일)
+        //    - 비밀번호 원문은 로그에 출력하지 않는다 (민감정보)
+        if (request == null || isBlank(request.getPassword())) {
+            throw new BusinessException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+
+        // 2. 로그인 사용자 존재 + 상태 확인 (users.status) — withdraw 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 재인증 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 현재 비밀번호 검증 — Auth 도메인 위임 (BCrypt matches, 불일치 → AUTH_INVALID_PASSWORD 400)
+        //    - changePassword/withdraw 와 동일한 검증 로직을 재사용한다 (중복 구현 금지)
+        //    - 비밀번호 원문은 로그에 출력하지 않는다 (민감정보)
+        authService.verifyCurrentPassword(userId, request.getPassword());
+
+        // 4. Audit 로그 — userId 만 기록 (비밀번호 원문/토큰 로그 출력 금지 — knowledge.md)
+        //    - 재인증 성공 여부는 저장하지 않으며 Access/Refresh Token 을 건드리지 않는다
+        log.info("계정 설정 진입용 비밀번호 재인증 성공 - userId={}", userId);
+    }
+
+    @Override
+    @Transactional
+    // 휴대폰 번호 변경은 하나의 Business UseCase — users UPDATE(DB 쓰기) + 검증(PASS 인증)을
+    // 하나의 Transaction Boundary 로 관리한다 (withdraw 와 동일 — 검증은 전부 Service Layer)
+    public PhoneChangeResponseDTO changePhone(Long userId, PhoneChangeRequestDTO request) {
+
+        // 1. 요청 값 검증 — identityVerificationId 필수 (null/빈 값 → INVALID_VERIFICATION_ID 400)
+        //    (findId/resetPin 과 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
+        //    - identityVerificationId 는 로그에 출력하지 않는다 (PASS 인증 임시값 — knowledge.md)
+        if (request == null || isBlank(request.getIdentityVerificationId())) {
+            throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
+        }
+
+        // 2. 로그인 사용자 존재 + 상태 확인 (users.status) — withdraw/verifyAccountPassword 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 변경 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. PASS 본인인증 결과 검증 — 기존 Mock PASS 검증 로직 재사용 (Auth 도메인 Provider)
+        //    - identityVerificationId 로 Redis(mock:pass:{id}) 세션을 조회·검증한다
+        //      (세션 없음 / TTL 만료 / status != VERIFIED / used == true → INVALID_VERIFICATION_ID 400)
+        //    - identityVerificationId 는 MockPassService 가 발급한 값만 유효하므로
+        //      프론트가 임의 생성/우회한 인증은 이 단계에서 차단된다
+        //    - Provider 가 세션에 저장된 name / phoneNumber / CI 를 복호화해 반환한다
+        IdentityVerificationResult verificationResult =
+                identityVerificationProvider.verify(request.getIdentityVerificationId());
+
+        // 4. 본인인증 이름 대조 — PASS 인증이 현재 사용자 본인 인증인지 확인
+        //    - Mock PASS 세션은 사용자와 연결되어 있지 않으므로, 인증된 이름(복호화)과
+        //      DB 에 저장된 사용자 이름(users.name_encrypt 복호화)이 일치해야 한다
+        //      (docs: "본인인증 이름을 복호화하여 DB에 조회된 사용자인지 확인" —
+        //       verifyPasswordReset 의 이름 일치 확인과 동일 패턴)
+        //    - 휴대폰 번호 변경은 인증된 새 번호(새 CI)를 사용하므로 CI 대조는 사용하지 않는다
+        //      (Mock CI 는 휴대폰 기반 결정값 — 번호 변경 시 기존 identity_ci_hash 와 달라짐)
+        //    - 다른 사용자에게 발급된 identityVerificationId → VERIFICATION_FAILED(400) (원인 비노출)
+        String registeredName = PersonalDataCipher.decrypt(user.getNameEncrypt());
+        if (!registeredName.equals(verificationResult.getName())) {
+            throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
+        }
+
+        // 5. 인증된 휴대폰 번호 조회 — 프론트가 전달한 phoneNumber 는 Request 에 존재하지 않으며
+        //    반드시 백엔드가 PASS 인증 결과에서 조회한 값만 사용한다 (docs — 프론트 번호 신뢰 금지)
+        String verifiedPhoneNumber = verificationResult.getPhoneNumber();
+
+        // 6. 현재 휴대폰 번호와 동일한지 확인 — 동일 번호로 변경 불가 (docs: 정책에 따라 실패 처리)
+        //    - AUTH_SAME_PASSWORD(400)/SAME_AS_CURRENT_PIN(400) 과 동일 패턴
+        String currentPhoneNumber = PersonalDataCipher.decrypt(user.getPhoneNumberEncrypt());
+        if (verifiedPhoneNumber.equals(currentPhoneNumber)) {
+            throw new BusinessException(UserErrorCode.PHONE_SAME_AS_CURRENT);
+        }
+
+        // 7. 다른 사용자 등록 여부 확인 — users.phone_number_hash (UNIQUE)
+        //    - 개인정보 원문(phone_number_encrypt)이 아닌 SHA-256 hash 로만 조회한다
+        //      (knowledge.md: 검색용 개인정보는 hash — AuthMapper.findUserByPhoneHash 와 동일 원칙)
+        //    - 사용 중인 번호 → PHONE_ALREADY_IN_USE(409)
+        String newPhoneHash = sha256Hex(verifiedPhoneNumber);
+        if (userMapper.countByPhoneHashExcludingUserId(newPhoneHash, userId) > 0) {
+            throw new BusinessException(UserErrorCode.PHONE_ALREADY_IN_USE);
+        }
+
+        // 8. users 휴대폰 번호 갱신 (AES-256 암호화본 + 검색용 SHA-256 hash — Service Layer 에서만)
+        //    - phoneNumber 는 프론트 입력이 아닌 PASS 인증 결과 값 (5번에서 검증 완료)
+        //    - 사전 중복 체크(SELECT)와 실제 UPDATE 사이의 Race Condition 은
+        //      DB UNIQUE 제약(phone_number_hash)이 최종 방어선 — DuplicateKeyException → 409 로 변환
+        //    - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴 시 0 row → USER_ALREADY_WITHDRAWN
+        String newPhoneEncrypt = PersonalDataCipher.encrypt(verifiedPhoneNumber);
+        try {
+            int updated = userMapper.updateUserPhoneNumber(userId, newPhoneHash, newPhoneEncrypt);
+            if (updated == 0) {
+                throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+            }
+        } catch (DuplicateKeyException e) {
+            throw mapDuplicateKeyException(e);
+        }
+
+        // 9. Audit 로그 — userId 만 기록 (휴대폰 번호 원문/identityVerificationId 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs)
+        log.info("휴대폰 번호 변경 성공 - userId={}", userId);
+
+        // 10. 변경된 휴대폰 번호 응답 (PASS 인증으로 변경된 인증된 번호)
+        return PhoneChangeResponseDTO.of(verifiedPhoneNumber);
+    }
+
+    @Override
+    // SELECT 만 수행하고 Redis 임시 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
+    // 읽기 전용 트랜잭션 (getMyProfile 과 동일 — MockEmailVerificationServiceImpl 은 별도 트랜잭션 없음)
+    @Transactional(readOnly = true)
+    public EmailVerificationResponseDTO sendEmailVerification(Long userId, EmailVerificationRequestDTO request) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인 (users.status) — changePhone/withdraw 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 인증번호 발송 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (docs 처리 로직: 현재 로그인한 사용자 확인 → 탈퇴 사용자 거부 → 이메일 검증 순서)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 요청 이메일 검증 + 정규화 — 필수(null/빈 값) + 형식 (EmailValidator 공통 정책)
+        //    - 실패 시 INVALID_EMAIL_REQUEST(400) (docs: 이메일 누락/이메일 형식 오류)
+        //    - EmailValidator.normalize: trim → 최대 길이 → lowercase → 형식 검증 (signup/check-email 과 동일)
+        //    - 이메일 원문은 로그에 출력하지 않는다 (민감정보)
+        if (request == null || isBlank(request.getEmail())) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+        String normalizedEmail;
+        try {
+            normalizedEmail = EmailValidator.normalize(request.getEmail());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+
+        // 3. 현재 사용자의 이메일과 동일한지 확인 (docs: 현재 이메일과 동일한 이메일 → 400)
+        //    - 회원가입 시 소문자+trim 정규화되어 저장되므로 정규화 값과 직접 비교 가능
+        //    - 동일 이메일 → EMAIL_SAME_AS_CURRENT(400) (휴대폰 변경의 PHONE_SAME_AS_CURRENT 와 동일 패턴)
+        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypt());
+        if (normalizedEmail.equals(currentEmail)) {
+            throw new BusinessException(UserErrorCode.EMAIL_SAME_AS_CURRENT);
+        }
+
+        // 4. 다른 사용자가 이미 사용 중인 이메일인지 확인 — users.email_hash (UNIQUE)
+        //    - 개인정보 원문(email_encrypt)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
+        //    - 사용 중인 이메일 → EMAIL_ALREADY_IN_USE(409) (PHONE_ALREADY_IN_USE 와 동일 패턴)
+        String emailHash = sha256Hex(normalizedEmail);
+        if (userMapper.countByEmailHashExcludingUserId(emailHash, userId) > 0) {
+            throw new BusinessException(UserErrorCode.EMAIL_ALREADY_IN_USE);
+        }
+
+        // 5. Mock 이메일 인증번호 발급 + 임시 저장 — Mock Email Verification Service 위임
+        //    - 6자리 숫자 인증번호 생성, 사용자(userId) 기준 임시 저장(TTL 5분),
+        //      같은 사용자 재발급 시 기존 인증번호 무효화 (docs: 서버가 userId + email + 인증번호 저장)
+        //    - 실제 이메일은 발송하지 않으며 개발 환경에서 [MOCK EMAIL] 로그로 인증번호를 확인한다 (docs)
+        //    - 인증번호는 DB 가 아닌 Mock 임시 저장소에만 보관한다 (docs: 인증번호를 DB 에 저장할 필요 없음)
+        emailVerificationService.issueVerificationCode(userId, normalizedEmail);
+
+        // 6. Audit 로그 — userId 만 기록 (이메일/인증번호 원문 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
+        log.info("이메일 인증번호 발송 성공 - userId={}", userId);
+
+        // 7. 응답 생성 — 인증번호를 발송한 이메일 반환 (docs 응답 data.email)
+        //    - 인증번호(verificationCode)는 응답에 포함하지 않는다 (docs: 운영 환경에서 인증번호 응답 미포함)
+        return EmailVerificationResponseDTO.of(normalizedEmail);
+    }
+
+    @Override
+    // SELECT 만 수행하고 Redis 임시 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
+    // 읽기 전용 트랜잭션 (sendEmailVerification 과 동일 — MockEmailVerificationServiceImpl 은 별도 트랜잭션 없음)
+    @Transactional(readOnly = true)
+    public EmailVerificationConfirmResponseDTO confirmEmailVerification(
+            Long userId, EmailVerificationConfirmRequestDTO request) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인 (users.status) — sendEmailVerification/changePhone 과 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 인증 확인 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (docs 처리 로직: 현재 로그인한 사용자 확인 → 탈퇴 사용자 거부 순서)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 요청 값 검증 — email/verificationCode 필수 (null/빈 값/공백 → 400)
+        //    - email: 누락/형식 오류 → INVALID_EMAIL_REQUEST(400) (sendEmailVerification 과 동일 정책)
+        //    - verificationCode: 누락 → EMAIL_VERIFICATION_CODE_INVALID(400)
+        //    - 인증번호 원문은 로그에 출력하지 않는다 (1회성 인증값 — knowledge.md)
+        if (request == null || isBlank(request.getEmail())) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+        if (isBlank(request.getVerificationCode())) {
+            throw new BusinessException(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID);
+        }
+
+        // 3. 이메일 정규화 (trim + lowercase) — 발송 시 정규화된 값과 동일한 key 로 조회하기 위함
+        //    - 형식 오류 → INVALID_EMAIL_REQUEST(400) (EmailValidator 공통 정책)
+        //    - 이메일 원문은 로그에 출력하지 않는다 (민감정보)
+        String normalizedEmail;
+        try {
+            normalizedEmail = EmailValidator.normalize(request.getEmail());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+
+        // 4. Mock 이메일 인증번호 검증 + 인증 완료 상태 저장 — Mock Email Verification Service 위임
+        //    - 인증정보 없음 → EMAIL_VERIFICATION_NOT_FOUND(400)
+        //    - 요청 이메일과 인증 세션 이메일 불일치 → EMAIL_VERIFICATION_NOT_FOUND(400)
+        //    - 인증번호 만료(5분) → EMAIL_VERIFICATION_CODE_EXPIRED(400)
+        //    - 이미 인증 완료된 인증번호 재사용 → EMAIL_ALREADY_VERIFIED(400)
+        //    - 인증번호 불일치 → EMAIL_VERIFICATION_CODE_INVALID(400)
+        //    - 성공 시 해당 이메일을 verified=true 상태로 저장 (이후 이메일 변경 API 에서 사용 — docs)
+        //    - 인증 세션은 사용자(userId) 기준으로 저장/조회한다 (docs: 서버가 userId + email + 인증번호 저장)
+        //    - 인증번호는 DB 가 아닌 Mock 임시 저장소에만 보관한다 (docs)
+        emailVerificationService.confirmVerificationCode(userId, normalizedEmail, request.getVerificationCode());
+
+        // 5. Audit 로그 — userId 만 기록 (이메일/인증번호 원문 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
+        log.info("이메일 인증번호 확인 성공 - userId={}", userId);
+
+        // 6. 응답 생성 — 인증 완료 여부 반환 (docs 응답 data.verified — 성공 시 true)
+        return EmailVerificationConfirmResponseDTO.of(true);
+    }
+
+    @Override
+    @Transactional
+    // 이메일 변경은 하나의 Business UseCase — users UPDATE(DB 쓰기) + 인증 세션 검증/소비를
+    // 하나의 Transaction Boundary 로 관리한다 (changePhone 과 동일 — 검증은 전부 Service Layer)
+    // - 인증 세션 소비(Redis 삭제)는 DB 트랜잭션과 분리 — DB 커밋 확정 후(afterCommit) 처리한다
+    public EmailChangeResponseDTO changeEmail(Long userId) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인 (users.status) — changePhone/withdraw 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 변경 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (docs 처리 로직: 현재 로그인한 사용자 확인 → 탈퇴 사용자 거부 순서)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 이메일 인증 완료 정보 조회 — Mock Email Verification Service 위임
+        //    - Request Body 를 받지 않으므로 인증 완료된 이메일은 서버가 인증 세션(userId 기준)에서 조회한다
+        //      (docs: EmailVerificationStore 에서 인증 완료된 이메일 확인 — 프론트 전달 이메일 신뢰 금지)
+        //    - 인증정보 없음/만료/인증 미완료(VERIFIED 아님) → EMAIL_VERIFICATION_REQUIRED(400)
+        //      (docs: 모두 "이메일 인증 필요" — 세부 원인 비노출)
+        //    - 반환값은 Service 가 AES-256 복호화한 인증된 이메일 (정규화된 값)
+        String verifiedEmail = emailVerificationService.getVerifiedEmail(userId);
+
+        // 3. 인증 완료된 이메일이 현재 이메일과 동일한지 확인 — 동일 이메일로 변경 불가 (docs)
+        //    - 회원가입 시 소문자+trim 정규화되어 저장되므로 정규화된 인증 이메일과 직접 비교 가능
+        //    - 동일 이메일 → EMAIL_SAME_AS_CURRENT(400) (변경할 이메일이 없음 — docs)
+        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypt());
+        if (verifiedEmail.equals(currentEmail)) {
+            throw new BusinessException(UserErrorCode.EMAIL_SAME_AS_CURRENT);
+        }
+
+        // 4. 다른 사용자가 이미 사용 중인 이메일인지 확인 — users.email_hash (UNIQUE)
+        //    - 개인정보 원문(email_encrypt)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
+        //    - 사용 중인 이메일 → EMAIL_ALREADY_IN_USE(409) (PHONE_ALREADY_IN_USE 와 동일 패턴)
+        String emailHash = sha256Hex(verifiedEmail);
+        if (userMapper.countByEmailHashExcludingUserId(emailHash, userId) > 0) {
+            throw new BusinessException(UserErrorCode.EMAIL_ALREADY_IN_USE);
+        }
+
+        // 5. users 이메일 갱신 (AES-256 암호화본 + 검색용 SHA-256 hash — Service Layer 에서만)
+        //    - verifiedEmail 은 프론트 입력이 아닌 인증 세션에서 조회한 값 (2번에서 검증 완료)
+        //    - 사전 중복 체크(SELECT)와 실제 UPDATE 사이의 Race Condition 은
+        //      DB UNIQUE 제약(email_hash)이 최종 방어선 — DuplicateKeyException → 409 로 변환
+        //    - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴 시 0 row → USER_ALREADY_WITHDRAWN
+        String newEmailEncrypt = PersonalDataCipher.encrypt(verifiedEmail);
+        try {
+            int updated = userMapper.updateUserEmail(userId, emailHash, newEmailEncrypt);
+            if (updated == 0) {
+                throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+            }
+        } catch (DuplicateKeyException e) {
+            throw mapDuplicateKeyException(e);
+        }
+
+        // 6. 인증 세션 소비(삭제) — 동일 인증 결과로 이메일 변경 API 를 재호출할 수 없도록 한다 (docs)
+        //    - Redis 삭제는 DB 커밋 확정 후(afterCommit) 수행 (MockEmailVerificationServiceImpl 내부 처리)
+        //    - 삭제 후 동일 인증정보로 재요청하면 2번에서 EMAIL_VERIFICATION_REQUIRED(400) 로 거부된다
+        emailVerificationService.consumeVerification(userId);
+
+        // 7. Audit 로그 — userId 만 기록 (이메일 원문 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
+        log.info("이메일 변경 성공 - userId={}", userId);
+
+        // 8. 변경된 이메일 응답 (인증 세션에서 조회한 인증된 이메일)
+        return EmailChangeResponseDTO.of(verifiedEmail);
+    }
+
+    @Override
     @Transactional
     // 회원 탈퇴는 하나의 Business UseCase — users UPDATE(DB 쓰기) 하나이지만
     // 검증(비밀번호/잔액)과 상태 변경을 하나의 Transaction Boundary 로 관리한다
@@ -345,8 +708,41 @@ public class UserServiceImpl implements UserService {
             // 동일 사용자의 동시 최초 등록 요청 — 1:1 프로필 정책상 재등록으로 처리
             return new BusinessException(UserErrorCode.PROFILE_ALREADY_EXISTS);
         }
+        if (message.contains("ux_users_phone") || message.contains("users.phone_number_hash")) {
+            // 동일 휴대폰으로 동시 변경 요청 — PHONE_ALREADY_IN_USE 로 처리
+            //   (AuthServiceImpl.mapDuplicateKeyException 의 phone UNIQUE 매핑과 동일 패턴)
+            return new BusinessException(UserErrorCode.PHONE_ALREADY_IN_USE);
+        }
+        if (message.contains("ux_users_email") || message.contains("users.email_hash")) {
+            // 동일 이메일로 동시 변경 요청 — EMAIL_ALREADY_IN_USE 로 처리
+            //   (AuthServiceImpl.mapDuplicateKeyException 의 email UNIQUE 매핑과 동일 패턴)
+            return new BusinessException(UserErrorCode.EMAIL_ALREADY_IN_USE);
+        }
         // 식별되지 않은 UNIQUE 충돌 — 응답에 제약조건명/테이블명 노출 금지 (knowledge.md)
         return new BusinessException(UserErrorCode.DUPLICATE_NICKNAME);
+    }
+
+    /**
+     * SHA-256 hex 변환 — 검색용 개인정보 hash 생성 (휴대폰 번호 중복 조회용)
+     * - 개인정보 원문(phone_number_encrypt) 조회 금지 — hash 로만 검색한다 (knowledge.md)
+     * - AuthServiceImpl.sha256Hex 와 동일한 hex 인코딩 (MockPassServiceImpl 과 동일 패턴)
+     */
+    private static String sha256Hex(String value) {
+        byte[] digest = sha256Bytes(value);
+        StringBuilder sb = new StringBuilder(digest.length * 2);
+        for (byte b : digest) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
+
+    private static byte[] sha256Bytes(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 알고리즘을 사용할 수 없습니다.", e);
+        }
     }
 
     private boolean isBlank(String value) {

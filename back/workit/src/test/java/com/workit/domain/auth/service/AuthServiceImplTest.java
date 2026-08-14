@@ -2137,7 +2137,7 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("비밀번호 변경 성공 - BCrypt 해시로 password_hash 갱신 + 기존 Refresh Token 전체 폐기")
+    @DisplayName("비밀번호 변경 성공 - BCrypt 해시로 password_hash 갱신 + 로그인 세션 유지(Refresh Token 미폐기)")
     void changePassword_success() {
         // Given — ACTIVE 회원 + 기존 Refresh Token 세션 존재 + 갱신 성공
         registerPasswordChangeUser(501L, "password123!", "ACTIVE");
@@ -2153,9 +2153,9 @@ class AuthServiceImplTest {
         assertNotEquals("NewPassword123!", hashCaptor.getValue());
         assertTrue(PasswordEncryptor.matches("NewPassword123!", hashCaptor.getValue()));
 
-        // 기존 Refresh Token 전체 폐기 — 이후 재발급 불가
-        assertTrue(savedRefreshTokens.isEmpty());
-        verify(refreshTokenStore).delete(501L);
+        // 로그인 세션 유지 (docs: 로그인 후 비밀번호 변경) — Refresh Token 을 폐기하지 않는다
+        assertFalse(savedRefreshTokens.isEmpty());
+        verify(refreshTokenStore, never()).delete(anyLong());
     }
 
     @Test
@@ -2296,8 +2296,8 @@ class AuthServiceImplTest {
     }
 
     @Test
-    @DisplayName("비밀번호 변경 후 - 기존 Refresh Token 으로 재발급 요청 실패 (INVALID_REFRESH_TOKEN)")
-    void changePassword_thenOldRefreshTokenCannotReissue() {
+    @DisplayName("비밀번호 변경 후 - 로그인 세션 유지 → 기존 Refresh Token 으로 재발급 성공")
+    void changePassword_thenSessionRetained_oldRefreshTokenStillReissues() {
         // Given — 로그인 세션 존재 (Refresh Token 발급 + Redis hash 저장)
         registerLoginUser(501L, "user@example.com", "01034567890",
                 "password123!", "123456", "device-uuid-1", "ACTIVE");
@@ -2309,14 +2309,16 @@ class AuthServiceImplTest {
                 .thenReturn(PasswordEncryptor.encode("password123!"));
         when(authMapper.updatePasswordHash(eq(501L), anyString())).thenReturn(1);
 
-        // When — 비밀번호 변경 → 기존 Refresh Token 세션 전체 폐기
+        // When — 비밀번호 변경 (docs: 로그인 후 비밀번호 변경 — 세션 유지)
         authService.changePassword(501L, changePasswordRequest("password123!", "NewPassword123!"));
 
-        // Then — 세션이 폐기되어 기존 Refresh Token 으로는 재발급 불가
-        assertTrue(savedRefreshTokens.isEmpty());
-        BusinessException ex = assertThrows(BusinessException.class,
-                () -> authService.refreshAccessToken(oldRefreshToken));
-        assertEquals(AuthErrorCode.INVALID_REFRESH_TOKEN, ex.getErrorCode());
+        // Then — Refresh Token 세션이 폐기되지 않아 기존 Refresh Token 으로 재발급이 계속 가능하다
+        assertFalse(savedRefreshTokens.isEmpty());
+        verify(refreshTokenStore, never()).delete(anyLong());
+        RefreshTokenResponseDTO result = authService.refreshAccessToken(oldRefreshToken);
+        assertNotNull(result);
+        assertNotNull(result.getAccessToken());
+        assertNotNull(result.getRefreshToken());
     }
 
     @Test

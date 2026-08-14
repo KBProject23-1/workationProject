@@ -2,10 +2,18 @@ package com.workit.domain.user.controller;
 
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.service.AuthService;
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
+import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.service.UserService;
 import com.workit.global.dto.CommonResponse;
@@ -121,13 +129,15 @@ public class UserController {
     }
 
     // 1.4 내 비밀번호 변경 (로그인 사용자 전용 — Auth 도메인 책임)
-    // - docs: 유저 개인정보 재설정 - 비밀번호 변경 (PATCH /api/v1/users/me/password)
+    // - docs: 로그인 후 비밀번호 변경 (PATCH /api/v1/users/me/password)
     // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
     //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
-    // - 현재 비밀번호 재입력 본인 인증/BCrypt 검증·암호화/DB 갱신/Refresh Token 전체 폐기/Audit 로그는
+    // - 현재 비밀번호 재입력 본인 인증/BCrypt 검증·암호화/DB 갱신/Audit 로그는
     //   AuthService(changePassword) 에서 수행한다 — User Domain 에 인증 로직을 구현하지 않는다
     //   (knowledge.md: Auth Domain 이 Password 검증/변경을 담당)
     // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (암호화/DB/Redis 접근 금지)
+    // - 변경 성공 후에도 로그인 세션(인증 Cookie)을 유지한다 — Access/Refresh Cookie 를 삭제·재발급하지 않고
+    //   로그아웃/Session revoke/강제 로그인 이동을 수행하지 않는다 (docs: 로그인 후 비밀번호 변경)
     // - 현재 비밀번호 불일치: AUTH_INVALID_PASSWORD(400), 동일 비밀번호: AUTH_SAME_PASSWORD(400),
     //   약한 비밀번호: WEAK_PASSWORD(422), 요청 값 누락: INVALID_PASSWORD_CHANGE_REQUEST(400),
     //   회원 없음: USER_NOT_FOUND(404)
@@ -137,7 +147,7 @@ public class UserController {
             @RequestBody ChangePasswordRequestDTO request) {
 
         authService.changePassword(userId, request);
-        return GlobalResponseFactory.success(null, "비밀번호가 성공적으로 변경되었습니다.");
+        return GlobalResponseFactory.success(null, "비밀번호가 변경되었습니다.");
     }
 
     // 1.5 회원 탈퇴 (로그인 사용자 전용)
@@ -186,5 +196,119 @@ public class UserController {
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredRefreshCookie.toString());
 
         return GlobalResponseFactory.success(null, "회원탈퇴가 정상적으로 처리되었습니다.");
+    }
+
+    // 1.6 계정 설정 진입용 비밀번호 재인증 (로그인 사용자 전용)
+    // - docs: 계정 설정 진입용 비밀번호 재인증 (POST /api/v1/users/me/account/verify)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 현재 비밀번호 재입력 본인 확인/BCrypt 검증은 UserService(verifyAccountPassword) 에서 수행하고,
+    //   비밀번호 검증은 AuthService.verifyCurrentPassword 로 위임한다 (changePassword/withdraw 와 동일)
+    // - 재인증 성공 여부는 Redis/DB/Session 에 저장하지 않으며, Access/Refresh Token 을 새로 발급하지 않는다
+    //   (계정 설정 화면 진입 확인 용도 — knowledge.md: Sensitive Action Verification)
+    //   성공 후 프론트가 계정 설정 화면으로 이동하며, 민감 작업은 각 API 에서 별도 인증을 수행한다
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (비밀번호 비교/DB/Redis 금지)
+    // - password 누락/공백: COMMON_INVALID_REQUEST(400), 비밀번호 불일치: AUTH_INVALID_PASSWORD(400),
+    //   이미 탈퇴: USER_ALREADY_WITHDRAWN(409), 회원 없음: USER_NOT_FOUND(404)
+    @PostMapping("/me/account/verify")
+    public ResponseEntity<CommonResponse<Void>> verifyAccountPassword(
+            @CurrentUser Long userId,
+            @RequestBody AccountPasswordVerifyRequestDTO request) {
+
+        userService.verifyAccountPassword(userId, request);
+        return GlobalResponseFactory.success(null, "비밀번호가 확인되었습니다.");
+    }
+
+    // 1.8 이메일 인증번호 발송 (로그인 사용자 전용)
+    // - docs: 이메일 인증번호 발송 (POST /api/v1/users/me/email/verification)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 이메일 변경 전, 변경할 새 이메일로 인증번호를 발송한다 — 실제 이메일은 발송하지 않으며
+    //   Mock 방식으로 인증번호를 생성해 임시 저장하고 [MOCK EMAIL] 로그로 확인한다 (개발 환경)
+    // - 사용자 확인/탈퇴 거부/이메일 형식 검증/동일 이메일/중복 이메일/인증번호 발급은
+    //   UserService → Mock Email Verification Service 에서 수행한다 (docs: API 호출 구조)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증번호 생성/저장 금지)
+    // - email 누락/형식 오류: INVALID_EMAIL_REQUEST(400), 현재 이메일과 동일: EMAIL_SAME_AS_CURRENT(400),
+    //   다른 사용자 사용 중: EMAIL_ALREADY_IN_USE(409), 이미 탈퇴: USER_ALREADY_WITHDRAWN(409),
+    //   회원 없음: USER_NOT_FOUND(404), 발급 실패: EMAIL_VERIFICATION_SEND_FAILED(500)
+    // - 응답 data 는 발송한 email (docs: 인증번호 자체는 응답에 포함하지 않으며 로그로만 확인 — 운영 환경 미포함)
+    @PostMapping("/me/email/verification")
+    public ResponseEntity<CommonResponse<EmailVerificationResponseDTO>> sendEmailVerification(
+            @CurrentUser Long userId,
+            @RequestBody EmailVerificationRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                userService.sendEmailVerification(userId, request),
+                "이메일 인증번호가 발송되었습니다.");
+    }
+
+    // 1.9 이메일 인증번호 확인 (로그인 사용자 전용)
+    // - docs: 이메일 인증번호 확인 (POST /api/v1/users/me/email/verification/confirm)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 이메일 변경 전, 발송된 인증번호가 올바른지 확인한다 — 인증번호 검증/만료 확인/인증 완료 상태 저장은
+    //   UserService → Mock Email Verification Service 에서 수행한다 (docs: API 호출 구조)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증번호 조회/검증/저장 금지)
+    // - email 누락/형식 오류: INVALID_EMAIL_REQUEST(400), 인증번호 누락/불일치: EMAIL_VERIFICATION_CODE_INVALID(400),
+    //   인증정보 없음: EMAIL_VERIFICATION_NOT_FOUND(400), 인증번호 만료: EMAIL_VERIFICATION_CODE_EXPIRED(400),
+    //   이미 인증 완료: EMAIL_ALREADY_VERIFIED(400), 이미 탈퇴: USER_ALREADY_WITHDRAWN(409),
+    //   회원 없음: USER_NOT_FOUND(404)
+    // - 이 API 는 인증번호 검증 → 인증 완료 상태 저장까지만 담당하며 실제 이메일 변경은 하지 않는다
+    //   (이메일 변경은 별도 PATCH /api/v1/users/me/email API 에서 처리)
+    @PostMapping("/me/email/verification/confirm")
+    public ResponseEntity<CommonResponse<EmailVerificationConfirmResponseDTO>> confirmEmailVerification(
+            @CurrentUser Long userId,
+            @RequestBody EmailVerificationConfirmRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                userService.confirmEmailVerification(userId, request),
+                "이메일 인증이 완료되었습니다.");
+    }
+
+    // 1.10 이메일 변경 (로그인 사용자 전용)
+    // - docs: 이메일 변경 (PATCH /api/v1/users/me/email)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 이메일 인증번호 확인을 완료한 사용자의 이메일을 변경한다 — 별도의 Request Body 를 받지 않으며,
+    //   변경할 이메일은 클라이언트가 전달하지 않는다 (docs 보안 조건)
+    //   서버가 EmailVerificationStore 에서 현재 사용자(userId)의 인증 완료된 이메일을 조회해 변경한다
+    // - 인증 완료 정보 조회/동일·중복 이메일 확인/DB 갱신/인증 세션 소비는
+    //   UserService → Mock Email Verification Service 에서 수행한다 (docs: API 호출 구조)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증 정보 조회/DB 접근 금지)
+    // - 인증 미완료/정보 없음/만료: EMAIL_VERIFICATION_REQUIRED(400),
+    //   현재 이메일과 동일: EMAIL_SAME_AS_CURRENT(400), 다른 사용자 사용 중: EMAIL_ALREADY_IN_USE(409),
+    //   이미 탈퇴: USER_ALREADY_WITHDRAWN(409), 회원 없음: USER_NOT_FOUND(404)
+    // - 변경 성공 후 Access/Refresh Token 을 새로 발급하지 않는다 (토큰 Cookie 변경 없음)
+    @PatchMapping("/me/email")
+    public ResponseEntity<CommonResponse<EmailChangeResponseDTO>> changeEmail(
+            @CurrentUser Long userId) {
+
+        return GlobalResponseFactory.success(
+                userService.changeEmail(userId),
+                "이메일이 변경되었습니다.");
+    }
+
+    // 1.7 휴대폰 번호 변경 (로그인 사용자 전용)
+    // - docs: 휴대폰 번호 변경 (PATCH /api/v1/users/me/phone)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - Mock PASS 인증 완료 후 발급된 identityVerificationId 만 전달받으며, 변경할 휴대폰 번호는
+    //   Request Body 에서 받지 않는다 — UserService 가 PASS 인증 결과에서 인증된 번호를 조회해 변경한다
+    //   (프론트가 전달한 phoneNumber 는 신뢰하지 않는다 — docs)
+    // - PASS 인증 결과 검증(세션 상태/만료/본인 확인)과 DB 갱신은 UserService 에서 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 접근/PASS 검증 금지)
+    // - identityVerificationId 누락/유효하지 않음: INVALID_VERIFICATION_ID(400),
+    //   본인 인증 불일치: VERIFICATION_FAILED(400), 동일 번호: PHONE_SAME_AS_CURRENT(400),
+    //   다른 사용자 사용 중: PHONE_ALREADY_IN_USE(409), 이미 탈퇴: USER_ALREADY_WITHDRAWN(409),
+    //   회원 없음: USER_NOT_FOUND(404)
+    // - 변경 성공 후 Access/Refresh Token 을 새로 발급하지 않는다 (토큰 Cookie 변경 없음)
+    @PatchMapping("/me/phone")
+    public ResponseEntity<CommonResponse<PhoneChangeResponseDTO>> changePhone(
+            @CurrentUser Long userId,
+            @RequestBody PhoneChangeRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                userService.changePhone(userId, request),
+                "휴대폰 번호가 변경되었습니다.");
     }
 }

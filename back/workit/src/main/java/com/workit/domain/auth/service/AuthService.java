@@ -180,17 +180,18 @@ public interface AuthService {
      *
      * 흐름:
      *   1. 요청 값 검증 (currentPassword/newPassword 누락·빈 값 → INVALID_PASSWORD_CHANGE_REQUEST 400)
-     *   2. JWT 로그인 사용자 조회 + 상태 확인 (users) — 없음/비활성 → USER_NOT_FOUND 404
+     *   2. JWT 로그인 사용자 조회 + 상태 확인 (users) — 없음/비활성(탈퇴 포함) → USER_NOT_FOUND 404
      *   3. user_auth.password_hash(BCrypt) 조회 — 없음 → USER_NOT_FOUND 404
      *   4. 현재 비밀번호 BCrypt 검증 — 불일치 → AUTH_INVALID_PASSWORD 400
      *   5. 신규 비밀번호 정책 검증 (영문/숫자/특수문자 포함 8자 이상 → WEAK_PASSWORD 422)
      *   6. 신규 비밀번호가 현재 비밀번호와 동일한지 BCrypt 대조 — 동일 → AUTH_SAME_PASSWORD 400
      *   7. 신규 비밀번호 BCrypt 암호화 (knowledge.md: 비밀번호 원문 저장 금지)
      *   8. user_auth.password_hash 갱신
-     *   9. 기존 Refresh Token 전체 폐기 (Redis refresh:token:{userId} 삭제 — DB 커밋 확정 후)
-     *      → 비밀번호 변경 후 기존 세션으로는 재발급 불가 (knowledge.md: 비밀번호 변경 후 기존 Refresh Token 전체 폐기)
+     *   9. 로그인 세션 유지 — Refresh Token 을 폐기하지 않는다
+     *      → 변경 성공 후에도 기존 Access/Refresh Token Cookie 가 유지되어 계속 로그인 상태가 된다
+     *        (docs: 로그인 후 비밀번호 변경 — 로그아웃/Session revoke/토큰 재발급 없음)
      *
-     * Access Token 은 Stateless 이므로 만료까지 유지된다 (knowledge.md: Logout 과 동일 — JWT 구조 변경/신규 발급 없음)
+     * Access Token 은 Stateless 이므로 만료까지 유지된다 (JWT 구조 변경/신규 발급 없음)
      *
      * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
      * @param request 비밀번호 변경 요청 (currentPassword, newPassword)
