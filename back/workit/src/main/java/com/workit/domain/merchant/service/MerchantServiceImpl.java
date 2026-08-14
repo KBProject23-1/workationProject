@@ -11,12 +11,12 @@ import com.workit.domain.merchant.dto.MerchantDetailCommonResponseDTO;
 import com.workit.domain.merchant.dto.MerchantDetailReviewResponseDTO;
 import com.workit.domain.merchant.vo.MerchantErrorCode;
 import com.workit.domain.merchant.vo.MerchantVO;
+import com.workit.domain.merchant.vo.MerchantSearchCondition;
 import com.workit.domain.merchant.vo.MerchantSortType;
 import com.workit.domain.merchant.vo.MerchantDetailVO;
 import com.workit.domain.merchant.vo.MerchantProductVO;
 import com.workit.domain.review.mapper.ReviewMapper;
 import com.workit.domain.review.vo.MerchantReviewVO;
-import com.workit.domain.reservation.vo.ReservationCategory;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +36,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
@@ -59,25 +60,37 @@ public class MerchantServiceImpl implements MerchantService {
     @Transactional(readOnly = true)
     public MerchantListResponseDTO<MerchantItemResponseDTO> findMerchants(
             Long userId,
-            String category,
-            LocalDate startDate,
-            LocalDate endDate,
-            Integer headcount,
-            Long minPrice,
-            Long maxPrice,
-            MerchantSortType sort,
-            String cursor,
-            int size,
-            Long regionId
+            MerchantSearchCondition condition
     ) {
-        ReservationCategory parsedCategory = parseReservationCategory(category);
+        String category = condition.getCategory();
+        LocalDate startDate = condition.getStartDate();
+        LocalDate endDate = condition.getEndDate();
+        Integer headcount = condition.getHeadcount();
+        Long minPrice = condition.getMinPrice();
+        Long maxPrice = condition.getMaxPrice();
+        String cursor = condition.getCursor();
+        Long regionId = condition.getRegionId();
 
-        int safeSize = normalizeSize(size);
+        String parsedCategory = parseMerchantCategory(category);
+
+        int safeSize = normalizeSize(condition.getSize());
         validatePriceRange(minPrice, maxPrice);
         validateHeadcount(headcount);
-        validatePeriod(startDate, endDate);
+        validateRoomCount(condition.getRoomCount());
 
-        MerchantSortType safeSort = sort == null ? MerchantSortType.RATING_DESC : sort;
+        // 음식점·여가는 재고가 없어 날짜를 받지 않는다
+        boolean reservable = parsedCategory == null
+                || "ACCOMMODATION".equals(parsedCategory)
+                || "OFFICE".equals(parsedCategory);
+        if (reservable) {
+            validatePeriod(startDate, endDate);
+        }
+
+        int safeRoomCount = condition.getRoomCount() == null ? 1 : condition.getRoomCount();
+
+        MerchantSortType safeSort = condition.getSort() == null
+                ? MerchantSortType.RATING_DESC
+                : condition.getSort();
         int querySize = safeSize + 1;
 
         try {
@@ -90,7 +103,7 @@ public class MerchantServiceImpl implements MerchantService {
 
             List<MerchantVO> merchants = merchantMapper.selectReservationMerchantsByCursor(
                     userId,
-                    parsedCategory == null ? null : parsedCategory.name(),
+                    parsedCategory,
                     decodedCursor.cursorValue,
                     decodedCursor.cursorMerchantId,
                     querySize,
@@ -99,8 +112,14 @@ public class MerchantServiceImpl implements MerchantService {
                     endDate,
                     requiredDateCount,
                     headcount,
+                    safeRoomCount,
                     minPrice,
                     maxPrice,
+                    condition.getAccommodationType(),
+                    condition.getNoiseLevel(),
+                    condition.getFoodType(),
+                    condition.getPriceLevel(),
+                    condition.getActivityType(),
                     safeSort.name()
             );
 
@@ -359,16 +378,20 @@ public class MerchantServiceImpl implements MerchantService {
         }
     }
 
-    private ReservationCategory parseReservationCategory(String category) {
+    // 예약 유형 4탭을 모두 받는다. ReservationCategory 는 숙소·공유오피스뿐이라 쓰지 않는다
+    private static final Set<String> SEARCHABLE_CATEGORIES =
+            Set.of("ACCOMMODATION", "OFFICE", "RESTAURANT", "ACTIVITY");
+
+    private String parseMerchantCategory(String category) {
         if (!StringUtils.hasText(category)) {
             return null;
         }
 
-        try {
-            return ReservationCategory.valueOf(category.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
+        String normalized = category.trim().toUpperCase(Locale.ROOT);
+        if (!SEARCHABLE_CATEGORIES.contains(normalized)) {
             throw new BusinessException(MerchantErrorCode.INVALID_CATEGORY);
         }
+        return normalized;
     }
 
     private int normalizeSize(int size) {

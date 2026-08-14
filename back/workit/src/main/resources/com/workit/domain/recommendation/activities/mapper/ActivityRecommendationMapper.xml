@@ -122,9 +122,13 @@
                NULL AS activity_type,
                CAST(COUNT(rw.review_id) AS UNSIGNED) AS review_count,
                NULL AS difficulty,
-               1 AS reserved
+               (rd.merchant_id IS NOT NULL) AS reserved
           FROM merchants m
-          JOIN (
+          <!--
+              LEFT JOIN 이어야 한다.
+              JOIN 으로 두면 예약이 없을 때 후보가 0건이 되어 기준 장소를 고를 수 없다
+          -->
+          LEFT JOIN (
             SELECT rp.merchant_id,
                    MIN(ABS(DATEDIFF(r.start_date, #{workationStartDate}))) AS reservation_distance
               FROM reservations r
@@ -144,7 +148,8 @@
          GROUP BY m.id, m.name, m.category, m.address, m.thumbnail_url,
                   m.price, m.rating, m.latitude, m.longitude,
                   rd.reservation_distance
-         ORDER BY CASE m.category
+         ORDER BY (rd.merchant_id IS NOT NULL) DESC,
+                  CASE m.category
                      WHEN 'ACCOMMODATION' THEN 0
                      WHEN 'OFFICE' THEN 1
                      ELSE 2

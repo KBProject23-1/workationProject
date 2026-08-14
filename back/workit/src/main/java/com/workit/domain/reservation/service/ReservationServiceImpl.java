@@ -518,14 +518,20 @@ public class ReservationServiceImpl implements ReservationService {
         }
     }
 
-    // 객실과 회의실은 수량별 수용 인원을, 좌석은 상품 최대 인원을 검증
+    // 객실과 회의실은 수량별 수용 인원으로 검증한다.
+    //
+    // 좌석은 1인 1석이라 상품의 최대 인원으로 막으면 2명 이상이 예약할 수 없다.
+    // 재고를 인원만큼 차감하고 금액도 인원만큼 곱하므로(calculateReservedCount, calculateTotalAmount)
+    // 인원 상한은 validateInventories 의 남은 좌석 검증이 담당한다
     private void validateHeadcount(
             ReservationCreateRequestDTO request,
             ReservationCreateProductVO product) {
 
-        long maximumHeadcount = product.getProductDetailType() == ReservationProductDetailType.OFFICE_SEAT
-                ? product.getMaxHeadcount()
-                : (long) product.getMaxHeadcount() * request.getQuantity();
+        if (product.getProductDetailType() == ReservationProductDetailType.OFFICE_SEAT) {
+            return;
+        }
+
+        long maximumHeadcount = (long) product.getMaxHeadcount() * request.getQuantity();
         if (request.getHeadcount() > maximumHeadcount) {
             throw new BusinessException(ReservationErrorCode.RESERVATION_HEADCOUNT_EXCEEDED);
         }

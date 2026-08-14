@@ -7,7 +7,8 @@ import java.util.Locale;
 public enum MerchantSortType {
 
     RATING_DESC,
-    PRICE_ASC;
+    PRICE_ASC,
+    PRICE_DESC;
 
     public static MerchantSortType from(String value) {
         if (value == null || value.trim().isEmpty()) {
@@ -21,6 +22,8 @@ public enum MerchantSortType {
                 return RATING_DESC;
             case "PRICE_ASC":
                 return PRICE_ASC;
+            case "PRICE_DESC":
+                return PRICE_DESC;
             default:
                 throw new BusinessException(MerchantErrorCode.INVALID_SORT);
         }
