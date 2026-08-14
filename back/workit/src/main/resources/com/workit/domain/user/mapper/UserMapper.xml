@@ -150,4 +150,21 @@
           AND id != #{userId}
     </select>
 
+    <!--
+        이메일 변경 - users 이메일 갱신.
+        - email_encrypt 는 Service Layer 에서 AES-256 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - email_hash 는 Service Layer 에서 SHA-256 생성 후 전달 (검색용 hash — knowledge.md)
+        - status != 'WITHDRAWN' 조건: 조회-갱신 사이 동시 탈퇴 Race Condition 최종 방어선
+          (0 row 반환 시 Service 에서 USER_ALREADY_WITHDRAWN 처리 — updateUserPhoneNumber 와 동일)
+        - email_hash UNIQUE 충돌(동시 변경) 은 DuplicateKeyException → 409 매핑 (Service)
+        - updated_at 은 DB ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신
+    -->
+    <update id="updateUserEmail">
+        UPDATE users
+        SET email_hash    = #{emailHash},
+            email_encrypt = #{emailEncrypt}
+        WHERE id = #{userId}
+          AND status != 'WITHDRAWN'
+    </update>
+
 </mapper>

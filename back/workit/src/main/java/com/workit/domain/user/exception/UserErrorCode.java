@@ -80,7 +80,15 @@ public enum UserErrorCode implements ErrorCode {
     // 이메일 인증번호 확인 - 이미 인증 완료된 인증번호 재사용 → 400
     // (docs: 이메일 인증번호 확인 — 이미 사용된 인증번호, 재사용 방지)
     EMAIL_ALREADY_VERIFIED(HttpStatus.BAD_REQUEST,
-            "이미 인증이 완료된 인증번호입니다. 인증번호를 다시 발송해주세요.");
+            "이미 인증이 완료된 인증번호입니다. 인증번호를 다시 발송해주세요."),
+
+    // 이메일 변경 - 이메일 인증 완료 정보가 없거나(인증정보 없음) 만료되었거나 인증 완료 상태(VERIFIED)가 아님 → 400
+    // (docs: 이메일 변경 — 이메일 인증 미완료/인증정보 없음/인증정보 만료 모두 "이메일 인증 필요" 로 처리)
+    // - 이메일 변경 API 는 Request Body 를 받지 않으므로, 인증 완료 정보는 EmailVerificationStore 에서
+    //   현재 사용자(userId) 기준으로만 조회한다 — 인증 완료 상태가 아니면 변경을 거부한다
+    // - 세부 원인(미발급/만료/미인증)을 구분해 노출하지 않는다 (인증 완료 정보 재시도 유도)
+    EMAIL_VERIFICATION_REQUIRED(HttpStatus.BAD_REQUEST,
+            "이메일 인증이 필요합니다. 인증번호를 발송하고 인증을 완료해주세요.");
 
     private final HttpStatus status;
     private final String message;

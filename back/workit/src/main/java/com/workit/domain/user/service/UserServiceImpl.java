@@ -11,6 +11,7 @@ import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -405,10 +406,11 @@ public class UserServiceImpl implements UserService {
         }
 
         // 5. Mock 이메일 인증번호 발급 + 임시 저장 — Mock Email Verification Service 위임
-        //    - 6자리 숫자 인증번호 생성, 이메일별 임시 저장(TTL 5분), 같은 이메일 재발급 시 기존 인증번호 무효화
+        //    - 6자리 숫자 인증번호 생성, 사용자(userId) 기준 임시 저장(TTL 5분),
+        //      같은 사용자 재발급 시 기존 인증번호 무효화 (docs: 서버가 userId + email + 인증번호 저장)
         //    - 실제 이메일은 발송하지 않으며 개발 환경에서 [MOCK EMAIL] 로그로 인증번호를 확인한다 (docs)
         //    - 인증번호는 DB 가 아닌 Mock 임시 저장소에만 보관한다 (docs: 인증번호를 DB 에 저장할 필요 없음)
-        emailVerificationService.issueVerificationCode(normalizedEmail);
+        emailVerificationService.issueVerificationCode(userId, normalizedEmail);
 
         // 6. Audit 로그 — userId 만 기록 (이메일/인증번호 원문 로그 출력 금지 — knowledge.md)
         //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
@@ -465,12 +467,14 @@ public class UserServiceImpl implements UserService {
 
         // 4. Mock 이메일 인증번호 검증 + 인증 완료 상태 저장 — Mock Email Verification Service 위임
         //    - 인증정보 없음 → EMAIL_VERIFICATION_NOT_FOUND(400)
+        //    - 요청 이메일과 인증 세션 이메일 불일치 → EMAIL_VERIFICATION_NOT_FOUND(400)
         //    - 인증번호 만료(5분) → EMAIL_VERIFICATION_CODE_EXPIRED(400)
         //    - 이미 인증 완료된 인증번호 재사용 → EMAIL_ALREADY_VERIFIED(400)
         //    - 인증번호 불일치 → EMAIL_VERIFICATION_CODE_INVALID(400)
         //    - 성공 시 해당 이메일을 verified=true 상태로 저장 (이후 이메일 변경 API 에서 사용 — docs)
+        //    - 인증 세션은 사용자(userId) 기준으로 저장/조회한다 (docs: 서버가 userId + email + 인증번호 저장)
         //    - 인증번호는 DB 가 아닌 Mock 임시 저장소에만 보관한다 (docs)
-        emailVerificationService.confirmVerificationCode(normalizedEmail, request.getVerificationCode());
+        emailVerificationService.confirmVerificationCode(userId, normalizedEmail, request.getVerificationCode());
 
         // 5. Audit 로그 — userId 만 기록 (이메일/인증번호 원문 로그 출력 금지 — knowledge.md)
         //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
@@ -478,6 +482,81 @@ public class UserServiceImpl implements UserService {
 
         // 6. 응답 생성 — 인증 완료 여부 반환 (docs 응답 data.verified — 성공 시 true)
         return EmailVerificationConfirmResponseDTO.of(true);
+    }
+
+    @Override
+    @Transactional
+    // 이메일 변경은 하나의 Business UseCase — users UPDATE(DB 쓰기) + 인증 세션 검증/소비를
+    // 하나의 Transaction Boundary 로 관리한다 (changePhone 과 동일 — 검증은 전부 Service Layer)
+    // - 인증 세션 소비(Redis 삭제)는 DB 트랜잭션과 분리 — DB 커밋 확정 후(afterCommit) 처리한다
+    public EmailChangeResponseDTO changeEmail(Long userId) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인 (users.status) — changePhone/withdraw 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 변경 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (docs 처리 로직: 현재 로그인한 사용자 확인 → 탈퇴 사용자 거부 순서)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 이메일 인증 완료 정보 조회 — Mock Email Verification Service 위임
+        //    - Request Body 를 받지 않으므로 인증 완료된 이메일은 서버가 인증 세션(userId 기준)에서 조회한다
+        //      (docs: EmailVerificationStore 에서 인증 완료된 이메일 확인 — 프론트 전달 이메일 신뢰 금지)
+        //    - 인증정보 없음/만료/인증 미완료(VERIFIED 아님) → EMAIL_VERIFICATION_REQUIRED(400)
+        //      (docs: 모두 "이메일 인증 필요" — 세부 원인 비노출)
+        //    - 반환값은 Service 가 AES-256 복호화한 인증된 이메일 (정규화된 값)
+        String verifiedEmail = emailVerificationService.getVerifiedEmail(userId);
+
+        // 3. 인증 완료된 이메일이 현재 이메일과 동일한지 확인 — 동일 이메일로 변경 불가 (docs)
+        //    - 회원가입 시 소문자+trim 정규화되어 저장되므로 정규화된 인증 이메일과 직접 비교 가능
+        //    - 동일 이메일 → EMAIL_SAME_AS_CURRENT(400) (변경할 이메일이 없음 — docs)
+        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypt());
+        if (verifiedEmail.equals(currentEmail)) {
+            throw new BusinessException(UserErrorCode.EMAIL_SAME_AS_CURRENT);
+        }
+
+        // 4. 다른 사용자가 이미 사용 중인 이메일인지 확인 — users.email_hash (UNIQUE)
+        //    - 개인정보 원문(email_encrypt)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
+        //    - 사용 중인 이메일 → EMAIL_ALREADY_IN_USE(409) (PHONE_ALREADY_IN_USE 와 동일 패턴)
+        String emailHash = sha256Hex(verifiedEmail);
+        if (userMapper.countByEmailHashExcludingUserId(emailHash, userId) > 0) {
+            throw new BusinessException(UserErrorCode.EMAIL_ALREADY_IN_USE);
+        }
+
+        // 5. users 이메일 갱신 (AES-256 암호화본 + 검색용 SHA-256 hash — Service Layer 에서만)
+        //    - verifiedEmail 은 프론트 입력이 아닌 인증 세션에서 조회한 값 (2번에서 검증 완료)
+        //    - 사전 중복 체크(SELECT)와 실제 UPDATE 사이의 Race Condition 은
+        //      DB UNIQUE 제약(email_hash)이 최종 방어선 — DuplicateKeyException → 409 로 변환
+        //    - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴 시 0 row → USER_ALREADY_WITHDRAWN
+        String newEmailEncrypt = PersonalDataCipher.encrypt(verifiedEmail);
+        try {
+            int updated = userMapper.updateUserEmail(userId, emailHash, newEmailEncrypt);
+            if (updated == 0) {
+                throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+            }
+        } catch (DuplicateKeyException e) {
+            throw mapDuplicateKeyException(e);
+        }
+
+        // 6. 인증 세션 소비(삭제) — 동일 인증 결과로 이메일 변경 API 를 재호출할 수 없도록 한다 (docs)
+        //    - Redis 삭제는 DB 커밋 확정 후(afterCommit) 수행 (MockEmailVerificationServiceImpl 내부 처리)
+        //    - 삭제 후 동일 인증정보로 재요청하면 2번에서 EMAIL_VERIFICATION_REQUIRED(400) 로 거부된다
+        emailVerificationService.consumeVerification(userId);
+
+        // 7. Audit 로그 — userId 만 기록 (이메일 원문 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
+        log.info("이메일 변경 성공 - userId={}", userId);
+
+        // 8. 변경된 이메일 응답 (인증 세션에서 조회한 인증된 이메일)
+        return EmailChangeResponseDTO.of(verifiedEmail);
     }
 
     @Override
@@ -633,6 +712,11 @@ public class UserServiceImpl implements UserService {
             // 동일 휴대폰으로 동시 변경 요청 — PHONE_ALREADY_IN_USE 로 처리
             //   (AuthServiceImpl.mapDuplicateKeyException 의 phone UNIQUE 매핑과 동일 패턴)
             return new BusinessException(UserErrorCode.PHONE_ALREADY_IN_USE);
+        }
+        if (message.contains("ux_users_email") || message.contains("users.email_hash")) {
+            // 동일 이메일로 동시 변경 요청 — EMAIL_ALREADY_IN_USE 로 처리
+            //   (AuthServiceImpl.mapDuplicateKeyException 의 email UNIQUE 매핑과 동일 패턴)
+            return new BusinessException(UserErrorCode.EMAIL_ALREADY_IN_USE);
         }
         // 식별되지 않은 UNIQUE 충돌 — 응답에 제약조건명/테이블명 노출 금지 (knowledge.md)
         return new BusinessException(UserErrorCode.DUPLICATE_NICKNAME);

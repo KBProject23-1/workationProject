@@ -11,6 +11,7 @@ import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -71,6 +72,9 @@ class UserServiceImplTest {
 
     /** PASS 인증을 통해 변경할 새 휴대폰 번호 (프론트는 전달하지 않는다 — Provider 결과 값) */
     private static final String NEW_PHONE_NUMBER = "01098765432";
+
+    /** 이메일 인증을 완료해 변경할 새 이메일 (프론트는 전달하지 않는다 — 인증 세션에서 조회한 값) */
+    private static final String NEW_EMAIL = "new@example.com";
 
     @Mock
     private UserMapper userMapper;
@@ -1255,7 +1259,7 @@ class UserServiceImplTest {
                 userService.sendEmailVerification(501L, emailVerificationRequest("  New@Example.com  "));
 
         // Then — EmailValidator 공통 정책으로 정규화된 값이 Mock 발송 서비스로 전달된다
-        verify(emailVerificationService).issueVerificationCode("new@example.com");
+        verify(emailVerificationService).issueVerificationCode(501L, "new@example.com");
         // 응답은 인증번호를 발송한(정규화된) 이메일 (docs 응답 data.email)
         assertEquals("new@example.com", result.getEmail());
         // 인증번호는 DB 에 저장하지 않는다 (Mock 임시 저장소 사용 — docs)
@@ -1286,7 +1290,7 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, blankEx.getErrorCode());
 
         // 검증 실패 시 Mock 발송 서비스가 호출되지 않아야 한다
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1305,7 +1309,7 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, noDomainEx.getErrorCode());
 
         // 검증 실패 시 Mock 발송 서비스가 호출되지 않아야 한다
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1321,7 +1325,7 @@ class UserServiceImplTest {
 
         // 중복 조회/발송이 발생하지 않아야 한다
         verify(userMapper, never()).countByEmailHashExcludingUserId(anyString(), any());
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1337,7 +1341,7 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.EMAIL_ALREADY_IN_USE, ex.getErrorCode());
 
         // 중복 시 Mock 발송 서비스가 호출되지 않아야 한다
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1352,7 +1356,7 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
 
         // 탈퇴 회원은 이메일 검증/발송이 수행되지 않아야 한다
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1366,7 +1370,7 @@ class UserServiceImplTest {
                 () -> userService.sendEmailVerification(501L, emailVerificationRequest("new@example.com")));
         assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
 
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1382,7 +1386,7 @@ class UserServiceImplTest {
                 () -> userService.sendEmailVerification(501L, emailVerificationRequest("new@example.com")));
         assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
 
-        verify(emailVerificationService, never()).issueVerificationCode(anyString());
+        verify(emailVerificationService, never()).issueVerificationCode(any(), anyString());
     }
 
     @Test
@@ -1410,7 +1414,7 @@ class UserServiceImplTest {
 
         // Then — 두 번 모두 발송 처리된다 (같은 이메일의 기존 인증번호 폐기/재발급은
         //   Mock 발송 서비스의 저장소가 같은 key 에 덮어써 처리한다 — docs)
-        verify(emailVerificationService, times(2)).issueVerificationCode("new@example.com");
+        verify(emailVerificationService, times(2)).issueVerificationCode(501L, "new@example.com");
     }
 
     // ---------- 이메일 인증번호 확인 ----------
@@ -1434,7 +1438,7 @@ class UserServiceImplTest {
                 501L, emailVerificationConfirmRequest("  New@Example.com  ", "123456"));
 
         // Then — 정규화된 이메일과 입력 인증번호가 Mock 인증 서비스로 전달된다
-        verify(emailVerificationService).confirmVerificationCode("new@example.com", "123456");
+        verify(emailVerificationService).confirmVerificationCode(501L, "new@example.com", "123456");
         // 응답은 인증 완료 여부 (docs 응답 data.verified — 성공 시 true)
         assertTrue(result.isVerified());
     }
@@ -1466,7 +1470,7 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, blankEx.getErrorCode());
 
         // 검증 실패 시 Mock 인증 서비스가 호출되지 않아야 한다
-        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+        verify(emailVerificationService, never()).confirmVerificationCode(any(), anyString(), anyString());
     }
 
     @Test
@@ -1492,7 +1496,7 @@ class UserServiceImplTest {
         assertEquals(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID, blankCodeEx.getErrorCode());
 
         // 검증 실패 시 Mock 인증 서비스가 호출되지 않아야 한다
-        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+        verify(emailVerificationService, never()).confirmVerificationCode(any(), anyString(), anyString());
     }
 
     @Test
@@ -1507,7 +1511,7 @@ class UserServiceImplTest {
                         emailVerificationConfirmRequest("new.example.com", "123456")));
         assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, ex.getErrorCode());
 
-        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+        verify(emailVerificationService, never()).confirmVerificationCode(any(), anyString(), anyString());
     }
 
     @Test
@@ -1522,7 +1526,7 @@ class UserServiceImplTest {
                         emailVerificationConfirmRequest("new@example.com", "123456")));
         assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
 
-        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+        verify(emailVerificationService, never()).confirmVerificationCode(any(), anyString(), anyString());
     }
 
     @Test
@@ -1537,7 +1541,7 @@ class UserServiceImplTest {
                         emailVerificationConfirmRequest("new@example.com", "123456")));
         assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
 
-        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+        verify(emailVerificationService, never()).confirmVerificationCode(any(), anyString(), anyString());
     }
 
     @Test
@@ -1554,7 +1558,7 @@ class UserServiceImplTest {
                         emailVerificationConfirmRequest("new@example.com", "123456")));
         assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
 
-        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+        verify(emailVerificationService, never()).confirmVerificationCode(any(), anyString(), anyString());
     }
 
     @Test
@@ -1570,6 +1574,203 @@ class UserServiceImplTest {
         // Then — 이메일(개인정보)/인증번호(1회성 인증값)는 로그/toString 노출 금지 (knowledge.md)
         assertFalse(text.contains("secret@example.com"));
         assertFalse(text.contains("123456"));
+    }
+
+    // ---------- 이메일 변경 ----------
+
+    @Test
+    @DisplayName("이메일 변경 성공 - 인증 완료된 이메일로 users UPDATE + 인증 세션 소비 + updatedEmail 반환")
+    void changeEmail_success() {
+        // Given — ACTIVE 회원 (현재 이메일: user@example.com) + 인증 완료된 새 이메일
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L)).thenReturn(NEW_EMAIL);
+        when(userMapper.countByEmailHashExcludingUserId(sha256Hex(NEW_EMAIL), 501L)).thenReturn(0);
+        when(userMapper.updateUserEmail(eq(501L), anyString(), anyString())).thenReturn(1);
+
+        // When
+        EmailChangeResponseDTO result = userService.changeEmail(501L);
+
+        // Then — 변경된 이메일 응답 (인증 세션에서 조회한 값 — 프론트 전달 값 아님)
+        assertEquals(NEW_EMAIL, result.getUpdatedEmail());
+
+        // 인증 완료된 이메일 조회를 EmailVerificationService 로 위임 (Request Body 없음 — docs)
+        verify(emailVerificationService).getVerifiedEmail(501L);
+        // 다른 사용자 중복 조회는 SHA-256 hash 로만 수행 (원문 조회 금지)
+        verify(userMapper).countByEmailHashExcludingUserId(sha256Hex(NEW_EMAIL), 501L);
+
+        // users UPDATE — hash(SHA-256) + encrypt(AES-256) 모두 Service Layer 에서 생성해 전달
+        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> encryptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userMapper).updateUserEmail(eq(501L), hashCaptor.capture(), encryptCaptor.capture());
+        assertEquals(sha256Hex(NEW_EMAIL), hashCaptor.getValue());
+        // AES-GCM 은 매 호출 새 IV — 복호화로 원문 확인 (암호문 동일성 비교 금지)
+        assertEquals(NEW_EMAIL, PersonalDataCipher.decrypt(encryptCaptor.getValue()));
+
+        // 변경 성공 후 인증 세션 소비 (동일 인증 결과 재사용 방지 — docs)
+        verify(emailVerificationService).consumeVerification(501L);
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 인증 미완료/인증정보 없음/만료 → EMAIL_VERIFICATION_REQUIRED + UPDATE 미호출")
+    void changeEmail_verificationRequired() {
+        // Given — ACTIVE 회원 + 인증 세션 검증 실패 (EmailVerificationService 가 거부)
+        //   - 인증 미완료(verified=false) / 인증정보 없음 / 인증정보 만료 는 모두 동일 에러로 수렴된다
+        //     (세부 원인별 검증은 MockEmailVerificationServiceImplTest 에서 수행)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L))
+                .thenThrow(new BusinessException(UserErrorCode.EMAIL_VERIFICATION_REQUIRED));
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_REQUIRED, ex.getErrorCode());
+
+        // 인증 실패 시 중복 조회/UPDATE/소비가 발생하지 않아야 한다
+        verify(userMapper, never()).countByEmailHashExcludingUserId(anyString(), any());
+        verify(userMapper, never()).updateUserEmail(any(), anyString(), anyString());
+        verify(emailVerificationService, never()).consumeVerification(any());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 인증된 이메일이 현재 이메일과 동일 → EMAIL_SAME_AS_CURRENT + UPDATE 미호출")
+    void changeEmail_sameAsCurrent() {
+        // Given — ACTIVE 회원 (현재 이메일: user@example.com) + 인증 완료된 이메일도 동일 값
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L)).thenReturn(EMAIL);
+
+        // When & Then — 변경할 이메일이 없음 (docs: 현재 이메일과 동일 → 오류 처리)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.EMAIL_SAME_AS_CURRENT, ex.getErrorCode());
+
+        // 중복 조회/UPDATE/소비가 발생하지 않아야 한다
+        verify(userMapper, never()).countByEmailHashExcludingUserId(anyString(), any());
+        verify(userMapper, never()).updateUserEmail(any(), anyString(), anyString());
+        verify(emailVerificationService, never()).consumeVerification(any());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 다른 사용자가 사용 중인 이메일 → EMAIL_ALREADY_IN_USE + UPDATE 미호출")
+    void changeEmail_alreadyInUse() {
+        // Given — ACTIVE 회원 + 인증 성공 + 새 이메일이 다른 사용자에게 등록됨 (hash 기준)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L)).thenReturn(NEW_EMAIL);
+        when(userMapper.countByEmailHashExcludingUserId(sha256Hex(NEW_EMAIL), 501L)).thenReturn(1);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.EMAIL_ALREADY_IN_USE, ex.getErrorCode());
+
+        // 중복 시 UPDATE/소비가 발생하지 않아야 한다
+        verify(userMapper, never()).updateUserEmail(any(), anyString(), anyString());
+        verify(emailVerificationService, never()).consumeVerification(any());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 이미 탈퇴한 사용자 → USER_ALREADY_WITHDRAWN + 인증 조회 없음")
+    void changeEmail_alreadyWithdrawn() {
+        // Given — WITHDRAWN 상태 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(withdrawnUser());
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
+
+        // 사용자 상태 확인이 인증 조회보다 먼저 수행되므로 인증 서비스 호출이 없어야 한다
+        verify(emailVerificationService, never()).getVerifiedEmail(any());
+        verify(userMapper, never()).updateUserEmail(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 회원 없음 → USER_NOT_FOUND")
+    void changeEmail_userNotFound() {
+        // Given — Mapper 가 null 반환 (회원 없음)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(null);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserEmail(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 기타 비활성(차단 등) 회원 → USER_NOT_FOUND (계정 존재 여부 비노출)")
+    void changeEmail_blockedUser() {
+        // Given — BLOCKED 상태 회원
+        MyProfileVO blocked = activeUserWithoutProfile();
+        blocked.setStatus("BLOCKED");
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(blocked);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserEmail(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - UPDATE 영향 row 0 (조회-갱신 사이 동시 탈퇴) → USER_ALREADY_WITHDRAWN + 소비 없음")
+    void changeEmail_updateNoRows() {
+        // Given — ACTIVE 회원 + 인증 성공 + 중복 없음 + UPDATE 가 0 row 반환 (동시 탈퇴)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L)).thenReturn(NEW_EMAIL);
+        when(userMapper.countByEmailHashExcludingUserId(sha256Hex(NEW_EMAIL), 501L)).thenReturn(0);
+        when(userMapper.updateUserEmail(eq(501L), anyString(), anyString())).thenReturn(0);
+
+        // When & Then — Race Condition 최종 방어선 (WHERE status != 'WITHDRAWN')
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
+
+        // DB 갱신이 실패했으므로 인증 세션을 소비하지 않아야 한다 (재시도 가능)
+        verify(emailVerificationService, never()).consumeVerification(any());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - email_hash UNIQUE 충돌(DuplicateKeyException) → EMAIL_ALREADY_IN_USE")
+    void changeEmail_duplicateKey() {
+        // Given — ACTIVE 회원 + 인증 성공 + UPDATE 중 동시 요청으로 UNIQUE 충돌
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L)).thenReturn(NEW_EMAIL);
+        when(userMapper.countByEmailHashExcludingUserId(sha256Hex(NEW_EMAIL), 501L)).thenReturn(0);
+        when(userMapper.updateUserEmail(eq(501L), anyString(), anyString()))
+                .thenThrow(new DuplicateKeyException("users.email_hash UNIQUE constraint violated"));
+
+        // When & Then — Race Condition 방어선: 500 대신 409
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.EMAIL_ALREADY_IN_USE, ex.getErrorCode());
+
+        // DB 갱신이 실패했으므로 인증 세션을 소비하지 않아야 한다 (재시도 가능)
+        verify(emailVerificationService, never()).consumeVerification(any());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 재사용 방지 - 변경 성공 후 인증 세션 소비, 이후 동일 인증정보로 재요청 시 실패")
+    void changeEmail_reusePrevention() {
+        // Given — 첫 번째 변경 성공 (getVerifiedEmail → new@example.com),
+        //        두 번째 요청은 인증 세션이 소비된 상태 (getVerifiedEmail → EMAIL_VERIFICATION_REQUIRED)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(emailVerificationService.getVerifiedEmail(501L))
+                .thenReturn(NEW_EMAIL)
+                .thenThrow(new BusinessException(UserErrorCode.EMAIL_VERIFICATION_REQUIRED));
+        when(userMapper.countByEmailHashExcludingUserId(sha256Hex(NEW_EMAIL), 501L)).thenReturn(0);
+        when(userMapper.updateUserEmail(eq(501L), anyString(), anyString())).thenReturn(1);
+
+        // When — 첫 번째 변경 성공 + 인증 세션 소비 (동일 인증 결과 재사용 방지 — docs)
+        EmailChangeResponseDTO first = userService.changeEmail(501L);
+        assertEquals(NEW_EMAIL, first.getUpdatedEmail());
+        verify(emailVerificationService).consumeVerification(501L);
+
+        // When & Then — 두 번째 변경 요청은 인증 세션이 소비되어 EMAIL_VERIFICATION_REQUIRED 로 실패
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changeEmail(501L));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_REQUIRED, ex.getErrorCode());
     }
 
     /** SHA-256 hex 변환 — 저장될 phone_number_hash 기대값 계산 (Service 와 동일 hex 인코딩) */

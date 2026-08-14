@@ -7,6 +7,7 @@ import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -180,4 +181,30 @@ public interface UserService {
      * @return 이메일 인증 완료 여부 (성공 시 true)
      */
     EmailVerificationConfirmResponseDTO confirmEmailVerification(Long userId, EmailVerificationConfirmRequestDTO request);
+
+    /**
+     * 이메일 변경 — 이메일 인증번호 확인을 완료한 사용자의 이메일을 인증된 이메일로 변경한다
+     *
+     * 흐름 (docs: 이메일 변경):
+     *   1. 로그인 사용자 존재/상태 확인 — 없음 → USER_NOT_FOUND(404),
+     *      이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409), 기타 비활성 → USER_NOT_FOUND(404)
+     *   2. 이메일 인증 완료 정보 조회 — EmailVerificationService.getVerifiedEmail 위임
+     *      (Request Body 를 받지 않으므로 인증 완료된 이메일은 서버가 인증 세션에서 조회한다)
+     *      - 인증정보 없음/만료/인증 미완료 → EMAIL_VERIFICATION_REQUIRED(400)
+     *   3. 인증 완료된 이메일이 현재 이메일과 동일 → EMAIL_SAME_AS_CURRENT(400)
+     *   4. 다른 사용자가 이미 사용 중인 이메일(users.email_hash UNIQUE, 본인 제외)
+     *      → EMAIL_ALREADY_IN_USE(409)
+     *   5. users.email_hash/email_encrypt 갱신 (SHA-256 + AES-256 — Service Layer)
+     *   6. 이메일 변경 성공 후 인증 세션 소비(삭제) — 동일 인증 결과 재사용 방지
+     *      (Redis 삭제는 DB 커밋 확정 후 처리)
+     *   7. 변경된 이메일 응답 (Access/Refresh Token 발급·관리 없음)
+     *
+     * 클라이언트가 이메일 주소를 전달하지 않는다 — 인증 완료된 이메일은 서버가
+     * EmailVerificationStore 에서 조회한 값만 사용한다 (docs 보안 조건: 인증하지 않은 이메일 변경 차단).
+     * 비밀번호를 다시 받지 않으며, Access/Refresh Token 을 읽거나 관리하지 않는다 (docs 주의사항).
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 변경된 이메일 (updatedEmail)
+     */
+    EmailChangeResponseDTO changeEmail(Long userId);
 }

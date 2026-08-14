@@ -12,6 +12,7 @@ import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -179,6 +180,18 @@ class UserControllerTest {
     private void stubConfirmEmailVerificationError(ErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(userService).confirmEmailVerification(anyLong(), any(EmailVerificationConfirmRequestDTO.class));
+    }
+
+    /** 이메일 변경 성공 Stub — Service 가 변경된 이메일을 반환한다 */
+    private void stubChangeEmailSuccess() {
+        when(userService.changeEmail(any()))
+                .thenReturn(EmailChangeResponseDTO.of("new@example.com"));
+    }
+
+    /** 이메일 변경 실패 Stub — UserService 가 지정 에러를 던진다 */
+    private void stubChangeEmailError(ErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(userService).changeEmail(anyLong());
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -1516,6 +1529,148 @@ class UserControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(userService, never()).confirmEmailVerification(anyLong(), any(EmailVerificationConfirmRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 이메일 변경 ----------
+
+    @Test
+    @DisplayName("이메일 변경 성공 - 200 + SUCCESS + 변경 완료 메시지 + data.updatedEmail + 토큰 Cookie 미변경")
+    void changeEmail_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 변경된 이메일을 반환한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangeEmailSuccess();
+
+        // When — Request Body 없이 이메일 변경 요청 (변경할 이메일은 서버가 인증 세션에서 조회 — docs)
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: data.updatedEmail + 변경 완료 메시지
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("이메일이 변경되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("new@example.com", data.get("updatedEmail").asText());
+
+        // Access/Refresh Token 은 발급/변경되지 않는다 — Set-Cookie 응답 헤더가 없어야 한다
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "이메일 변경 응답에는 Set-Cookie 가 없어야 한다 (토큰 발급/변경 없음)");
+
+        // Controller 는 userId 만 Service 로 위임한다 (Request Body 없음 — 인증 정보 조회/DB 접근 금지)
+        verify(userService).changeEmail(eq(501L));
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 인증 미완료/인증정보 없음/만료 → 400 + EMAIL_VERIFICATION_REQUIRED")
+    void changeEmail_verificationRequired() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 이메일 인증 필요를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangeEmailError(UserErrorCode.EMAIL_VERIFICATION_REQUIRED);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_VERIFICATION_REQUIRED", json.get("errorCode").asText());
+        assertEquals("이메일 인증이 필요합니다. 인증번호를 발송하고 인증을 완료해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 인증된 이메일이 현재 이메일과 동일 → 400 + EMAIL_SAME_AS_CURRENT")
+    void changeEmail_sameAsCurrent() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 동일 이메일 변경을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangeEmailError(UserErrorCode.EMAIL_SAME_AS_CURRENT);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_SAME_AS_CURRENT", json.get("errorCode").asText());
+        assertEquals("현재 이메일과 동일한 이메일로는 변경할 수 없습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 다른 사용자가 사용 중인 이메일 → 409 + EMAIL_ALREADY_IN_USE")
+    void changeEmail_alreadyInUse() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 이메일 중복을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangeEmailError(UserErrorCode.EMAIL_ALREADY_IN_USE);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_ALREADY_IN_USE", json.get("errorCode").asText());
+        assertEquals("이미 사용 중인 이메일입니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 이미 탈퇴한 사용자 → 409 + USER_ALREADY_WITHDRAWN")
+    void changeEmail_alreadyWithdrawn() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 탈퇴 회원 변경을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangeEmailError(UserErrorCode.USER_ALREADY_WITHDRAWN);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_ALREADY_WITHDRAWN", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 회원 없음 → 404 + USER_NOT_FOUND")
+    void changeEmail_userNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 회원 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangeEmailError(UserErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 변경 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void changeEmail_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/email"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(userService, never()).changeEmail(anyLong());
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());

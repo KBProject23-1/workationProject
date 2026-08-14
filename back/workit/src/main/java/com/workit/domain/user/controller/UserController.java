@@ -9,6 +9,7 @@ import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailChangeResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
@@ -260,6 +261,29 @@ public class UserController {
         return GlobalResponseFactory.success(
                 userService.confirmEmailVerification(userId, request),
                 "이메일 인증이 완료되었습니다.");
+    }
+
+    // 1.10 이메일 변경 (로그인 사용자 전용)
+    // - docs: 이메일 변경 (PATCH /api/v1/users/me/email)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 이메일 인증번호 확인을 완료한 사용자의 이메일을 변경한다 — 별도의 Request Body 를 받지 않으며,
+    //   변경할 이메일은 클라이언트가 전달하지 않는다 (docs 보안 조건)
+    //   서버가 EmailVerificationStore 에서 현재 사용자(userId)의 인증 완료된 이메일을 조회해 변경한다
+    // - 인증 완료 정보 조회/동일·중복 이메일 확인/DB 갱신/인증 세션 소비는
+    //   UserService → Mock Email Verification Service 에서 수행한다 (docs: API 호출 구조)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증 정보 조회/DB 접근 금지)
+    // - 인증 미완료/정보 없음/만료: EMAIL_VERIFICATION_REQUIRED(400),
+    //   현재 이메일과 동일: EMAIL_SAME_AS_CURRENT(400), 다른 사용자 사용 중: EMAIL_ALREADY_IN_USE(409),
+    //   이미 탈퇴: USER_ALREADY_WITHDRAWN(409), 회원 없음: USER_NOT_FOUND(404)
+    // - 변경 성공 후 Access/Refresh Token 을 새로 발급하지 않는다 (토큰 Cookie 변경 없음)
+    @PatchMapping("/me/email")
+    public ResponseEntity<CommonResponse<EmailChangeResponseDTO>> changeEmail(
+            @CurrentUser Long userId) {
+
+        return GlobalResponseFactory.success(
+                userService.changeEmail(userId),
+                "이메일이 변경되었습니다.");
     }
 
     // 1.7 휴대폰 번호 변경 (로그인 사용자 전용)

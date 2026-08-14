@@ -7,16 +7,14 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 
 // 이메일 인증번호 Mock 저장소 Redis 구현
 //
-// Key 규약 (knowledge.md Redis Key Convention 스타일): mock:email-verification:{emailHash}
-//   - emailHash 는 정규화된 이메일의 SHA-256 해시 — 이메일 원문을 Redis key 에 노출하지 않는다
-//     (knowledge.md: 검색용 개인정보는 hash — users.email_hash 와 동일 원칙)
+// Key 규약 (docs: "서버가 userId + email + 인증번호 저장"): mock:email-verification:{userId}
+//   - userId 는 로그인 사용자 고유 번호 — 이메일 변경 API 는 Request Body 를 받지 않으므로
+//     현재 사용자의 인증 완료 정보를 userId 로만 조회할 수 있어야 한다 (docs)
+//   - 인증 대상 이메일 원문은 key 에 노출하지 않는다 (세션 내부 AES-256 암호화본으로만 보관)
 // Value: EmailVerificationSession 을 JSON 직렬화한 문자열 (email 은 AES-256 암호화본만 보관)
 // TTL : mock.email-verification.ttl-minutes (기본 5분) — docs: 인증번호 유효시간 5분
 //
@@ -31,7 +29,7 @@ public class RedisEmailVerificationStore implements EmailVerificationStore {
     /** 이메일 인증번호 TTL 프로퍼티 키 (단위: 분, 기본 5분) */
     public static final String TTL_MINUTES_PROPERTY = "mock.email-verification.ttl.minutes";
 
-    /** knowledge.md Redis Key Convention 스타일: mock:email-verification:{emailHash} */
+    /** docs: mock:email-verification:{userId} */
     private static final String KEY_PREFIX = "mock:email-verification:";
 
     // 설정 후 스레드 안전 (JVM 당 인스턴스 하나만 사용)
@@ -50,18 +48,18 @@ public class RedisEmailVerificationStore implements EmailVerificationStore {
     }
 
     @Override
-    public void save(String email, EmailVerificationSession session) {
+    public void save(Long userId, EmailVerificationSession session) {
         try {
             redisTemplate.opsForValue()
-                    .set(key(email), OBJECT_MAPPER.writeValueAsString(session), ttl);
+                    .set(key(userId), OBJECT_MAPPER.writeValueAsString(session), ttl);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("이메일 인증번호 세션 직렬화에 실패했습니다.", e);
         }
     }
 
     @Override
-    public EmailVerificationSession find(String email) {
-        String json = redisTemplate.opsForValue().get(key(email));
+    public EmailVerificationSession find(Long userId) {
+        String json = redisTemplate.opsForValue().get(key(userId));
         if (json == null) {
             return null;
         }
@@ -74,8 +72,8 @@ public class RedisEmailVerificationStore implements EmailVerificationStore {
     }
 
     @Override
-    public void delete(String email) {
-        redisTemplate.delete(key(email));
+    public void delete(Long userId) {
+        redisTemplate.delete(key(userId));
     }
 
     @Override
@@ -84,25 +82,11 @@ public class RedisEmailVerificationStore implements EmailVerificationStore {
     }
 
     /**
-     * Redis key 생성 — 정규화된 이메일의 SHA-256 hash 사용 (이메일 원문 key 노출 금지)
-     * - users.email_hash 와 동일한 hex 인코딩 (knowledge.md: 검색용 개인정보는 hash)
+     * Redis key 생성 — 로그인 사용자 id 기반 (docs: 서버가 userId + email + 인증번호 저장)
+     * - 이메일 변경 API 는 Request Body 를 받지 않으므로 userId 로만 조회할 수 있어야 한다
+     * - 인증 대상 이메일 원문은 key 에 노출하지 않는다 (세션 내부 암호화본만 보관)
      */
-    private String key(String email) {
-        return KEY_PREFIX + sha256Hex(email);
-    }
-
-    private static String sha256Hex(String value) {
-        byte[] digest;
-        try {
-            digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 알고리즘을 사용할 수 없습니다.", e);
-        }
-        StringBuilder sb = new StringBuilder(digest.length * 2);
-        for (byte b : digest) {
-            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
-            sb.append(Character.forDigit(b & 0xF, 16));
-        }
-        return sb.toString();
+    private String key(Long userId) {
+        return KEY_PREFIX + userId;
     }
 }

@@ -108,4 +108,20 @@ public interface UserMapper {
      * @param userId    인증번호 발송을 요청한 사용자 — 본인은 중복 대상에서 제외한다
      */
     int countByEmailHashExcludingUserId(@Param("emailHash") String emailHash, @Param("userId") Long userId);
+
+    /**
+     * 이메일 변경 - users 이메일 갱신 (AES 암호화본 + 검색용 SHA-256 hash)
+     * - email_encrypt: AES-256 암호화본 (Service Layer 에서 암호화 후 전달 — Mapper 에서 암호화 금지)
+     * - email_hash: SHA-256 해시 (knowledge.md: 검색용 개인정보는 hash)
+     * - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴(Race Condition) 시 0 row 반환
+     *   (USER_ALREADY_WITHDRAWN 최종 방어선 — updateUserPhoneNumber 과 동일 패턴)
+     *
+     * @param userId        변경할 회원 번호
+     * @param emailHash     변경할 이메일의 SHA-256 hash
+     * @param emailEncrypt  변경할 이메일의 AES-256 암호화본
+     * @return 갱신된 row 수 (0 이면 이미 WITHDRAWN 상태)
+     */
+    int updateUserEmail(@Param("userId") Long userId,
+                        @Param("emailHash") String emailHash,
+                        @Param("emailEncrypt") String emailEncrypt);
 }
