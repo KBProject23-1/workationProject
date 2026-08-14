@@ -559,7 +559,7 @@ class UserControllerTest {
         //   (CommonResponse 는 NON_NULL 직렬화 — data 가 null 이면 JSON 에서 제외됨)
         JsonNode json = parse(result);
         assertEquals("SUCCESS", json.get("status").asText());
-        assertEquals("비밀번호가 성공적으로 변경되었습니다.", json.get("message").asText());
+        assertEquals("비밀번호가 변경되었습니다.", json.get("message").asText());
         assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
         assertTrue(json.get("data") == null || json.get("data").isNull());
 

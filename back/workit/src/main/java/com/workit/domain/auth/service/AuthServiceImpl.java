@@ -726,8 +726,10 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
-    // 비밀번호 변경은 user_auth UPDATE(DB 쓰기) + Redis Refresh Token 폐기의 조합이므로
-    // resetPassword 와 동일하게 트랜잭션 경계를 Service 에 두고, Redis 폐기는 DB 커밋 확정 후(afterCommit) 수행한다
+    // 비밀번호 변경은 user_auth UPDATE(DB 쓰기) 하나의 작업이므로 트랜잭션 경계를 Service 에 둔다
+    // (resetPassword 와 동일 — 검증/암호화는 전부 Service Layer 에서 수행)
+    // - docs(로그인 후 비밀번호 변경): 변경 성공 후에도 현재 로그인 세션(인증 Cookie)을 유지한다
+    //   → Refresh Token 을 폐기하지 않으며, 별도의 로그아웃/세션 revoke/토큰 재발급을 수행하지 않는다
     public void changePassword(Long userId, ChangePasswordRequestDTO request) {
 
         // 1. 요청 값 검증 (javax.validation 미사용 환경 → Service Layer 에서 수행)
@@ -740,7 +742,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 2~4. 현재 비밀번호 본인 인증 — verifyCurrentPassword 공통 로직 재사용
-        //      - 회원 존재/ACTIVE 확인 → USER_NOT_FOUND(404)
+        //      - 회원 존재/ACTIVE 확인 → USER_NOT_FOUND(404) (탈퇴/비활성 회원 포함 — 계정 존재 비노출)
         //      - 현재 비밀번호 BCrypt 검증 → 불일치 시 AUTH_INVALID_PASSWORD(400)
         //      (회원 탈퇴 등 민감 작업과 동일한 검증을 공유 — 중복 구현 금지)
         verifyCurrentPassword(userId, request.getCurrentPassword());
@@ -768,11 +770,11 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
         }
 
-        // 9. 기존 Refresh Token 전체 폐기 (knowledge.md: 비밀번호 변경 후 기존 Refresh Token 전체 폐기)
-        //    - Redis(refresh:token:{userId}) 삭제 — DB 커밋 확정 후(afterCommit) 수행
-        //      (트랜잭션 롤백 시 세션이 유지되어 사용자가 재시도할 수 있어야 한다)
-        //    - Access Token 은 Stateless 이므로 만료까지 유지된다 (JWT 구조 변경/신규 발급 없음)
-        deleteRefreshTokenAfterCommit(userId);
+        // 9. 로그인 세션 유지 (docs: 로그인 후 비밀번호 변경 — "변경 성공 후 현재 로그인 세션을 유지한다")
+        //    - Access Token / Refresh Token Cookie 를 삭제하거나 재발급하지 않으며,
+        //      로그아웃 / Session revoke / 강제 로그인 이동을 수행하지 않는다
+        //      (Access Token 은 Stateless — 만료까지 유효, Refresh Token 은 계속 재발급에 사용 가능)
+        //    - Redis(refresh:token:{userId}) 를 건드리지 않으므로 별도 afterCommit 처리가 필요 없다
 
         // 10. Audit 로그 (knowledge.md Audit Log Policy: 비밀번호 변경 기록 대상)
         //     - userId 는 민감정보가 아니며, 비밀번호 원문/해시는 로그에 포함하지 않는다
@@ -814,7 +816,7 @@ public class AuthServiceImpl implements AuthService {
     // (logout 과 동일 — Redis 는 DB 트랜잭션에 참여하지 않음)
     public void revokeAllRefreshSessions(Long userId) {
         // 모든 Refresh Token 세션 폐기 — DB 커밋 확정 후(afterCommit) 수행
-        // (changePassword 의 deleteRefreshTokenAfterCommit 패턴 재사용 — 트랜잭션 롤백 시 세션 유지)
+        // (deleteRefreshTokenAfterCommit — 트랜잭션 롤백 시 세션 유지)
         deleteRefreshTokenAfterCommit(userId);
     }
 
@@ -999,8 +1001,9 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * DB 트랜잭션이 커밋된 후(afterCommit)에만 사용자의 Refresh Token 세션을 삭제한다.
-     * - 비밀번호 변경 시 기존 Refresh Token 전체 폐기 — 트랜잭션이 진행 중일 때 Redis 를 지우면
+     * - 회원 탈퇴 등 전체 세션 폐기가 필요한 작업에서 사용한다 — 트랜잭션이 진행 중일 때 Redis 를 지우면
      *   롤백 시 세션이 사라진 상태로 남아 사용자가 재시도할 수 없게 된다.
+     * - 비밀번호 변경은 로그인 세션을 유지하므로 이 메서드를 호출하지 않는다 (docs: 로그인 후 비밀번호 변경).
      * - 실제 트랜잭션 밖(테스트 등)에서는 즉시 삭제한다 (deletePasswordResetTokenAfterCommit 과 동일 패턴).
      */
     private void deleteRefreshTokenAfterCommit(Long userId) {

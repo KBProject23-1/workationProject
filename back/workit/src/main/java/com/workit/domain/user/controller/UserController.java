@@ -129,13 +129,15 @@ public class UserController {
     }
 
     // 1.4 내 비밀번호 변경 (로그인 사용자 전용 — Auth 도메인 책임)
-    // - docs: 유저 개인정보 재설정 - 비밀번호 변경 (PATCH /api/v1/users/me/password)
+    // - docs: 로그인 후 비밀번호 변경 (PATCH /api/v1/users/me/password)
     // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
     //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
-    // - 현재 비밀번호 재입력 본인 인증/BCrypt 검증·암호화/DB 갱신/Refresh Token 전체 폐기/Audit 로그는
+    // - 현재 비밀번호 재입력 본인 인증/BCrypt 검증·암호화/DB 갱신/Audit 로그는
     //   AuthService(changePassword) 에서 수행한다 — User Domain 에 인증 로직을 구현하지 않는다
     //   (knowledge.md: Auth Domain 이 Password 검증/변경을 담당)
     // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (암호화/DB/Redis 접근 금지)
+    // - 변경 성공 후에도 로그인 세션(인증 Cookie)을 유지한다 — Access/Refresh Cookie 를 삭제·재발급하지 않고
+    //   로그아웃/Session revoke/강제 로그인 이동을 수행하지 않는다 (docs: 로그인 후 비밀번호 변경)
     // - 현재 비밀번호 불일치: AUTH_INVALID_PASSWORD(400), 동일 비밀번호: AUTH_SAME_PASSWORD(400),
     //   약한 비밀번호: WEAK_PASSWORD(422), 요청 값 누락: INVALID_PASSWORD_CHANGE_REQUEST(400),
     //   회원 없음: USER_NOT_FOUND(404)
@@ -145,7 +147,7 @@ public class UserController {
             @RequestBody ChangePasswordRequestDTO request) {
 
         authService.changePassword(userId, request);
-        return GlobalResponseFactory.success(null, "비밀번호가 성공적으로 변경되었습니다.");
+        return GlobalResponseFactory.success(null, "비밀번호가 변경되었습니다.");
     }
 
     // 1.5 회원 탈퇴 (로그인 사용자 전용)
