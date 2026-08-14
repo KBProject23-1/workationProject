@@ -18,6 +18,8 @@ public class ReservationCancellationDetailVO {
 
     private Long reservationId;
     private String reservationCode;
+    private Long merchantId;
+    private String merchantCategory;
     private String merchantName;
     private String productName;
     private ReservationProductDetailType productDetailType;

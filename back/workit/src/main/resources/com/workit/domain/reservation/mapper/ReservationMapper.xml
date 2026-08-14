@@ -346,6 +346,8 @@
                type="com.workit.domain.reservation.vo.ReservationCancellationDetailVO">
         <id property="reservationId" column="reservation_id"/>
         <result property="reservationCode" column="reservation_code"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="merchantCategory" column="merchant_category"/>
         <result property="merchantName" column="merchant_name"/>
         <result property="productName" column="product_name"/>
         <result property="productDetailType" column="product_detail_type"/>
@@ -480,6 +482,8 @@
         SELECT
             r.id AS reservation_id,
             r.reservation_code,
+            m.id AS merchant_id,
+            m.category AS merchant_category,
             m.name AS merchant_name,
             rp.product_name,
             rp.product_detail_type,
