@@ -17,6 +17,8 @@ public class ReservationCancellationDetailResponseDTO {
 
     private Long reservationId;
     private String reservationCode;
+    private Long merchantId;
+    private String merchantCategory;
     private String merchantName;
     private ReservationCancellationDetailProductResponseDTO reservationProduct;
     private LocalDate startDate;
@@ -33,6 +35,8 @@ public class ReservationCancellationDetailResponseDTO {
         return ReservationCancellationDetailResponseDTO.builder()
                 .reservationId(vo.getReservationId())
                 .reservationCode(vo.getReservationCode())
+                .merchantId(vo.getMerchantId())
+                .merchantCategory(vo.getMerchantCategory())
                 .merchantName(vo.getMerchantName())
                 .reservationProduct(ReservationCancellationDetailProductResponseDTO.from(vo))
                 .startDate(vo.getStartDate())
