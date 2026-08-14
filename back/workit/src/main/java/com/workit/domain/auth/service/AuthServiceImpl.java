@@ -739,28 +739,11 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(AuthErrorCode.INVALID_PASSWORD_CHANGE_REQUEST);
         }
 
-        // 2. JWT 로그인 사용자 조회 + 상태 확인 (users.status)
-        //    - 탈퇴/차단/미존재 회원은 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404) 로 처리
-        //      (setupPin/refreshAccessToken 과 동일 정책 — docs: 404 USER_NOT_FOUND)
-        LoginUserVO user = authMapper.findUserById(userId);
-        if (user == null || !USER_STATUS_ACTIVE.equals(user.getStatus())) {
-            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
-        }
-
-        // 3. 현재 비밀번호 hash(BCrypt) 조회 — 본인 인증용
-        //    - BCrypt 는 단방향 해시이므로 원문을 조회/복호화하지 않고 해시를 그대로 matches() 에 사용한다
-        //      (knowledge.md: 비밀번호 원문 저장 금지, 검증은 BCrypt matches)
-        String currentPasswordHash = authMapper.selectPasswordHashByUserId(userId);
-        if (currentPasswordHash == null) {
-            // user_auth 행이 없는 회원(회원 탈퇴 등 비정상 상태) → 인증 정보 없음
-            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
-        }
-
-        // 4. 현재 비밀번호 BCrypt 검증 — 본인 인증
-        //    - 불일치 → AUTH_INVALID_PASSWORD(400) (docs: "현재 비밀번호가 올바르지 않습니다.")
-        if (!PasswordEncryptor.matches(request.getCurrentPassword(), currentPasswordHash)) {
-            throw new BusinessException(AuthErrorCode.AUTH_INVALID_PASSWORD);
-        }
+        // 2~4. 현재 비밀번호 본인 인증 — verifyCurrentPassword 공통 로직 재사용
+        //      - 회원 존재/ACTIVE 확인 → USER_NOT_FOUND(404)
+        //      - 현재 비밀번호 BCrypt 검증 → 불일치 시 AUTH_INVALID_PASSWORD(400)
+        //      (회원 탈퇴 등 민감 작업과 동일한 검증을 공유 — 중복 구현 금지)
+        verifyCurrentPassword(userId, request.getCurrentPassword());
 
         // 5. 신규 비밀번호 정책 검증 — 영문/숫자/특수문자 포함 8자 이상 (docs: WEAK_PASSWORD 422)
         //    - resetPassword 와 동일한 정책 재사용 (프로젝트 공통 비밀번호 규칙)
@@ -768,7 +751,9 @@ public class AuthServiceImpl implements AuthService {
 
         // 6. 신규 비밀번호가 현재 비밀번호와 동일한지 확인 (docs: AUTH_SAME_PASSWORD 400)
         //    - BCrypt matches() 검증이므로 비밀번호 원문을 조회/복호화하지 않는다 (원문 저장 금지)
+        //    - verifyCurrentPassword 가 검증한 현재 hash 를 재조회해 대조한다 (동일 트랜잭션 내 단순 재조회)
         //    - resetPin 의 SAME_AS_CURRENT_PIN 대조 방식과 동일 패턴
+        String currentPasswordHash = authMapper.selectPasswordHashByUserId(userId);
         if (PasswordEncryptor.matches(request.getNewPassword(), currentPasswordHash)) {
             throw new BusinessException(AuthErrorCode.AUTH_SAME_PASSWORD);
         }
@@ -792,6 +777,45 @@ public class AuthServiceImpl implements AuthService {
         // 10. Audit 로그 (knowledge.md Audit Log Policy: 비밀번호 변경 기록 대상)
         //     - userId 는 민감정보가 아니며, 비밀번호 원문/해시는 로그에 포함하지 않는다
         log.info("비밀번호 변경 성공 - userId={}", userId);
+    }
+
+    @Override
+    // SELECT 만 수행하므로 읽기 전용 트랜잭션 (findId/checkPasswordResetId 와 동일)
+    @Transactional(readOnly = true)
+    public void verifyCurrentPassword(Long userId, String rawPassword) {
+
+        // 1. JWT 로그인 사용자 조회 + 상태 확인 (users.status)
+        //    - 탈퇴/차단/미존재 회원은 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404) 로 처리
+        //      (changePassword/setupPin 과 동일 정책 — docs: 404 USER_NOT_FOUND)
+        LoginUserVO user = authMapper.findUserById(userId);
+        if (user == null || !USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 현재 비밀번호 hash(BCrypt) 조회 — 본인 인증용
+        //    - BCrypt 는 단방향 해시이므로 원문을 조회/복호화하지 않고 해시를 그대로 matches() 에 사용한다
+        //      (knowledge.md: 비밀번호 원문 저장 금지, 검증은 BCrypt matches)
+        String currentPasswordHash = authMapper.selectPasswordHashByUserId(userId);
+        if (currentPasswordHash == null) {
+            // user_auth 행이 없는 회원(회원 탈퇴 등 비정상 상태) → 인증 정보 없음
+            throw new BusinessException(AuthErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 현재 비밀번호 BCrypt 검증 — 본인 인증
+        //    - 불일치 → AUTH_INVALID_PASSWORD(400) (docs: "현재 비밀번호가 올바르지 않습니다.")
+        //    - 비밀번호 원문은 로그에 출력하지 않는다 (민감정보)
+        if (!PasswordEncryptor.matches(rawPassword, currentPasswordHash)) {
+            throw new BusinessException(AuthErrorCode.AUTH_INVALID_PASSWORD);
+        }
+    }
+
+    @Override
+    // Redis 삭제(side-effect)만 수행하므로 별도 @Transactional 을 사용하지 않는다
+    // (logout 과 동일 — Redis 는 DB 트랜잭션에 참여하지 않음)
+    public void revokeAllRefreshSessions(Long userId) {
+        // 모든 Refresh Token 세션 폐기 — DB 커밋 확정 후(afterCommit) 수행
+        // (changePassword 의 deleteRefreshTokenAfterCommit 패턴 재사용 — 트랜잭션 롤백 시 세션 유지)
+        deleteRefreshTokenAfterCommit(userId);
     }
 
     @Override

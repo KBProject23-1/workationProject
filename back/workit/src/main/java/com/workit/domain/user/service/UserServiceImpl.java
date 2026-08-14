@@ -1,20 +1,27 @@
 package com.workit.domain.user.service;
 
+import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
+import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
 import com.workit.domain.user.mapper.UserMapper;
 import com.workit.domain.user.vo.MyProfileVO;
 import com.workit.domain.user.vo.UserProfileVO;
+import com.workit.domain.wallet.exception.WalletErrorCode;
+import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
+import com.workit.exception.CommonErrorCode;
 import com.workit.global.util.PersonalDataCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
 
 // User 도메인 Service 구현체
 // - 검증/복호화/트랜잭션 경계는 전부 Service Layer 에서 수행 (Controller/Mapper 에서 금지)
@@ -26,8 +33,17 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
 
+    // 비밀번호 검증/Refresh 세션 revoke 는 Auth 도메인 책임 — Service 위임 (knowledge.md: User Domain 에 인증 로직 금지)
+    private final AuthService authService;
+
+    // 지갑 잔액 조회는 Wallet 도메인 책임 — Service 위임 (WalletMapper 직접 호출 금지)
+    private final WalletService walletService;
+
     /** 회원 서비스 이용 가능 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
+
+    /** 회원 탈퇴 상태 (knowledge.md Withdrawal Policy: users.status = WITHDRAWN) */
+    private static final String USER_STATUS_WITHDRAWN = "WITHDRAWN";
 
     /** user_profile.nickname VARCHAR(50) — 초과 시 DB 오류(500) 대신 400 으로 처리 */
     private static final int NICKNAME_MAX_LENGTH = 50;
@@ -178,6 +194,71 @@ public class UserServiceImpl implements UserService {
 
         // 6. Audit 로그 — userId 만 기록 (닉네임/회사명 등 로그 출력 금지 — knowledge.md)
         log.info("프로필 수정 성공 - userId={}", userId);
+    }
+
+    @Override
+    @Transactional
+    // 회원 탈퇴는 하나의 Business UseCase — users UPDATE(DB 쓰기) 하나이지만
+    // 검증(비밀번호/잔액)과 상태 변경을 하나의 Transaction Boundary 로 관리한다
+    // (knowledge.md Transaction Rules — Redis 세션 revoke 는 DB 트랜잭션과 분리: afterCommit)
+    public void withdraw(Long userId, UserWithdrawalRequestDTO request) {
+
+        // 1. 요청 값 검증 — password 필수 (null/빈 값 → 400)
+        //    (javax.validation 미사용 환경 → Service Layer 에서 수행 — ChangePasswordRequestDTO 와 동일)
+        //    - 비밀번호 원문은 로그에 출력하지 않는다 (민감정보)
+        if (request == null || isBlank(request.getPassword())) {
+            throw new BusinessException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+
+        // 2. 로그인 사용자 존재 + 상태 확인 (users.status)
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (재탈퇴 차단 — 상태 충돌)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (getMyProfile/changePassword 와 동일 정책)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 현재 비밀번호 검증 — Auth 도메인 위임 (BCrypt matches, 불일치 → AUTH_INVALID_PASSWORD 400)
+        //    - changePassword 와 동일한 검증 로직을 재사용한다 (중복 구현 금지)
+        //    - 비밀번호 검증 전에 잔액/탈퇴 여부를 노출하지 않아 본인 확인 우선 (민감 작업 정책)
+        authService.verifyCurrentPassword(userId, request.getPassword());
+
+        // 4. 전자지갑 잔액 확인 — Wallet 도메인 위임 (순수 조회, 생성/변경 부작용 없음)
+        //    - 잔액이 0 보다 크면 탈퇴 차단 → WALLET_BALANCE_REMAINING(409)
+        //      (BigDecimal.compareTo 사용 — knowledge.md: 금액 비교는 compareTo)
+        //    - 지갑 미존재/잔액 NULL 은 0 으로 간주 (탈퇴 허용)
+        //    - 잔액을 환불하거나 0 으로 만들지 않는다
+        BigDecimal balance = walletService.getBalance(userId);
+        if (balance != null && balance.compareTo(BigDecimal.ZERO) > 0) {
+            throw new BusinessException(WalletErrorCode.WALLET_BALANCE_REMAINING);
+        }
+
+        // 5. users.status = WITHDRAWN + deleted_at 기록 (Soft Delete)
+        //    - 금융 거래/결제/지갑 데이터는 삭제하지 않는다 (users 테이블만 UPDATE)
+        //    - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴 요청(Race Condition)이면
+        //      0 row 반환 → USER_ALREADY_WITHDRAWN(409) 로 최종 방어
+        int updated = userMapper.updateUserStatusToWithdrawn(userId);
+        if (updated == 0) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+
+        // 6. 모든 Refresh Token 세션 revoke — Auth 도메인 위임
+        //    - Redis(refresh:token:{userId}) 삭제 — DB 커밋 확정 후(afterCommit) 수행
+        //      (Redis 는 DB 트랜잭션과 동일한 트랜잭션으로 취급하지 않는 기존 정책)
+        //    - Access Token 은 Stateless — Access Token Blacklist 미사용 (만료까지 유지)
+        authService.revokeAllRefreshSessions(userId);
+
+        // 7. Audit 로그 (knowledge.md Audit Log Policy: 회원 탈퇴 기록 대상)
+        //    - userId 만 기록 — 비밀번호/토큰/개인정보 원문은 로그에 포함하지 않는다
+        log.info("회원 탈퇴 성공 - userId={}", userId);
     }
 
     /**

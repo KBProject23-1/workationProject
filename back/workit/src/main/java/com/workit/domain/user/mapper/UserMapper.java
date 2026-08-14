@@ -55,4 +55,16 @@ public interface UserMapper {
      * @return UPDATE 된 row 수 (0 이면 대상 프로필 없음)
      */
     int updateUserProfile(UserProfileVO userProfile);
+
+    /**
+     * 회원 탈퇴 - users 상태 WITHDRAWN 전환 + deleted_at 기록 (Soft Delete)
+     * - status = 'WITHDRAWN', deleted_at = 탈퇴 시각 (NOW()), updated_at 갱신
+     * - WHERE status != 'WITHDRAWN' — 이미 탈퇴된 회원은 갱신 대상에서 제외
+     *   (조회(SELECT)와 갱신(UPDATE) 사이 동시 요청으로 인한 중복 탈퇴 Race Condition 방어선)
+     * - 금융 거래/결제/지갑 데이터는 삭제하지 않는다 (UserMapper 는 users 테이블만 담당)
+     *
+     * @param userId 탈퇴 처리할 회원 번호
+     * @return 갱신된 row 수 (0 이면 이미 WITHDRAWN 상태)
+     */
+    int updateUserStatusToWithdrawn(@Param("userId") Long userId);
 }

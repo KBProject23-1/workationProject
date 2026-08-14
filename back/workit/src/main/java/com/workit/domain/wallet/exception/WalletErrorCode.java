@@ -22,7 +22,12 @@ public enum WalletErrorCode implements ErrorCode {
     WALLET_INVALID_REFUND_AMOUNT(HttpStatus.BAD_REQUEST, "환불 금액이 올바르지 않습니다."),
     WALLET_INSUFFICIENT_ACCOUNT_BALANCE(HttpStatus.BAD_REQUEST, "계좌 잔액이 부족합니다."),
     WALLET_INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "환불 가능한 잔액이 부족합니다."),
-    WALLET_ACCOUNT_STATE_INVALID(HttpStatus.BAD_REQUEST, "계좌 상태가 유효하지 않습니다.");
+    WALLET_ACCOUNT_STATE_INVALID(HttpStatus.BAD_REQUEST, "계좌 상태가 유효하지 않습니다."),
+
+    // 회원 탈퇴 - 전자지갑 잔액이 0 보다 커서 탈퇴 불가 → 409
+    // (knowledge.md ErrorCode Convention: WALLET_BALANCE_REMAINING — 상태 충돌 409)
+    // - 잔액 환불/0 원 처리 없이 탈퇴를 차단한다 (탈퇴 시 잔액 처리 정책은 별도)
+    WALLET_BALANCE_REMAINING(HttpStatus.CONFLICT, "전자지갑에 남은 잔액이 있어 회원탈퇴를 진행할 수 없습니다. 잔액을 모두 소진하거나 환불한 후 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String message;

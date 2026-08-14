@@ -7,12 +7,16 @@ import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
+import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
 import com.workit.domain.user.service.UserService;
+import com.workit.domain.wallet.exception.WalletErrorCode;
 import com.workit.exception.BusinessException;
+import com.workit.exception.CommonErrorCode;
 import com.workit.exception.CommonExceptionAdvice;
+import com.workit.exception.ErrorCode;
 import com.workit.security.CurrentUserArgumentResolver;
 import com.workit.security.WorkitPrincipal;
 import org.junit.jupiter.api.AfterEach;
@@ -40,6 +44,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -63,7 +68,9 @@ class UserControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService, authService))
+        // Cookie Secure/SameSite 는 @Value 파라미터 — Cookie Secure 속성 검증을 위해
+        // 운영 기준(true, Lax) 사용 (AuthControllerTest 의 standaloneSetup 과 동일 패턴)
+        mockMvc = MockMvcBuilders.standaloneSetup(new UserController(userService, authService, true, "Lax"))
                 .setControllerAdvice(new CommonExceptionAdvice())
                 // @CurrentUser Long userId 파라미터 해석용 — 운영에서는 ServletConfig 가 등록한다
                 .setCustomArgumentResolvers(new CurrentUserArgumentResolver())
@@ -117,6 +124,12 @@ class UserControllerTest {
     private void stubChangePasswordError(AuthErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(authService).changePassword(anyLong(), any(ChangePasswordRequestDTO.class));
+    }
+
+    /** 회원 탈퇴 실패 Stub — UserService 가 지정 에러를 던진다 */
+    private void stubWithdrawError(ErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(userService).withdraw(anyLong(), any(UserWithdrawalRequestDTO.class));
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -608,6 +621,170 @@ class UserControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(authService, never()).changePassword(anyLong(), any(ChangePasswordRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 회원 탈퇴 ----------
+
+    @Test
+    @DisplayName("회원 탈퇴 성공 - 200 + SUCCESS + 탈퇴 완료 메시지 + Access/Refresh Token Cookie 즉시 만료(Max-Age=0)")
+    void withdraw_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 는 정상 탈퇴를 허용한다 (void — 별도 Stub 불필요)
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When — 현재 비밀번호 재확인 요청
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: data null + 탈퇴 완료 메시지
+        //   (CommonResponse 는 NON_NULL 직렬화 — data 가 null 이면 JSON 에서 제외됨)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("회원탈퇴가 정상적으로 처리되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+
+        // Set-Cookie 2개 — accessToken + refreshToken 모두 즉시 만료 (logout 과 동일: Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "탈퇴 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
+        for (String setCookie : setCookies) {
+            assertTrue(setCookie.contains("="), "쿠키명/값: " + setCookie);
+            assertTrue(setCookie.contains("Max-Age=0"), "Max-Age 속성: " + setCookie);
+            assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
+            assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
+            assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
+            assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+        }
+        assertTrue(setCookies.stream().anyMatch(c -> c.startsWith("accessToken=")),
+                "accessToken Cookie 가 포함되어야 한다: " + setCookies);
+        assertTrue(setCookies.stream().anyMatch(c -> c.startsWith("refreshToken=")),
+                "refreshToken Cookie 가 포함되어야 한다: " + setCookies);
+
+        // Controller 는 userId 와 요청을 Service 로 위임만 한다 (비밀번호 비교/DB/Redis 금지)
+        verify(userService).withdraw(eq(501L), any(UserWithdrawalRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 - password 누락 → 400 + COMMON_INVALID_REQUEST")
+    void withdraw_missingPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 필수 값 누락을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubWithdrawError(CommonErrorCode.COMMON_INVALID_REQUEST);
+
+        // When — password 없는 본문
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("COMMON_INVALID_REQUEST", json.get("errorCode").asText());
+        assertEquals("요청 값이 올바르지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 - 비밀번호 불일치 → 400 + AUTH_INVALID_PASSWORD")
+    void withdraw_wrongPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 현재 비밀번호 불일치를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubWithdrawError(AuthErrorCode.AUTH_INVALID_PASSWORD);
+
+        // When
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"wrong-password!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_INVALID_PASSWORD", json.get("errorCode").asText());
+        assertEquals("현재 비밀번호가 올바르지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 - 지갑 잔액 잔존 → 409 + WALLET_BALANCE_REMAINING")
+    void withdraw_balanceRemaining() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 잔액 잔존으로 탈퇴를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubWithdrawError(WalletErrorCode.WALLET_BALANCE_REMAINING);
+
+        // When
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("WALLET_BALANCE_REMAINING", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 - 이미 탈퇴 상태 → 409 + USER_ALREADY_WITHDRAWN")
+    void withdraw_alreadyWithdrawn() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 이미 탈퇴 상태를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubWithdrawError(UserErrorCode.USER_ALREADY_WITHDRAWN);
+
+        // When
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_ALREADY_WITHDRAWN", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 - 회원 없음 → 404 + USER_NOT_FOUND")
+    void withdraw_userNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 회원 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubWithdrawError(UserErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원 탈퇴 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void withdraw_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(delete("/api/v1/users/me")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(userService, never()).withdraw(anyLong(), any(UserWithdrawalRequestDTO.class));
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());

@@ -6,6 +6,8 @@ import com.workit.domain.wallet.vo.WalletVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+
 /**
  * 지갑 라이프사이클(생성/조회) 담당.
  * 충전/환불 등 결제 오케스트레이션은 payment 도메인(PaymentService)으로 이관됨.
@@ -32,5 +34,12 @@ public class WalletServiceImpl implements WalletService {
             wallet = walletMapper.findByUserId(userId);
         }
         return WalletResponse.from(wallet);
+    }
+
+    @Override
+    // 잔액 순수 조회 — 지갑 미존재 시 null 반환 (생성 부작용 없음, 회원 탈퇴 잔액 검증용)
+    public BigDecimal getBalance(Long userId) {
+        WalletVO wallet = walletMapper.findByUserId(userId);
+        return wallet == null ? null : wallet.getBalance();
     }
 }

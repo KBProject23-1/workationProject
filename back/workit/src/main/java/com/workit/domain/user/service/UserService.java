@@ -2,6 +2,7 @@ package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
+import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 
@@ -57,4 +58,27 @@ public interface UserService {
      * @param request 프로필 수정 요청 (nickname/companyName 중 하나 이상)
      */
     void updateProfile(Long userId, ProfileUpdateRequestDTO request);
+
+    /**
+     * 회원 탈퇴 — 로그인 사용자가 현재 비밀번호를 재확인한 뒤 Soft Delete 처리
+     *
+     * 흐름 (knowledge.md Withdrawal Policy):
+     *   1. 요청 값 검증 — password 필수 (null/빈 값 → COMMON_INVALID_REQUEST 400)
+     *   2. 로그인 사용자 존재/상태 확인 — 없음 → USER_NOT_FOUND(404),
+     *      이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409), 기타 비활성 → USER_NOT_FOUND(404)
+     *   3. 현재 비밀번호 검증 — AuthService.verifyCurrentPassword 위임
+     *      (BCrypt matches — 불일치 → AUTH_INVALID_PASSWORD 400)
+     *   4. 전자지갑 잔액 확인 — WalletService.getBalance 위임,
+     *      잔액 > 0 → WALLET_BALANCE_REMAINING(409) 으로 탈퇴 차단 (BigDecimal.compareTo)
+     *   5. users.status = WITHDRAWN + deleted_at 기록 (Soft Delete)
+     *   6. 모든 Refresh Token 세션 revoke — AuthService.revokeAllRefreshSessions 위임
+     *      (Redis 는 DB 트랜잭션과 분리 — DB 커밋 확정 후 처리)
+     *
+     * 금융 거래/결제/지갑 데이터는 삭제하지 않는다. 잔액 환불/0 원 처리도 하지 않는다.
+     * 비밀번호 원문은 로그에 출력하지 않는다.
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 회원 탈퇴 요청 (password 필수)
+     */
+    void withdraw(Long userId, UserWithdrawalRequestDTO request);
 }
