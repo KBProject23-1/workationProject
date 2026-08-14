@@ -81,12 +81,4 @@ public class TransactionController {
         return GlobalResponseFactory.created(deadlockRetrier.execute(() -> paymentService.pay(userId, requestBody)));
     }
 
-    /** 거래 내역 취소(환불) */
-    @PatchMapping("/api/v1/transactions/{transactionId}/cancel")
-    public ResponseEntity<CommonResponse<CancelResponse>> cancelTransaction(
-            @PathVariable Long transactionId,
-            @CurrentUser Long userId
-    ) {
-        return GlobalResponseFactory.success(deadlockRetrier.execute(() -> paymentService.cancelPayment(userId, transactionId)));
-    }
 }
