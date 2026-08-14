@@ -95,4 +95,17 @@ public interface UserMapper {
     int updateUserPhoneNumber(@Param("userId") Long userId,
                               @Param("phoneNumberHash") String phoneNumberHash,
                               @Param("phoneNumberEncrypt") String phoneNumberEncrypt);
+
+    /**
+     * 이메일 인증번호 발송 - 이메일(SHA-256 hash) 중복 조회 (자기 자신 제외)
+     * - users.email_hash (UNIQUE) 대상
+     * - 인증번호를 받을 이메일이 다른 사용자에게 이미 등록되어 있는지 확인
+     *   (개인정보 원문(email_encrypt)은 조회하지 않는다 — knowledge.md: 검색용 hash,
+     *    AuthMapper.countByEmailHash 와 동일 원칙)
+     * - 반환값이 0 초과면 다른 사용자가 사용 중인 이메일 (EMAIL_ALREADY_IN_USE 판단은 Service)
+     *
+     * @param emailHash 인증번호를 받을 이메일의 SHA-256 hash (Service Layer 에서 생성)
+     * @param userId    인증번호 발송을 요청한 사용자 — 본인은 중복 대상에서 제외한다
+     */
+    int countByEmailHashExcludingUserId(@Param("emailHash") String emailHash, @Param("userId") Long userId);
 }

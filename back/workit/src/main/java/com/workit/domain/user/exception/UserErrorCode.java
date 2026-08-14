@@ -39,7 +39,28 @@ public enum UserErrorCode implements ErrorCode {
     // 휴대폰 번호 변경 - PASS 인증된 휴대폰 번호가 이미 다른 사용자에게 등록되어 있음 → 409
     // (knowledge.md: 409 CONFLICT - 중복 데이터 — users.phone_number_hash UNIQUE,
     //  회원가입 시 동일 휴대폰 중복을 DUPLICATE_USER(409) 로 처리하는 정책과 동일)
-    PHONE_ALREADY_IN_USE(HttpStatus.CONFLICT, "이미 사용 중인 휴대폰 번호입니다.");
+    PHONE_ALREADY_IN_USE(HttpStatus.CONFLICT, "이미 사용 중인 휴대폰 번호입니다."),
+
+    // 이메일 인증번호 발송 - email 누락/형식 오류 → 400
+    // (docs: 이메일 인증번호 발송 — 이메일 누락, 이메일 형식이 올바르지 않음 → 400,
+    //  INVALID_PROFILE_REQUEST(400) 와 동일한 INVALID_*_REQUEST 규약 — javax.validation 미사용 환경,
+    //  검증은 Service Layer 에서 EmailValidator 공통 정책으로 수행)
+    INVALID_EMAIL_REQUEST(HttpStatus.BAD_REQUEST, "이메일을 확인해주세요."),
+
+    // 이메일 인증번호 발송 - 현재 사용자의 이메일과 동일한 이메일 → 400
+    // (docs: 현재 이메일과 동일한 이메일 → 400 — 휴대폰 번호 변경의
+    //  PHONE_SAME_AS_CURRENT(400) 와 동일 패턴)
+    EMAIL_SAME_AS_CURRENT(HttpStatus.BAD_REQUEST, "현재 이메일과 동일한 이메일로는 변경할 수 없습니다."),
+
+    // 이메일 인증번호 발송 - 다른 사용자가 이미 사용 중인 이메일 → 409
+    // (knowledge.md: 409 CONFLICT - 중복 데이터 — users.email_hash UNIQUE,
+    //  휴대폰 번호 변경의 PHONE_ALREADY_IN_USE(409) 와 동일 패턴)
+    EMAIL_ALREADY_IN_USE(HttpStatus.CONFLICT, "이미 사용 중인 이메일입니다."),
+
+    // 이메일 인증번호 발송 - 인증번호 생성/임시 저장 실패 → 500
+    // (docs: 인증번호 발급 실패 — Mock 저장소(Redis) 오류 등 발급이 완료되지 못한 경우)
+    EMAIL_VERIFICATION_SEND_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
+            "이메일 인증번호 발급에 실패했습니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String message;

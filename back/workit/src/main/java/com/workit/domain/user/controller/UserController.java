@@ -3,10 +3,12 @@ package com.workit.domain.user.controller;
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
@@ -210,6 +212,29 @@ public class UserController {
 
         userService.verifyAccountPassword(userId, request);
         return GlobalResponseFactory.success(null, "비밀번호가 확인되었습니다.");
+    }
+
+    // 1.8 이메일 인증번호 발송 (로그인 사용자 전용)
+    // - docs: 이메일 인증번호 발송 (POST /api/v1/users/me/email/verification)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 이메일 변경 전, 변경할 새 이메일로 인증번호를 발송한다 — 실제 이메일은 발송하지 않으며
+    //   Mock 방식으로 인증번호를 생성해 임시 저장하고 [MOCK EMAIL] 로그로 확인한다 (개발 환경)
+    // - 사용자 확인/탈퇴 거부/이메일 형식 검증/동일 이메일/중복 이메일/인증번호 발급은
+    //   UserService → Mock Email Verification Service 에서 수행한다 (docs: API 호출 구조)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증번호 생성/저장 금지)
+    // - email 누락/형식 오류: INVALID_EMAIL_REQUEST(400), 현재 이메일과 동일: EMAIL_SAME_AS_CURRENT(400),
+    //   다른 사용자 사용 중: EMAIL_ALREADY_IN_USE(409), 이미 탈퇴: USER_ALREADY_WITHDRAWN(409),
+    //   회원 없음: USER_NOT_FOUND(404), 발급 실패: EMAIL_VERIFICATION_SEND_FAILED(500)
+    // - 응답 data 는 발송한 email (docs: 인증번호 자체는 응답에 포함하지 않으며 로그로만 확인 — 운영 환경 미포함)
+    @PostMapping("/me/email/verification")
+    public ResponseEntity<CommonResponse<EmailVerificationResponseDTO>> sendEmailVerification(
+            @CurrentUser Long userId,
+            @RequestBody EmailVerificationRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                userService.sendEmailVerification(userId, request),
+                "이메일 인증번호가 발송되었습니다.");
     }
 
     // 1.7 휴대폰 번호 변경 (로그인 사용자 전용)

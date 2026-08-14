@@ -5,10 +5,12 @@ import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
@@ -20,6 +22,7 @@ import com.workit.domain.wallet.exception.WalletErrorCode;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
 import com.workit.exception.CommonErrorCode;
+import com.workit.global.util.EmailValidator;
 import com.workit.global.util.PersonalDataCipher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +55,12 @@ public class UserServiceImpl implements UserService {
     // - identityVerificationId 검증/세션 상태(VERIFIED)/만료/사용 완료 판단을 Provider 에 위임한다
     //   (AuthServiceImpl.signup/findId/resetPin 과 동일한 검증 로직 재사용)
     private final IdentityVerificationProvider identityVerificationProvider;
+
+    // 이메일 인증번호 발급/임시 저장은 Mock Email Verification Service 위임 (docs: API 호출 구조)
+    // - 인증번호 생성 + [MOCK EMAIL] 로그 출력(개발 환경)은 EmailVerificationService 가 담당하고,
+    //   임시 저장/TTL/재발급 무효화는 내부적으로 EmailVerificationStore 가 담당한다
+    //   (실제 이메일 서비스 연동 시 구현체 교체 — UserService 는 인터페이스에만 의존)
+    private final EmailVerificationService emailVerificationService;
 
     /** 회원 서비스 이용 가능 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
@@ -339,6 +348,73 @@ public class UserServiceImpl implements UserService {
 
         // 10. 변경된 휴대폰 번호 응답 (PASS 인증으로 변경된 인증된 번호)
         return PhoneChangeResponseDTO.of(verifiedPhoneNumber);
+    }
+
+    @Override
+    // SELECT 만 수행하고 Redis 임시 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
+    // 읽기 전용 트랜잭션 (getMyProfile 과 동일 — MockEmailVerificationServiceImpl 은 별도 트랜잭션 없음)
+    @Transactional(readOnly = true)
+    public EmailVerificationResponseDTO sendEmailVerification(Long userId, EmailVerificationRequestDTO request) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인 (users.status) — changePhone/withdraw 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 인증번호 발송 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (docs 처리 로직: 현재 로그인한 사용자 확인 → 탈퇴 사용자 거부 → 이메일 검증 순서)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 요청 이메일 검증 + 정규화 — 필수(null/빈 값) + 형식 (EmailValidator 공통 정책)
+        //    - 실패 시 INVALID_EMAIL_REQUEST(400) (docs: 이메일 누락/이메일 형식 오류)
+        //    - EmailValidator.normalize: trim → 최대 길이 → lowercase → 형식 검증 (signup/check-email 과 동일)
+        //    - 이메일 원문은 로그에 출력하지 않는다 (민감정보)
+        if (request == null || isBlank(request.getEmail())) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+        String normalizedEmail;
+        try {
+            normalizedEmail = EmailValidator.normalize(request.getEmail());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+
+        // 3. 현재 사용자의 이메일과 동일한지 확인 (docs: 현재 이메일과 동일한 이메일 → 400)
+        //    - 회원가입 시 소문자+trim 정규화되어 저장되므로 정규화 값과 직접 비교 가능
+        //    - 동일 이메일 → EMAIL_SAME_AS_CURRENT(400) (휴대폰 변경의 PHONE_SAME_AS_CURRENT 와 동일 패턴)
+        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypt());
+        if (normalizedEmail.equals(currentEmail)) {
+            throw new BusinessException(UserErrorCode.EMAIL_SAME_AS_CURRENT);
+        }
+
+        // 4. 다른 사용자가 이미 사용 중인 이메일인지 확인 — users.email_hash (UNIQUE)
+        //    - 개인정보 원문(email_encrypt)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
+        //    - 사용 중인 이메일 → EMAIL_ALREADY_IN_USE(409) (PHONE_ALREADY_IN_USE 와 동일 패턴)
+        String emailHash = sha256Hex(normalizedEmail);
+        if (userMapper.countByEmailHashExcludingUserId(emailHash, userId) > 0) {
+            throw new BusinessException(UserErrorCode.EMAIL_ALREADY_IN_USE);
+        }
+
+        // 5. Mock 이메일 인증번호 발급 + 임시 저장 — Mock Email Verification Service 위임
+        //    - 6자리 숫자 인증번호 생성, 이메일별 임시 저장(TTL 5분), 같은 이메일 재발급 시 기존 인증번호 무효화
+        //    - 실제 이메일은 발송하지 않으며 개발 환경에서 [MOCK EMAIL] 로그로 인증번호를 확인한다 (docs)
+        //    - 인증번호는 DB 가 아닌 Mock 임시 저장소에만 보관한다 (docs: 인증번호를 DB 에 저장할 필요 없음)
+        emailVerificationService.issueVerificationCode(normalizedEmail);
+
+        // 6. Audit 로그 — userId 만 기록 (이메일/인증번호 원문 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
+        log.info("이메일 인증번호 발송 성공 - userId={}", userId);
+
+        // 7. 응답 생성 — 인증번호를 발송한 이메일 반환 (docs 응답 data.email)
+        //    - 인증번호(verificationCode)는 응답에 포함하지 않는다 (docs: 운영 환경에서 인증번호 응답 미포함)
+        return EmailVerificationResponseDTO.of(normalizedEmail);
     }
 
     @Override

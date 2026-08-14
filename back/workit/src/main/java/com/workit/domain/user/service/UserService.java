@@ -1,10 +1,12 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
@@ -128,4 +130,26 @@ public interface UserService {
      * @return 변경된 휴대폰 번호 (updatedPhone)
      */
     PhoneChangeResponseDTO changePhone(Long userId, PhoneChangeRequestDTO request);
+
+    /**
+     * 이메일 인증번호 발송 — 계정 설정에서 이메일 변경 전, 변경할 새 이메일로 인증번호를 발송한다
+     *
+     * 흐름 (docs: 이메일 인증번호 발송):
+     *   1. 로그인 사용자 존재/상태 확인 — 없음 → USER_NOT_FOUND(404),
+     *      이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409), 기타 비활성 → USER_NOT_FOUND(404)
+     *   2. 요청 이메일 검증 — 필수 + 형식 (EmailValidator 공통 정책) → INVALID_EMAIL_REQUEST(400)
+     *   3. 현재 사용자의 이메일과 동일 → EMAIL_SAME_AS_CURRENT(400)
+     *   4. 다른 사용자가 이미 사용 중인 이메일(users.email_hash UNIQUE, 본인 제외)
+     *      → EMAIL_ALREADY_IN_USE(409)
+     *   5. Mock 이메일 인증번호 발급 — EmailVerificationService 위임 (6자리 숫자 생성 + 임시 저장)
+     *      - 실제 이메일은 발송하지 않으며 [MOCK EMAIL] 로그로 인증번호를 확인한다 (개발 환경)
+     *
+     * 인증번호는 DB 에 저장하지 않는다 (docs: 인증번호를 DB 에 저장할 필요 없음 — Mock 임시 저장소 사용).
+     * Access/Refresh Token 을 읽거나 관리하지 않으며 발급도 하지 않는다 (docs 보안 주의사항).
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 이메일 인증번호 발송 요청 (email 필수)
+     * @return 인증번호를 발송한 이메일 (정규화된 값 — docs 응답 data.email)
+     */
+    EmailVerificationResponseDTO sendEmailVerification(Long userId, EmailVerificationRequestDTO request);
 }

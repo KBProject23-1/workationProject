@@ -135,4 +135,19 @@
           AND status != 'WITHDRAWN'
     </update>
 
+    <!--
+        이메일 인증번호 발송 - 이메일(SHA-256 hash) 중복 조회 (자기 자신 제외).
+        - users.email_hash (UNIQUE) 대상
+        - 인증번호를 받을 이메일이 다른 사용자에게 이미 등록되어 있는지 확인 (본인은 제외)
+        - 개인정보 원문(email_encrypt)은 조회하지 않는다 (knowledge.md: 검색용 hash —
+          AuthMapper.countByEmailHash 와 동일 원칙)
+        - Mapper 는 조회만 담당 (중복 판단은 Service — EMAIL_ALREADY_IN_USE)
+    -->
+    <select id="countByEmailHashExcludingUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM users
+        WHERE email_hash = #{emailHash}
+          AND id != #{userId}
+    </select>
+
 </mapper>
