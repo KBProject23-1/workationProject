@@ -1,6 +1,7 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.auth.service.AuthService;
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
@@ -194,6 +195,44 @@ public class UserServiceImpl implements UserService {
 
         // 6. Audit 로그 — userId 만 기록 (닉네임/회사명 등 로그 출력 금지 — knowledge.md)
         log.info("프로필 수정 성공 - userId={}", userId);
+    }
+
+    @Override
+    // SELECT 만 수행하므로 읽기 전용 트랜잭션 (verifyCurrentPassword/getMyProfile 과 동일)
+    // - 재인증 성공 정보를 DB/Redis/Session 등에 저장하지 않으므로 쓰기 트랜잭션이 필요 없다
+    @Transactional(readOnly = true)
+    public void verifyAccountPassword(Long userId, AccountPasswordVerifyRequestDTO request) {
+
+        // 1. 요청 값 검증 — password 필수 (null/빈 값/공백 → 400)
+        //    (javax.validation 미사용 환경 → Service Layer 에서 수행 — withdraw 와 동일)
+        //    - 비밀번호 원문은 로그에 출력하지 않는다 (민감정보)
+        if (request == null || isBlank(request.getPassword())) {
+            throw new BusinessException(CommonErrorCode.COMMON_INVALID_REQUEST);
+        }
+
+        // 2. 로그인 사용자 존재 + 상태 확인 (users.status) — withdraw 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 재인증 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. 현재 비밀번호 검증 — Auth 도메인 위임 (BCrypt matches, 불일치 → AUTH_INVALID_PASSWORD 400)
+        //    - changePassword/withdraw 와 동일한 검증 로직을 재사용한다 (중복 구현 금지)
+        //    - 비밀번호 원문은 로그에 출력하지 않는다 (민감정보)
+        authService.verifyCurrentPassword(userId, request.getPassword());
+
+        // 4. Audit 로그 — userId 만 기록 (비밀번호 원문/토큰 로그 출력 금지 — knowledge.md)
+        //    - 재인증 성공 여부는 저장하지 않으며 Access/Refresh Token 을 건드리지 않는다
+        log.info("계정 설정 진입용 비밀번호 재인증 성공 - userId={}", userId);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.workit.domain.user.service;
 
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
@@ -81,4 +82,24 @@ public interface UserService {
      * @param request 회원 탈퇴 요청 (password 필수)
      */
     void withdraw(Long userId, UserWithdrawalRequestDTO request);
+
+    /**
+     * 계정 설정 진입용 비밀번호 재인증 — 로그인 사용자가 현재 비밀번호를 재입력해 본인임을 확인
+     *
+     * 흐름:
+     *   1. 요청 값 검증 — password 필수 (null/빈 값/공백 → COMMON_INVALID_REQUEST 400)
+     *   2. 로그인 사용자 존재/상태 확인 — 없음 → USER_NOT_FOUND(404),
+     *      이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409), 기타 비활성 → USER_NOT_FOUND(404)
+     *   3. 현재 비밀번호 검증 — AuthService.verifyCurrentPassword 위임
+     *      (BCrypt matches — 불일치 → AUTH_INVALID_PASSWORD 400)
+     *
+     * 재인증 성공 여부를 Redis/DB/Session 등에 별도로 저장하지 않으며,
+     * Access Token / Refresh Token 을 새로 발급하지 않는다 (읽거나 관리하지도 않는다).
+     * 성공 후 프론트가 계정 설정 화면으로 이동하며, 민감 작업(휴대폰/이메일/비밀번호 변경, 탈퇴)은
+     * 각 API 에서 별도의 인증 절차를 수행한다 (프론트 재인증 상태 신뢰 금지).
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 비밀번호 재인증 요청 (password 필수)
+     */
+    void verifyAccountPassword(Long userId, AccountPasswordVerifyRequestDTO request);
 }

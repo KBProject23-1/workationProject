@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
@@ -130,6 +131,12 @@ class UserControllerTest {
     private void stubWithdrawError(ErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(userService).withdraw(anyLong(), any(UserWithdrawalRequestDTO.class));
+    }
+
+    /** 비밀번호 재인증 실패 Stub — UserService 가 지정 에러를 던진다 */
+    private void stubVerifyAccountPasswordError(ErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(userService).verifyAccountPassword(anyLong(), any(AccountPasswordVerifyRequestDTO.class));
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -785,6 +792,158 @@ class UserControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(userService, never()).withdraw(anyLong(), any(UserWithdrawalRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 계정 설정 진입용 비밀번호 재인증 ----------
+
+    @Test
+    @DisplayName("비밀번호 재인증 성공 - 200 + SUCCESS + 확인 완료 메시지 + 토큰 Cookie 미변경")
+    void verifyAccountPassword_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When — 현재 비밀번호 재확인 요청
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: data null + 확인 완료 메시지
+        //   (CommonResponse 는 NON_NULL 직렬화 — data 가 null 이면 JSON 에서 제외됨)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("비밀번호가 확인되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+
+        // Access/Refresh Token 은 새로 발급/변경되지 않는다 — Set-Cookie 응답 헤더가 없어야 한다
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "재인증 응답에는 Set-Cookie 가 없어야 한다 (토큰 재발급/변경 없음)");
+
+        // Controller 는 userId 와 요청을 Service 로 위임만 한다 (비밀번호 비교/DB/Redis 금지)
+        verify(userService).verifyAccountPassword(eq(501L), any(AccountPasswordVerifyRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 비밀번호 불일치 → 400 + AUTH_INVALID_PASSWORD")
+    void verifyAccountPassword_wrongPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 현재 비밀번호 불일치를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubVerifyAccountPasswordError(AuthErrorCode.AUTH_INVALID_PASSWORD);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"wrong-password!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_INVALID_PASSWORD", json.get("errorCode").asText());
+        assertEquals("현재 비밀번호가 올바르지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - password 누락 → 400 + COMMON_INVALID_REQUEST")
+    void verifyAccountPassword_missingPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 필수 값 누락을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubVerifyAccountPasswordError(CommonErrorCode.COMMON_INVALID_REQUEST);
+
+        // When — password 없는 본문
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("COMMON_INVALID_REQUEST", json.get("errorCode").asText());
+        assertEquals("요청 값이 올바르지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - password 빈 문자열/공백 → 400 + COMMON_INVALID_REQUEST")
+    void verifyAccountPassword_blankPassword() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 공백 비밀번호를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubVerifyAccountPasswordError(CommonErrorCode.COMMON_INVALID_REQUEST);
+
+        // When — 빈 문자열 본문
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("COMMON_INVALID_REQUEST", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 이미 탈퇴한 사용자 → 409 + USER_ALREADY_WITHDRAWN")
+    void verifyAccountPassword_alreadyWithdrawn() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 이미 탈퇴 상태를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubVerifyAccountPasswordError(UserErrorCode.USER_ALREADY_WITHDRAWN);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_ALREADY_WITHDRAWN", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 회원 없음 → 404 + USER_NOT_FOUND")
+    void verifyAccountPassword_userNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 회원 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubVerifyAccountPasswordError(UserErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void verifyAccountPassword_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/account/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"password\":\"user_password123!\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(userService, never()).verifyAccountPassword(anyLong(), any(AccountPasswordVerifyRequestDTO.class));
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());

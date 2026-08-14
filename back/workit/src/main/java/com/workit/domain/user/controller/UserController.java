@@ -2,6 +2,7 @@ package com.workit.domain.user.controller;
 
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.service.AuthService;
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
@@ -186,5 +187,26 @@ public class UserController {
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, expiredRefreshCookie.toString());
 
         return GlobalResponseFactory.success(null, "회원탈퇴가 정상적으로 처리되었습니다.");
+    }
+
+    // 1.6 계정 설정 진입용 비밀번호 재인증 (로그인 사용자 전용)
+    // - docs: 계정 설정 진입용 비밀번호 재인증 (POST /api/v1/users/me/account/verify)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 현재 비밀번호 재입력 본인 확인/BCrypt 검증은 UserService(verifyAccountPassword) 에서 수행하고,
+    //   비밀번호 검증은 AuthService.verifyCurrentPassword 로 위임한다 (changePassword/withdraw 와 동일)
+    // - 재인증 성공 여부는 Redis/DB/Session 에 저장하지 않으며, Access/Refresh Token 을 새로 발급하지 않는다
+    //   (계정 설정 화면 진입 확인 용도 — knowledge.md: Sensitive Action Verification)
+    //   성공 후 프론트가 계정 설정 화면으로 이동하며, 민감 작업은 각 API 에서 별도 인증을 수행한다
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (비밀번호 비교/DB/Redis 금지)
+    // - password 누락/공백: COMMON_INVALID_REQUEST(400), 비밀번호 불일치: AUTH_INVALID_PASSWORD(400),
+    //   이미 탈퇴: USER_ALREADY_WITHDRAWN(409), 회원 없음: USER_NOT_FOUND(404)
+    @PostMapping("/me/account/verify")
+    public ResponseEntity<CommonResponse<Void>> verifyAccountPassword(
+            @CurrentUser Long userId,
+            @RequestBody AccountPasswordVerifyRequestDTO request) {
+
+        userService.verifyAccountPassword(userId, request);
+        return GlobalResponseFactory.success(null, "비밀번호가 확인되었습니다.");
     }
 }

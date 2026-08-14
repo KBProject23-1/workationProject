@@ -2,6 +2,7 @@ package com.workit.domain.user.service;
 
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
+import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
@@ -840,6 +841,132 @@ class UserServiceImplTest {
     void withdraw_requestToStringHidesSecret() {
         // Given
         UserWithdrawalRequestDTO request = withdrawalRequest("secret-password123!");
+
+        // When
+        String text = request.toString();
+
+        // Then
+        assertFalse(text.contains("secret-password123!"));
+    }
+
+    // ---------- 계정 설정 진입용 비밀번호 재인증 ----------
+
+    /** 재인증 요청 DTO 생성 헬퍼 — password 원문은 Service 가 AuthService 로 위임한다 */
+    private AccountPasswordVerifyRequestDTO verifyRequest(String password) {
+        AccountPasswordVerifyRequestDTO request = new AccountPasswordVerifyRequestDTO();
+        request.setPassword(password);
+        return request;
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 성공 - AuthService.verifyCurrentPassword 위임 + 별도 인증 세션/토큰 미생성")
+    void verifyAccountPassword_success() {
+        // Given — ACTIVE 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+
+        // When — 올바른 비밀번호 재확인
+        userService.verifyAccountPassword(501L, verifyRequest("password123!"));
+
+        // Then
+        // 1) 현재 비밀번호 검증을 AuthService 로 위임 (BCrypt 검증은 Auth 도메인 책임 — 중복 구현 금지)
+        verify(authService).verifyCurrentPassword(eq(501L), eq("password123!"));
+        // 2) 재인증은 SELECT 만 수행 — DB 쓰기(상태 변경/프로필 저장)가 없어야 한다
+        verify(userMapper, never()).updateUserStatusToWithdrawn(any());
+        verify(userMapper, never()).insertUserProfile(any(UserProfileVO.class));
+        verify(userMapper, never()).updateUserProfile(any(UserProfileVO.class));
+        // 3) Redis/세션/토큰 부수 효과 없음 — Refresh 세션 revoke 등 다른 Auth 호출이 없어야 한다
+        verify(authService, never()).revokeAllRefreshSessions(any());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 비밀번호 불일치 → AUTH_INVALID_PASSWORD 전파")
+    void verifyAccountPassword_wrongPassword() {
+        // Given — ACTIVE 회원 + AuthService 가 비밀번호 불일치를 거부
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        doThrow(new BusinessException(AuthErrorCode.AUTH_INVALID_PASSWORD))
+                .when(authService).verifyCurrentPassword(eq(501L), anyString());
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest("wrong-password!")));
+        assertEquals(AuthErrorCode.AUTH_INVALID_PASSWORD, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - password 누락/빈 값/공백 → COMMON_INVALID_REQUEST + 조회 없음")
+    void verifyAccountPassword_missingPassword() {
+        // When & Then — null 요청 / null 비밀번호 / 빈 값 / 공백 모두 검증 실패
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, null));
+        assertEquals(CommonErrorCode.COMMON_INVALID_REQUEST, nullEx.getErrorCode());
+
+        BusinessException nullPasswordEx = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest(null)));
+        assertEquals(CommonErrorCode.COMMON_INVALID_REQUEST, nullPasswordEx.getErrorCode());
+
+        BusinessException emptyEx = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest("")));
+        assertEquals(CommonErrorCode.COMMON_INVALID_REQUEST, emptyEx.getErrorCode());
+
+        BusinessException blankEx = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest("   ")));
+        assertEquals(CommonErrorCode.COMMON_INVALID_REQUEST, blankEx.getErrorCode());
+
+        // 검증 실패 시 어떤 Mapper/Auth 호출도 없어야 한다 (사용자 조회조차 하지 않음)
+        verify(userMapper, never()).selectMyProfileByUserId(any());
+        verify(authService, never()).verifyCurrentPassword(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 이미 WITHDRAWN 상태 → USER_ALREADY_WITHDRAWN + 비밀번호 검증 없음")
+    void verifyAccountPassword_alreadyWithdrawn() {
+        // Given — WITHDRAWN 상태 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(withdrawnUser());
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest("password123!")));
+        assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
+
+        // 비밀번호 검증이 수행되지 않아야 한다 (탈퇴 회원 재인증 차단)
+        verify(authService, never()).verifyCurrentPassword(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 회원 없음 → USER_NOT_FOUND")
+    void verifyAccountPassword_userNotFound() {
+        // Given — Mapper 가 null 반환 (회원 없음)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(null);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest("password123!")));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(authService, never()).verifyCurrentPassword(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재인증 - 기타 비활성(차단 등) 회원 → USER_NOT_FOUND (계정 존재 여부 비노출)")
+    void verifyAccountPassword_blockedUser() {
+        // Given — BLOCKED 상태 회원
+        MyProfileVO blocked = activeUserWithoutProfile();
+        blocked.setStatus("BLOCKED");
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(blocked);
+
+        // When & Then — 탈퇴 회원과 달리 존재 여부 비노출 정책으로 USER_NOT_FOUND 통일
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.verifyAccountPassword(501L, verifyRequest("password123!")));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(authService, never()).verifyCurrentPassword(any(), anyString());
+    }
+
+    @Test
+    @DisplayName("보안 - AccountPasswordVerifyRequestDTO toString 에 비밀번호 원문 미노출")
+    void verifyAccountPassword_requestToStringHidesSecret() {
+        // Given
+        AccountPasswordVerifyRequestDTO request = verifyRequest("secret-password123!");
 
         // When
         String text = request.toString();
