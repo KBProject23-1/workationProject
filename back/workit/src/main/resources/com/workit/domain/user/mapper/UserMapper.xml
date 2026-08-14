@@ -105,4 +105,34 @@
           AND status != 'WITHDRAWN'
     </update>
 
+    <!--
+        휴대폰 번호 변경 - 휴대폰 번호(SHA-256 hash) 중복 조회 (자기 자신 제외).
+        - users.phone_number_hash (UNIQUE) 대상
+        - 변경 요청 번호가 다른 사용자에게 이미 등록되어 있는지 확인 (본인은 제외)
+        - 개인정보 원문(phone_number_encrypt)은 조회하지 않는다 (knowledge.md: 검색용 hash)
+        - Mapper 는 조회만 담당 (중복 판단은 Service — PHONE_ALREADY_IN_USE)
+    -->
+    <select id="countByPhoneHashExcludingUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM users
+        WHERE phone_number_hash = #{phoneHash}
+          AND id != #{userId}
+    </select>
+
+    <!--
+        휴대폰 번호 변경 - users 휴대폰 번호 갱신.
+        - phone_number_encrypt 는 Service Layer 에서 AES-256 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - phone_number_hash 는 Service Layer 에서 SHA-256 생성 후 전달 (검색용 hash — knowledge.md)
+        - status != 'WITHDRAWN' 조건: 조회-갱신 사이 동시 탈퇴 Race Condition 최종 방어선
+          (0 row 반환 시 Service 에서 USER_ALREADY_WITHDRAWN 처리 — updateUserStatusToWithdrawn 과 동일)
+        - updated_at 은 DB ON UPDATE CURRENT_TIMESTAMP 로 자동 갱신
+    -->
+    <update id="updateUserPhoneNumber">
+        UPDATE users
+        SET phone_number_hash    = #{phoneNumberHash},
+            phone_number_encrypt = #{phoneNumberEncrypt}
+        WHERE id = #{userId}
+          AND status != 'WITHDRAWN'
+    </update>
+
 </mapper>

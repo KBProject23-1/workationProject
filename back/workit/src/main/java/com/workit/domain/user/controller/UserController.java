@@ -3,10 +3,12 @@ package com.workit.domain.user.controller;
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.service.UserService;
 import com.workit.global.dto.CommonResponse;
@@ -208,5 +210,29 @@ public class UserController {
 
         userService.verifyAccountPassword(userId, request);
         return GlobalResponseFactory.success(null, "비밀번호가 확인되었습니다.");
+    }
+
+    // 1.7 휴대폰 번호 변경 (로그인 사용자 전용)
+    // - docs: 휴대폰 번호 변경 (PATCH /api/v1/users/me/phone)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - Mock PASS 인증 완료 후 발급된 identityVerificationId 만 전달받으며, 변경할 휴대폰 번호는
+    //   Request Body 에서 받지 않는다 — UserService 가 PASS 인증 결과에서 인증된 번호를 조회해 변경한다
+    //   (프론트가 전달한 phoneNumber 는 신뢰하지 않는다 — docs)
+    // - PASS 인증 결과 검증(세션 상태/만료/본인 확인)과 DB 갱신은 UserService 에서 수행하고,
+    //   Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (DB 접근/PASS 검증 금지)
+    // - identityVerificationId 누락/유효하지 않음: INVALID_VERIFICATION_ID(400),
+    //   본인 인증 불일치: VERIFICATION_FAILED(400), 동일 번호: PHONE_SAME_AS_CURRENT(400),
+    //   다른 사용자 사용 중: PHONE_ALREADY_IN_USE(409), 이미 탈퇴: USER_ALREADY_WITHDRAWN(409),
+    //   회원 없음: USER_NOT_FOUND(404)
+    // - 변경 성공 후 Access/Refresh Token 을 새로 발급하지 않는다 (토큰 Cookie 변경 없음)
+    @PatchMapping("/me/phone")
+    public ResponseEntity<CommonResponse<PhoneChangeResponseDTO>> changePhone(
+            @CurrentUser Long userId,
+            @RequestBody PhoneChangeRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                userService.changePhone(userId, request),
+                "휴대폰 번호가 변경되었습니다.");
     }
 }

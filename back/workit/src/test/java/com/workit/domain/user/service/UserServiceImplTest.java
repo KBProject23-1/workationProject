@@ -1,12 +1,16 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.auth.exception.AuthErrorCode;
+import com.workit.domain.auth.provider.IdentityVerificationProvider;
+import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
 import com.workit.domain.user.mapper.UserMapper;
@@ -25,8 +29,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,6 +64,9 @@ class UserServiceImplTest {
     private static final String NAME = "홍길동";
     private static final String PHONE_NUMBER = "01012345678";
 
+    /** PASS 인증을 통해 변경할 새 휴대폰 번호 (프론트는 전달하지 않는다 — Provider 결과 값) */
+    private static final String NEW_PHONE_NUMBER = "01098765432";
+
     @Mock
     private UserMapper userMapper;
 
@@ -67,6 +78,10 @@ class UserServiceImplTest {
     @Mock
     private WalletService walletService;
 
+    // 휴대폰 번호 변경 시 PASS 본인인증 결과 검증을 IdentityVerificationProvider 로 위임한다 (Mock 주입)
+    @Mock
+    private IdentityVerificationProvider identityVerificationProvider;
+
     private UserServiceImpl userService;
 
     @BeforeEach
@@ -75,7 +90,7 @@ class UserServiceImplTest {
         System.setProperty("personal.data.aes.key", TEST_AES_KEY);
         PersonalDataCipher.reloadKey();
 
-        userService = new UserServiceImpl(userMapper, authService, walletService);
+        userService = new UserServiceImpl(userMapper, authService, walletService, identityVerificationProvider);
     }
 
     @AfterEach
@@ -973,6 +988,257 @@ class UserServiceImplTest {
 
         // Then
         assertFalse(text.contains("secret-password123!"));
+    }
+
+    // ---------- 휴대폰 번호 변경 ----------
+
+    /** 휴대폰 번호 변경 요청 DTO 생성 헬퍼 — identityVerificationId 만 전달 (phoneNumber 는 Request 에 없음) */
+    private PhoneChangeRequestDTO phoneChangeRequest(String identityVerificationId) {
+        PhoneChangeRequestDTO request = new PhoneChangeRequestDTO();
+        request.setIdentityVerificationId(identityVerificationId);
+        return request;
+    }
+
+    /** PASS 인증 결과 헬퍼 — Mock PASS 세션에서 복원된 인증 정보 (name 은 현재 사용자와 동일해야 본인 확인 통과) */
+    private IdentityVerificationResult verifiedResult(String name, String phoneNumber) {
+        return IdentityVerificationResult.builder()
+                .ci("MOCK-CI-" + sha256Hex(phoneNumber))
+                .name(name)
+                .phoneNumber(phoneNumber)
+                .build();
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 성공 - PASS 인증 결과 번호로 users UPDATE + 변경된 번호 반환")
+    void changePhone_success() {
+        // Given — ACTIVE 회원 (현재 번호: 01012345678) + PASS 인증 결과가 새 번호(01098765432) 반환
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("identity-verification-id"))
+                .thenReturn(verifiedResult(NAME, NEW_PHONE_NUMBER));
+        when(userMapper.countByPhoneHashExcludingUserId(sha256Hex(NEW_PHONE_NUMBER), 501L)).thenReturn(0);
+        when(userMapper.updateUserPhoneNumber(eq(501L), anyString(), anyString())).thenReturn(1);
+
+        // When
+        PhoneChangeResponseDTO result = userService.changePhone(501L, phoneChangeRequest("identity-verification-id"));
+
+        // Then — 변경된 번호 응답 (PASS 인증 결과에서 조회한 값 — 프론트 전달 번호 아님)
+        assertEquals(NEW_PHONE_NUMBER, result.getUpdatedPhone());
+
+        // PASS 인증 결과 검증을 Provider 로 위임
+        verify(identityVerificationProvider).verify("identity-verification-id");
+        // 다른 사용자 중복 조회는 SHA-256 hash 로만 수행 (원문 조회 금지)
+        verify(userMapper).countByPhoneHashExcludingUserId(sha256Hex(NEW_PHONE_NUMBER), 501L);
+
+        // users UPDATE — hash(SHA-256) + encrypt(AES-256) 모두 Service Layer 에서 생성해 전달
+        ArgumentCaptor<String> hashCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> encryptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(userMapper).updateUserPhoneNumber(eq(501L), hashCaptor.capture(), encryptCaptor.capture());
+        assertEquals(sha256Hex(NEW_PHONE_NUMBER), hashCaptor.getValue());
+        // AES-GCM 은 매 호출 새 IV — 복호화로 원문 확인 (암호문 동일성 비교 금지)
+        assertEquals(NEW_PHONE_NUMBER, PersonalDataCipher.decrypt(encryptCaptor.getValue()));
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - identityVerificationId 누락/빈 값/공백 → INVALID_VERIFICATION_ID + 어떤 처리도 없음")
+    void changePhone_missingIdentityVerificationId() {
+        // When & Then — null 요청 / null ID / 빈 값 / 공백 모두 검증 실패
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, null));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, nullEx.getErrorCode());
+
+        BusinessException nullIdEx = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest(null)));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, nullIdEx.getErrorCode());
+
+        BusinessException emptyEx = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("")));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, emptyEx.getErrorCode());
+
+        BusinessException blankEx = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("   ")));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, blankEx.getErrorCode());
+
+        // 검증 실패 시 어떤 Mapper/Provider 호출도 없어야 한다 (사용자 조회조차 하지 않음)
+        verify(userMapper, never()).selectMyProfileByUserId(any());
+        verify(identityVerificationProvider, never()).verify(anyString());
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 존재하지 않는/만료된/VERIFIED 아닌 identityVerificationId → INVALID_VERIFICATION_ID 전파")
+    void changePhone_invalidSession() {
+        // Given — ACTIVE 회원 + Provider 가 세션 없음(만료/미인증)을 거부한다
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("invalid-id"))
+                .thenThrow(new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID));
+
+        // When & Then — 세션 없음/TTL 만료/status != VERIFIED/used == true 모두 동일 에러 (Provider 책임)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("invalid-id")));
+        assertEquals(AuthErrorCode.INVALID_VERIFICATION_ID, ex.getErrorCode());
+
+        // 인증 실패 시 번호 변경 UPDATE 가 발생하지 않아야 한다
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 다른 사용자에게 발급된 identityVerificationId(이름 불일치) → VERIFICATION_FAILED")
+    void changePhone_nameMismatch() {
+        // Given — ACTIVE 회원(이름: 홍길동) + PASS 인증 결과가 다른 사람 이름을 반환
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("other-user-id"))
+                .thenReturn(verifiedResult("김철수", NEW_PHONE_NUMBER));
+
+        // When & Then — 본인 인증 실패 (다른 사용자에게 발급된 인증 ID 차단)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("other-user-id")));
+        assertEquals(AuthErrorCode.VERIFICATION_FAILED, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 인증된 번호가 현재 번호와 동일 → PHONE_SAME_AS_CURRENT")
+    void changePhone_samePhone() {
+        // Given — ACTIVE 회원(현재 번호: 01012345678) + PASS 인증 결과가 동일 번호를 반환
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("identity-verification-id"))
+                .thenReturn(verifiedResult(NAME, PHONE_NUMBER));
+
+        // When & Then — 동일 번호로 변경 불가 (비밀번호/PIN 변경 동일 패턴)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.PHONE_SAME_AS_CURRENT, ex.getErrorCode());
+
+        // 중복 조회/UPDATE 가 발생하지 않아야 한다
+        verify(userMapper, never()).countByPhoneHashExcludingUserId(anyString(), any());
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 다른 사용자가 사용 중인 번호 → PHONE_ALREADY_IN_USE + update 미호출")
+    void changePhone_phoneAlreadyInUse() {
+        // Given — ACTIVE 회원 + PASS 인증 성공 + 새 번호가 다른 사용자에게 등록됨 (hash 기준)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("identity-verification-id"))
+                .thenReturn(verifiedResult(NAME, NEW_PHONE_NUMBER));
+        when(userMapper.countByPhoneHashExcludingUserId(sha256Hex(NEW_PHONE_NUMBER), 501L)).thenReturn(1);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.PHONE_ALREADY_IN_USE, ex.getErrorCode());
+
+        // 중복 시 UPDATE 미호출
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 이미 탈퇴한 사용자 → USER_ALREADY_WITHDRAWN + PASS 검증 없음")
+    void changePhone_alreadyWithdrawn() {
+        // Given — WITHDRAWN 상태 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(withdrawnUser());
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
+
+        // 사용자 상태 확인이 PASS 검증보다 먼저 수행되므로 Provider 호출이 없어야 한다
+        verify(identityVerificationProvider, never()).verify(anyString());
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 회원 없음 → USER_NOT_FOUND")
+    void changePhone_userNotFound() {
+        // Given — Mapper 가 null 반환 (회원 없음)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(null);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 기타 비활성(차단 등) 회원 → USER_NOT_FOUND (계정 존재 여부 비노출)")
+    void changePhone_blockedUser() {
+        // Given — BLOCKED 상태 회원
+        MyProfileVO blocked = activeUserWithoutProfile();
+        blocked.setStatus("BLOCKED");
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(blocked);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(userMapper, never()).updateUserPhoneNumber(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - UPDATE 영향 row 0 (조회-갱신 사이 동시 탈퇴) → USER_ALREADY_WITHDRAWN")
+    void changePhone_updateNoRows() {
+        // Given — ACTIVE 회원 + PASS 인증 성공 + 중복 없음 + UPDATE 가 0 row 반환 (동시 탈퇴)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("identity-verification-id"))
+                .thenReturn(verifiedResult(NAME, NEW_PHONE_NUMBER));
+        when(userMapper.countByPhoneHashExcludingUserId(sha256Hex(NEW_PHONE_NUMBER), 501L)).thenReturn(0);
+        when(userMapper.updateUserPhoneNumber(eq(501L), anyString(), anyString())).thenReturn(0);
+
+        // When & Then — Race Condition 최종 방어선 (WHERE status != 'WITHDRAWN')
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - phone_number_hash UNIQUE 충돌(DuplicateKeyException) → PHONE_ALREADY_IN_USE")
+    void changePhone_duplicateKey() {
+        // Given — ACTIVE 회원 + PASS 인증 성공 + UPDATE 중 동시 요청으로 UNIQUE 충돌
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+        when(identityVerificationProvider.verify("identity-verification-id"))
+                .thenReturn(verifiedResult(NAME, NEW_PHONE_NUMBER));
+        when(userMapper.countByPhoneHashExcludingUserId(sha256Hex(NEW_PHONE_NUMBER), 501L)).thenReturn(0);
+        when(userMapper.updateUserPhoneNumber(eq(501L), anyString(), anyString()))
+                .thenThrow(new DuplicateKeyException("users.phone_number_hash UNIQUE constraint violated"));
+
+        // When & Then — Race Condition 방어선: 500 대신 409
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.changePhone(501L, phoneChangeRequest("identity-verification-id")));
+        assertEquals(UserErrorCode.PHONE_ALREADY_IN_USE, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("보안 - PhoneChangeRequestDTO toString 에 identityVerificationId 미노출")
+    void changePhone_requestToStringHidesSecret() {
+        // Given
+        PhoneChangeRequestDTO request = phoneChangeRequest("secret-identity-verification-id");
+
+        // When
+        String text = request.toString();
+
+        // Then
+        assertFalse(text.contains("secret-identity-verification-id"));
+    }
+
+    /** SHA-256 hex 변환 — 저장될 phone_number_hash 기대값 계산 (Service 와 동일 hex 인코딩) */
+    private String sha256Hex(String value) {
+        byte[] digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 알고리즘을 사용할 수 없습니다.", e);
+        }
+        StringBuilder sb = new StringBuilder(digest.length * 2);
+        for (byte b : digest) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
     }
 
     /** 지정한 길이의 문자열 생성 — Java 8 호환 (String.repeat 미사용) */

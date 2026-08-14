@@ -67,4 +67,32 @@ public interface UserMapper {
      * @return 갱신된 row 수 (0 이면 이미 WITHDRAWN 상태)
      */
     int updateUserStatusToWithdrawn(@Param("userId") Long userId);
+
+    /**
+     * 휴대폰 번호 변경 - 휴대폰 번호(SHA-256 hash) 중복 조회 (자기 자신 제외)
+     * - users.phone_number_hash (UNIQUE) 대상
+     * - PASS 인증된 휴대폰 번호가 다른 사용자에게 이미 등록되어 있는지 확인
+     *   (개인정보 원문(phone_number_encrypt)은 조회하지 않는다 — knowledge.md: 검색용 hash)
+     * - 반환값이 0 초과면 다른 사용자가 사용 중인 번호 (PHONE_ALREADY_IN_USE 판단은 Service)
+     *
+     * @param phoneHash 변경할 휴대폰 번호의 SHA-256 hash (Service Layer 에서 생성)
+     * @param userId    변경을 요청한 사용자 — 본인은 중복 대상에서 제외한다
+     */
+    int countByPhoneHashExcludingUserId(@Param("phoneHash") String phoneHash, @Param("userId") Long userId);
+
+    /**
+     * 휴대폰 번호 변경 - users 휴대폰 번호 갱신 (AES 암호화본 + 검색용 SHA-256 hash)
+     * - phone_number_encrypt: AES-256 암호화본 (Service Layer 에서 암호화 후 전달 — Mapper 에서 암호화 금지)
+     * - phone_number_hash: SHA-256 해시 (knowledge.md: 검색용 개인정보는 hash)
+     * - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴(Race Condition) 시 0 row 반환
+     *   (USER_ALREADY_WITHDRAWN 최종 방어선 — updateUserStatusToWithdrawn 과 동일 패턴)
+     *
+     * @param userId             변경할 회원 번호
+     * @param phoneNumberHash    변경할 휴대폰 번호의 SHA-256 hash
+     * @param phoneNumberEncrypt 변경할 휴대폰 번호의 AES-256 암호화본
+     * @return 갱신된 row 수 (0 이면 이미 WITHDRAWN 상태)
+     */
+    int updateUserPhoneNumber(@Param("userId") Long userId,
+                              @Param("phoneNumberHash") String phoneNumberHash,
+                              @Param("phoneNumberEncrypt") String phoneNumberEncrypt);
 }

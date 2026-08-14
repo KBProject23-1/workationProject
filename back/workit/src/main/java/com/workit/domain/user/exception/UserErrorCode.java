@@ -29,7 +29,17 @@ public enum UserErrorCode implements ErrorCode {
 
     // 회원 탈퇴 - 이미 탈퇴(WITHDRAWN) 처리된 회원의 재탈퇴 시도 → 409
     // (knowledge.md: 409 CONFLICT - 상태 충돌 — 이미 탈퇴된 계정은 재탈퇴 불가)
-    USER_ALREADY_WITHDRAWN(HttpStatus.CONFLICT, "이미 탈퇴 처리된 회원입니다.");
+    USER_ALREADY_WITHDRAWN(HttpStatus.CONFLICT, "이미 탈퇴 처리된 회원입니다."),
+
+    // 휴대폰 번호 변경 - PASS 인증된 휴대폰 번호가 현재 휴대폰 번호와 동일함 → 400
+    // (docs: 동일한 휴대폰 번호로 변경하는 경우 정책에 따라 실패 처리 —
+    //  비밀번호 변경의 AUTH_SAME_PASSWORD(400) / PIN 재설정의 SAME_AS_CURRENT_PIN(400) 과 동일 패턴)
+    PHONE_SAME_AS_CURRENT(HttpStatus.BAD_REQUEST, "현재 휴대폰 번호와 동일한 번호로는 변경할 수 없습니다."),
+
+    // 휴대폰 번호 변경 - PASS 인증된 휴대폰 번호가 이미 다른 사용자에게 등록되어 있음 → 409
+    // (knowledge.md: 409 CONFLICT - 중복 데이터 — users.phone_number_hash UNIQUE,
+    //  회원가입 시 동일 휴대폰 중복을 DUPLICATE_USER(409) 로 처리하는 정책과 동일)
+    PHONE_ALREADY_IN_USE(HttpStatus.CONFLICT, "이미 사용 중인 휴대폰 번호입니다.");
 
     private final HttpStatus status;
     private final String message;

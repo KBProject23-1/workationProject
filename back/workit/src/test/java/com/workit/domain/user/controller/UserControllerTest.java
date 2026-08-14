@@ -6,10 +6,12 @@ import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
 import com.workit.domain.user.service.UserService;
@@ -137,6 +139,18 @@ class UserControllerTest {
     private void stubVerifyAccountPasswordError(ErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(userService).verifyAccountPassword(anyLong(), any(AccountPasswordVerifyRequestDTO.class));
+    }
+
+    /** 휴대폰 번호 변경 성공 Stub — Service 가 변경된 번호를 반환한다 */
+    private void stubChangePhoneSuccess() {
+        when(userService.changePhone(any(), any(PhoneChangeRequestDTO.class)))
+                .thenReturn(PhoneChangeResponseDTO.of("01098765432"));
+    }
+
+    /** 휴대폰 번호 변경 실패 Stub — UserService 가 지정 에러를 던진다 */
+    private void stubChangePhoneError(ErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(userService).changePhone(anyLong(), any(PhoneChangeRequestDTO.class));
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -944,6 +958,182 @@ class UserControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(userService, never()).verifyAccountPassword(anyLong(), any(AccountPasswordVerifyRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 휴대폰 번호 변경 ----------
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 성공 - 200 + SUCCESS + 변경 완료 메시지 + updatedPhone 반환 + 토큰 Cookie 미변경")
+    void changePhone_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 변경된 번호를 반환한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneSuccess();
+
+        // When — Mock PASS 인증 후 발급된 identityVerificationId 만 전달 (phoneNumber 는 Request 에 없음)
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"identity-verification-id\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: data.updatedPhone + 변경 완료 메시지
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("휴대폰 번호가 변경되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("01098765432", data.get("updatedPhone").asText());
+
+        // Access/Refresh Token 은 새로 발급/변경되지 않는다 — Set-Cookie 응답 헤더가 없어야 한다
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "휴대폰 번호 변경 응답에는 Set-Cookie 가 없어야 한다 (토큰 재발급/변경 없음)");
+
+        // Controller 는 userId 와 요청을 Service 로 위임만 한다 (PASS 검증/DB 접근 금지)
+        verify(userService).changePhone(eq(501L), any(PhoneChangeRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - identityVerificationId 유효하지 않음(누락/만료/미인증) → 400 + INVALID_VERIFICATION_ID")
+    void changePhone_invalidVerificationId() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 PASS 인증 검증 실패를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneError(AuthErrorCode.INVALID_VERIFICATION_ID);
+
+        // When — identityVerificationId 누락 본문
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 다른 사용자에게 발급된 identityVerificationId(이름 불일치) → 400 + VERIFICATION_FAILED")
+    void changePhone_verificationFailed() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 본인 인증 불일치를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneError(AuthErrorCode.VERIFICATION_FAILED);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"other-user-verification-id\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("VERIFICATION_FAILED", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 인증된 번호가 현재 번호와 동일 → 400 + PHONE_SAME_AS_CURRENT")
+    void changePhone_samePhone() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 동일 번호 변경을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneError(UserErrorCode.PHONE_SAME_AS_CURRENT);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"identity-verification-id\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("PHONE_SAME_AS_CURRENT", json.get("errorCode").asText());
+        assertEquals("현재 휴대폰 번호와 동일한 번호로는 변경할 수 없습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 다른 사용자가 사용 중인 번호 → 409 + PHONE_ALREADY_IN_USE")
+    void changePhone_alreadyInUse() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 번호 중복을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneError(UserErrorCode.PHONE_ALREADY_IN_USE);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"identity-verification-id\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("PHONE_ALREADY_IN_USE", json.get("errorCode").asText());
+        assertEquals("이미 사용 중인 휴대폰 번호입니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 이미 탈퇴한 사용자 → 409 + USER_ALREADY_WITHDRAWN")
+    void changePhone_alreadyWithdrawn() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 탈퇴 회원 변경을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneError(UserErrorCode.USER_ALREADY_WITHDRAWN);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"identity-verification-id\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_ALREADY_WITHDRAWN", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 회원 없음 → 404 + USER_NOT_FOUND")
+    void changePhone_userNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 회원 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubChangePhoneError(UserErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"identity-verification-id\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("휴대폰 번호 변경 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void changePhone_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/users/me/phone")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"identity-verification-id\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(userService, never()).changePhone(anyLong(), any(PhoneChangeRequestDTO.class));
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());

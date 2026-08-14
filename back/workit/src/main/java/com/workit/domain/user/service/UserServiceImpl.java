@@ -1,11 +1,16 @@
 package com.workit.domain.user.service;
 
+import com.workit.domain.auth.exception.AuthErrorCode;
+import com.workit.domain.auth.provider.IdentityVerificationProvider;
+import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 import com.workit.domain.user.exception.UserErrorCode;
 import com.workit.domain.user.mapper.UserMapper;
@@ -23,6 +28,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 // User 도메인 Service 구현체
 // - 검증/복호화/트랜잭션 경계는 전부 Service Layer 에서 수행 (Controller/Mapper 에서 금지)
@@ -39,6 +47,11 @@ public class UserServiceImpl implements UserService {
 
     // 지갑 잔액 조회는 Wallet 도메인 책임 — Service 위임 (WalletMapper 직접 호출 금지)
     private final WalletService walletService;
+
+    // Mock PASS 본인인증 결과 검증은 Auth 도메인 Provider 재사용 (knowledge.md: 중복 구현 금지)
+    // - identityVerificationId 검증/세션 상태(VERIFIED)/만료/사용 완료 판단을 Provider 에 위임한다
+    //   (AuthServiceImpl.signup/findId/resetPin 과 동일한 검증 로직 재사용)
+    private final IdentityVerificationProvider identityVerificationProvider;
 
     /** 회원 서비스 이용 가능 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
@@ -237,6 +250,99 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    // 휴대폰 번호 변경은 하나의 Business UseCase — users UPDATE(DB 쓰기) + 검증(PASS 인증)을
+    // 하나의 Transaction Boundary 로 관리한다 (withdraw 와 동일 — 검증은 전부 Service Layer)
+    public PhoneChangeResponseDTO changePhone(Long userId, PhoneChangeRequestDTO request) {
+
+        // 1. 요청 값 검증 — identityVerificationId 필수 (null/빈 값 → INVALID_VERIFICATION_ID 400)
+        //    (findId/resetPin 과 동일 — javax.validation 미사용 환경, Service Layer 에서 수행)
+        //    - identityVerificationId 는 로그에 출력하지 않는다 (PASS 인증 임시값 — knowledge.md)
+        if (request == null || isBlank(request.getIdentityVerificationId())) {
+            throw new BusinessException(AuthErrorCode.INVALID_VERIFICATION_ID);
+        }
+
+        // 2. 로그인 사용자 존재 + 상태 확인 (users.status) — withdraw/verifyAccountPassword 와 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 변경 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 3. PASS 본인인증 결과 검증 — 기존 Mock PASS 검증 로직 재사용 (Auth 도메인 Provider)
+        //    - identityVerificationId 로 Redis(mock:pass:{id}) 세션을 조회·검증한다
+        //      (세션 없음 / TTL 만료 / status != VERIFIED / used == true → INVALID_VERIFICATION_ID 400)
+        //    - identityVerificationId 는 MockPassService 가 발급한 값만 유효하므로
+        //      프론트가 임의 생성/우회한 인증은 이 단계에서 차단된다
+        //    - Provider 가 세션에 저장된 name / phoneNumber / CI 를 복호화해 반환한다
+        IdentityVerificationResult verificationResult =
+                identityVerificationProvider.verify(request.getIdentityVerificationId());
+
+        // 4. 본인인증 이름 대조 — PASS 인증이 현재 사용자 본인 인증인지 확인
+        //    - Mock PASS 세션은 사용자와 연결되어 있지 않으므로, 인증된 이름(복호화)과
+        //      DB 에 저장된 사용자 이름(users.name_encrypt 복호화)이 일치해야 한다
+        //      (docs: "본인인증 이름을 복호화하여 DB에 조회된 사용자인지 확인" —
+        //       verifyPasswordReset 의 이름 일치 확인과 동일 패턴)
+        //    - 휴대폰 번호 변경은 인증된 새 번호(새 CI)를 사용하므로 CI 대조는 사용하지 않는다
+        //      (Mock CI 는 휴대폰 기반 결정값 — 번호 변경 시 기존 identity_ci_hash 와 달라짐)
+        //    - 다른 사용자에게 발급된 identityVerificationId → VERIFICATION_FAILED(400) (원인 비노출)
+        String registeredName = PersonalDataCipher.decrypt(user.getNameEncrypt());
+        if (!registeredName.equals(verificationResult.getName())) {
+            throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
+        }
+
+        // 5. 인증된 휴대폰 번호 조회 — 프론트가 전달한 phoneNumber 는 Request 에 존재하지 않으며
+        //    반드시 백엔드가 PASS 인증 결과에서 조회한 값만 사용한다 (docs — 프론트 번호 신뢰 금지)
+        String verifiedPhoneNumber = verificationResult.getPhoneNumber();
+
+        // 6. 현재 휴대폰 번호와 동일한지 확인 — 동일 번호로 변경 불가 (docs: 정책에 따라 실패 처리)
+        //    - AUTH_SAME_PASSWORD(400)/SAME_AS_CURRENT_PIN(400) 과 동일 패턴
+        String currentPhoneNumber = PersonalDataCipher.decrypt(user.getPhoneNumberEncrypt());
+        if (verifiedPhoneNumber.equals(currentPhoneNumber)) {
+            throw new BusinessException(UserErrorCode.PHONE_SAME_AS_CURRENT);
+        }
+
+        // 7. 다른 사용자 등록 여부 확인 — users.phone_number_hash (UNIQUE)
+        //    - 개인정보 원문(phone_number_encrypt)이 아닌 SHA-256 hash 로만 조회한다
+        //      (knowledge.md: 검색용 개인정보는 hash — AuthMapper.findUserByPhoneHash 와 동일 원칙)
+        //    - 사용 중인 번호 → PHONE_ALREADY_IN_USE(409)
+        String newPhoneHash = sha256Hex(verifiedPhoneNumber);
+        if (userMapper.countByPhoneHashExcludingUserId(newPhoneHash, userId) > 0) {
+            throw new BusinessException(UserErrorCode.PHONE_ALREADY_IN_USE);
+        }
+
+        // 8. users 휴대폰 번호 갱신 (AES-256 암호화본 + 검색용 SHA-256 hash — Service Layer 에서만)
+        //    - phoneNumber 는 프론트 입력이 아닌 PASS 인증 결과 값 (5번에서 검증 완료)
+        //    - 사전 중복 체크(SELECT)와 실제 UPDATE 사이의 Race Condition 은
+        //      DB UNIQUE 제약(phone_number_hash)이 최종 방어선 — DuplicateKeyException → 409 로 변환
+        //    - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴 시 0 row → USER_ALREADY_WITHDRAWN
+        String newPhoneEncrypt = PersonalDataCipher.encrypt(verifiedPhoneNumber);
+        try {
+            int updated = userMapper.updateUserPhoneNumber(userId, newPhoneHash, newPhoneEncrypt);
+            if (updated == 0) {
+                throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+            }
+        } catch (DuplicateKeyException e) {
+            throw mapDuplicateKeyException(e);
+        }
+
+        // 9. Audit 로그 — userId 만 기록 (휴대폰 번호 원문/identityVerificationId 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs)
+        log.info("휴대폰 번호 변경 성공 - userId={}", userId);
+
+        // 10. 변경된 휴대폰 번호 응답 (PASS 인증으로 변경된 인증된 번호)
+        return PhoneChangeResponseDTO.of(verifiedPhoneNumber);
+    }
+
+    @Override
+    @Transactional
     // 회원 탈퇴는 하나의 Business UseCase — users UPDATE(DB 쓰기) 하나이지만
     // 검증(비밀번호/잔액)과 상태 변경을 하나의 Transaction Boundary 로 관리한다
     // (knowledge.md Transaction Rules — Redis 세션 revoke 는 DB 트랜잭션과 분리: afterCommit)
@@ -384,8 +490,36 @@ public class UserServiceImpl implements UserService {
             // 동일 사용자의 동시 최초 등록 요청 — 1:1 프로필 정책상 재등록으로 처리
             return new BusinessException(UserErrorCode.PROFILE_ALREADY_EXISTS);
         }
+        if (message.contains("ux_users_phone") || message.contains("users.phone_number_hash")) {
+            // 동일 휴대폰으로 동시 변경 요청 — PHONE_ALREADY_IN_USE 로 처리
+            //   (AuthServiceImpl.mapDuplicateKeyException 의 phone UNIQUE 매핑과 동일 패턴)
+            return new BusinessException(UserErrorCode.PHONE_ALREADY_IN_USE);
+        }
         // 식별되지 않은 UNIQUE 충돌 — 응답에 제약조건명/테이블명 노출 금지 (knowledge.md)
         return new BusinessException(UserErrorCode.DUPLICATE_NICKNAME);
+    }
+
+    /**
+     * SHA-256 hex 변환 — 검색용 개인정보 hash 생성 (휴대폰 번호 중복 조회용)
+     * - 개인정보 원문(phone_number_encrypt) 조회 금지 — hash 로만 검색한다 (knowledge.md)
+     * - AuthServiceImpl.sha256Hex 와 동일한 hex 인코딩 (MockPassServiceImpl 과 동일 패턴)
+     */
+    private static String sha256Hex(String value) {
+        byte[] digest = sha256Bytes(value);
+        StringBuilder sb = new StringBuilder(digest.length * 2);
+        for (byte b : digest) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
+
+    private static byte[] sha256Bytes(String value) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 알고리즘을 사용할 수 없습니다.", e);
+        }
     }
 
     private boolean isBlank(String value) {

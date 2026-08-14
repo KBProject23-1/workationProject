@@ -1,10 +1,12 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
+import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
 import com.workit.domain.user.dto.response.ProfileOnboardingResponseDTO;
 
 // User 도메인 Service (회원 기본 정보 / 프로필 / 회원 상태 담당 — knowledge.md User Domain 책임)
@@ -102,4 +104,28 @@ public interface UserService {
      * @param request 비밀번호 재인증 요청 (password 필수)
      */
     void verifyAccountPassword(Long userId, AccountPasswordVerifyRequestDTO request);
+
+    /**
+     * 휴대폰 번호 변경 — Mock PASS 본인인증 결과를 검증해 인증된 휴대폰 번호로 변경
+     *
+     * 흐름 (docs: 휴대폰 번호 변경):
+     *   1. 요청 값 검증 — identityVerificationId 필수 (null/빈 값 → INVALID_VERIFICATION_ID 400)
+     *   2. 로그인 사용자 존재/상태 확인 — 없음 → USER_NOT_FOUND(404),
+     *      이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409), 기타 비활성 → USER_NOT_FOUND(404)
+     *   3. PASS 본인인증 결과 검증 — IdentityVerificationProvider.verify 재사용
+     *      (세션 없음/TTL 만료/status != VERIFIED/used == true → INVALID_VERIFICATION_ID 400)
+     *   4. 본인인증 이름과 DB 사용자 이름 대조 — PASS 인증이 현재 사용자 본인 인증인지 확인
+     *      (불일치 → 다른 사용자에게 발급된 identityVerificationId → VERIFICATION_FAILED 400)
+     *   5. 인증된 휴대폰 번호 조회 (프론트가 전달한 phoneNumber 는 사용하지 않는다)
+     *   6. 현재 휴대폰 번호와 동일 → PHONE_SAME_AS_CURRENT(400)
+     *   7. 다른 사용자 등록 여부 확인 (users.phone_number_hash UNIQUE, 본인 제외)
+     *      → PHONE_ALREADY_IN_USE(409)
+     *   8. users.phone_number_hash/phone_number_encrypt 갱신 (SHA-256 + AES-256 — Service Layer)
+     *   9. 변경된 휴대폰 번호 응답 (Access/Refresh Token 발급·관리 없음)
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 휴대폰 번호 변경 요청 (identityVerificationId 필수 — phoneNumber 는 받지 않음)
+     * @return 변경된 휴대폰 번호 (updatedPhone)
+     */
+    PhoneChangeResponseDTO changePhone(Long userId, PhoneChangeRequestDTO request);
 }
