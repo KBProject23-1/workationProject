@@ -41,6 +41,9 @@ public interface TransactionMapper {
     TransactionVO findTransactionForReceipt(@Param("transactionId") Long transactionId,
                                             @Param("userId") Long userId);
 
+    // 결제 시점 스냅샷용: merchantId 로 가맹점 카테고리만 조회. 가맹점이 없거나 null 이면 null 반환.
+    String findMerchantCategoryById(@Param("merchantId") Long merchantId);
+
     // 거래 생성 (충전/환불/카드결제 공용)
     void insertTransaction(TransactionVO transaction);
 

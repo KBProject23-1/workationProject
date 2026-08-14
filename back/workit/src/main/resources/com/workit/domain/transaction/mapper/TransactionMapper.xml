@@ -128,6 +128,13 @@
         WHERE t.id = #{transactionId} AND t.user_id = #{userId}
     </select>
 
+    <!-- 결제 시점에 가맹점 카테고리를 스냅샷으로 확보하기 위한 단건 조회 -->
+    <select id="findMerchantCategoryById" resultType="string">
+        SELECT category
+        FROM merchants
+        WHERE id = #{merchantId}
+    </select>
+
     <insert id="insertTransaction" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO transactions (
         user_id, wallet_id, bank_account_id, card_id, workation_id, reservation_id, merchant_id, idempotency_key,
