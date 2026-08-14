@@ -181,6 +181,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         // 1) REQUESTED 결제 거래 생성 — 멱등키 중복이면 자동충전/차감 전에 먼저 거부(409)
         TransactionVO paymentTx = TransactionVO.forWalletPayment(userId, wallet, request);
+        assignMerchantCategory(paymentTx);
         try {
             transactionMapper.insertTransaction(paymentTx);
         } catch (DuplicateKeyException e) {
@@ -258,6 +259,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409)
         TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense);
+        assignMerchantCategory(paymentTx);
         try {
             transactionMapper.insertTransaction(paymentTx);
         } catch (DuplicateKeyException e) {
@@ -340,6 +342,22 @@ public class PaymentServiceImpl implements PaymentService {
 
         TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
         return CancelResponse.of(cancelled, amount, refundedTo);
+    }
+
+    // ===== 카테고리 스냅샷 =====
+    /**
+     * 결제 시점의 가맹점 카테고리를 거래에 스냅샷으로 저장한다.
+     * 나중에 가맹점 정보가 바뀌거나 삭제돼도 거래 당시 분류가 남도록 조회 시 조인이 아닌 저장 값을 쓴다.
+     * INSERT 가 category_assigned 를 명시적으로 넣어 null 이면 컬럼 DEFAULT('기타')가 무시되므로,
+     * merchantId 가 없거나 매칭 가맹점이 없으면 여기서 '기타'로 채워 의미 있는 기본값을 남긴다.
+     */
+    private static final String DEFAULT_CATEGORY = "기타";
+
+    private void assignMerchantCategory(TransactionVO tx) {
+        String category = tx.getMerchantId() != null
+                ? transactionMapper.findMerchantCategoryById(tx.getMerchantId())
+                : null;
+        tx.setCategoryAssigned(category != null ? category : DEFAULT_CATEGORY);
     }
 
     // ===== 상태 전이 (상태머신 규칙 강제) =====
