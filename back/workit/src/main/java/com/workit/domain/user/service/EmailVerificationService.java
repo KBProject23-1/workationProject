@@ -29,4 +29,23 @@ public interface EmailVerificationService {
      * @param email 정규화된(trim + lowercase) 인증 대상 이메일
      */
     void issueVerificationCode(String email);
+
+    /**
+     * 이메일 인증번호 확인 (Mock 검증)
+     *
+     * 흐름 (docs: 이메일 인증번호 확인 처리 로직):
+     *   1. 해당 이메일의 인증정보 조회 — 없으면(TTL 만료/미발급) EMAIL_VERIFICATION_NOT_FOUND(400)
+     *   2. 인증번호 유효시간(5분) 만료 확인 — 만료 시 EMAIL_VERIFICATION_CODE_EXPIRED(400)
+     *   3. 이미 인증 완료(verified) 된 인증정보 재사용 확인 → EMAIL_ALREADY_VERIFIED(400)
+     *      (인증 성공 후 동일 인증번호 재사용 방지)
+     *   4. 사용자 입력 인증번호와 저장된 인증번호 비교 — 불일치 → EMAIL_VERIFICATION_CODE_INVALID(400)
+     *   5. 일치 시 인증정보를 verified=true 로 변경해 저장 (인증 완료 상태 유지 —
+     *      이후 이메일 변경 API 가 인증 완료된 이메일을 조회/사용)
+     *
+     * 인증번호/사용자 검증은 호출 측(UserService)에서 수행 완료된 값만 전달받는다.
+     *
+     * @param email            정규화된(trim + lowercase) 인증 대상 이메일
+     * @param verificationCode 사용자가 입력한 6자리 인증번호
+     */
+    void confirmVerificationCode(String email, String verificationCode);
 }

@@ -1,11 +1,13 @@
 package com.workit.domain.user.service;
 
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
 import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
@@ -152,4 +154,30 @@ public interface UserService {
      * @return 인증번호를 발송한 이메일 (정규화된 값 — docs 응답 data.email)
      */
     EmailVerificationResponseDTO sendEmailVerification(Long userId, EmailVerificationRequestDTO request);
+
+    /**
+     * 이메일 인증번호 확인 — 이메일 변경 전, 발송된 인증번호가 올바른지 검증하고 인증 완료 상태를 저장한다
+     *
+     * 흐름 (docs: 이메일 인증번호 확인):
+     *   1. 로그인 사용자 존재/상태 확인 — 없음 → USER_NOT_FOUND(404),
+     *      이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409), 기타 비활성 → USER_NOT_FOUND(404)
+     *   2. 요청 값 검증 — email 필수 + 형식(EmailValidator 공통 정책) → INVALID_EMAIL_REQUEST(400),
+     *      verificationCode 필수(null/빈 값/공백) → EMAIL_VERIFICATION_CODE_INVALID(400)
+     *   3. Mock 이메일 인증번호 검증 — EmailVerificationService 위임
+     *      - 인증정보 없음 → EMAIL_VERIFICATION_NOT_FOUND(400)
+     *      - 인증번호 만료(5분) → EMAIL_VERIFICATION_CODE_EXPIRED(400)
+     *      - 이미 인증 완료된 인증번호 재사용 → EMAIL_ALREADY_VERIFIED(400)
+     *      - 인증번호 불일치 → EMAIL_VERIFICATION_CODE_INVALID(400)
+     *   4. 인증 성공 시 해당 이메일을 인증 완료 상태(VERIFIED)로 저장 —
+     *      이후 이메일 변경 API 가 인증 완료된 이메일을 조회/사용한다
+     *
+     * 이 API 는 인증번호 검증 → 인증 완료 상태 저장까지만 담당하며, 실제 이메일 변경은 하지 않는다
+     * (이메일 변경은 별도의 PATCH /api/v1/users/me/email API 에서 처리 — docs).
+     * Access/Refresh Token 을 읽거나 관리하지 않으며 발급도 하지 않는다 (docs 보안 주의사항).
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 이메일 인증번호 확인 요청 (email, verificationCode 필수)
+     * @return 이메일 인증 완료 여부 (성공 시 true)
+     */
+    EmailVerificationConfirmResponseDTO confirmEmailVerification(Long userId, EmailVerificationConfirmRequestDTO request);
 }

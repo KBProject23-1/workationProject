@@ -66,6 +66,46 @@ public class MockEmailVerificationServiceImpl implements EmailVerificationServic
         log.info("[MOCK EMAIL] email={}, verificationCode={}", email, verificationCode);
     }
 
+    @Override
+    public void confirmVerificationCode(String email, String verificationCode) {
+
+        // 1. 해당 이메일의 인증정보 조회 — 없으면(TTL 만료/미발급) 인증 실패
+        //    (docs: 인증번호 발송 기록이 없음 → 400)
+        EmailVerificationSession session = emailVerificationStore.find(email);
+        if (session == null) {
+            throw new BusinessException(UserErrorCode.EMAIL_VERIFICATION_NOT_FOUND);
+        }
+
+        // 2. 인증번호 유효시간(5분) 만료 확인 — 만료된 인증번호는 사용할 수 없다 (docs)
+        //    - expiresAt 은 저장소 TTL 기준 발급 시각에 설정되며, epoch millis 로 비교한다
+        if (session.getExpiresAt() <= System.currentTimeMillis()) {
+            throw new BusinessException(UserErrorCode.EMAIL_VERIFICATION_CODE_EXPIRED);
+        }
+
+        // 3. 이미 인증 완료(verified) 된 인증정보 재사용 확인 (docs: 인증 성공 후 동일 인증번호 재사용 불가)
+        //    - 인증 성공 시점에 verified=true 로 저장되므로, 이후 동일 인증번호로는 재인증할 수 없다
+        if (session.isVerified()) {
+            throw new BusinessException(UserErrorCode.EMAIL_ALREADY_VERIFIED);
+        }
+
+        // 4. 사용자 입력 인증번호와 저장된 인증번호 비교 — 불일치 시 인증 실패 (docs)
+        //    - 인증번호는 6자리 숫자 1회성 값이므로 평문 비교 (Redis 에도 평문 보관 — 5분 TTL)
+        if (!session.getVerificationCode().equals(verificationCode)) {
+            throw new BusinessException(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID);
+        }
+
+        // 5. 인증 성공 — 인증정보를 verified=true 로 변경해 다시 저장한다 (인증 완료 상태)
+        //    - 같은 이메일(key)에 덮어쓰므로 TTL(5분)이 재적용되어, 이후 이메일 변경 API가
+        //      인증 완료 상태를 조회할 수 있도록 유지한다 (docs: 인증 완료 상태 저장 — 예: status VERIFIED)
+        //    - verified=true 인 세션은 이후 동일 인증번호 재사용 시 3번에서 차단된다
+        session.setVerified(true);
+        try {
+            emailVerificationStore.save(email, session);
+        } catch (RuntimeException e) {
+            throw new BusinessException(UserErrorCode.EMAIL_VERIFICATION_SEND_FAILED);
+        }
+    }
+
     /** 6자리 숫자 인증번호 생성 (각 자리 0~9, SecureRandom) */
     private String generateVerificationCode() {
         StringBuilder sb = new StringBuilder(CODE_LENGTH);

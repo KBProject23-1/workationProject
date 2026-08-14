@@ -6,11 +6,13 @@ import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.exception.AuthErrorCode;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
 import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
@@ -165,6 +167,18 @@ class UserControllerTest {
     private void stubSendEmailVerificationError(ErrorCode errorCode) {
         doThrow(new BusinessException(errorCode))
                 .when(userService).sendEmailVerification(anyLong(), any(EmailVerificationRequestDTO.class));
+    }
+
+    /** 이메일 인증번호 확인 성공 Stub — Service 가 인증 완료 여부(true)를 반환한다 */
+    private void stubConfirmEmailVerificationSuccess() {
+        when(userService.confirmEmailVerification(any(), any(EmailVerificationConfirmRequestDTO.class)))
+                .thenReturn(EmailVerificationConfirmResponseDTO.of(true));
+    }
+
+    /** 이메일 인증번호 확인 실패 Stub — UserService 가 지정 에러를 던진다 */
+    private void stubConfirmEmailVerificationError(ErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(userService).confirmEmailVerification(anyLong(), any(EmailVerificationConfirmRequestDTO.class));
     }
 
     // ---------- 내 프로필 조회 ----------
@@ -1304,6 +1318,204 @@ class UserControllerTest {
 
         // Then — Service 호출 없이 401 응답
         verify(userService, never()).sendEmailVerification(anyLong(), any(EmailVerificationRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 이메일 인증번호 확인 ----------
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 성공 - 200 + SUCCESS + 확인 완료 메시지 + data.verified(true) + 토큰 Cookie 미변경")
+    void confirmEmailVerification_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 인증 완료 결과를 반환한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationSuccess();
+
+        // When — 인증번호를 발송받은 이메일 + 사용자 입력 인증번호 전달
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — docs 응답: status/message + data.verified (성공 시 true)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("이메일 인증이 완료되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertTrue(data.get("verified").asBoolean());
+
+        // Access/Refresh Token 은 발급/변경되지 않는다 — Set-Cookie 응답 헤더가 없어야 한다
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "이메일 인증번호 확인 응답에는 Set-Cookie 가 없어야 한다 (토큰 발급/변경 없음)");
+
+        // Controller 는 userId 와 요청을 Service 로 위임만 한다 (인증번호 조회/검증/저장 금지)
+        verify(userService).confirmEmailVerification(eq(501L), any(EmailVerificationConfirmRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - email 누락/형식 오류 → 400 + INVALID_EMAIL_REQUEST")
+    void confirmEmailVerification_invalidEmail() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 이메일 검증 실패를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.INVALID_EMAIL_REQUEST);
+
+        // When — email 누락 본문
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_REQUEST", json.get("errorCode").asText());
+        assertEquals("이메일을 확인해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - verificationCode 누락/불일치 → 400 + EMAIL_VERIFICATION_CODE_INVALID")
+    void confirmEmailVerification_invalidCode() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 인증번호 검증 실패를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID);
+
+        // When — verificationCode 누락 본문
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_VERIFICATION_CODE_INVALID", json.get("errorCode").asText());
+        assertEquals("인증번호가 올바르지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 발송된 인증정보 없음 → 400 + EMAIL_VERIFICATION_NOT_FOUND")
+    void confirmEmailVerification_notFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 인증정보 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.EMAIL_VERIFICATION_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_VERIFICATION_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("발송된 인증번호가 없습니다. 인증번호를 다시 발송해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 인증번호 만료 → 400 + EMAIL_VERIFICATION_CODE_EXPIRED")
+    void confirmEmailVerification_expired() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 인증번호 만료를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.EMAIL_VERIFICATION_CODE_EXPIRED);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_VERIFICATION_CODE_EXPIRED", json.get("errorCode").asText());
+        assertEquals("인증번호가 만료되었습니다. 인증번호를 다시 발송해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 이미 인증 완료된 인증번호 재사용 → 400 + EMAIL_ALREADY_VERIFIED")
+    void confirmEmailVerification_alreadyVerified() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 인증 완료 재사용을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.EMAIL_ALREADY_VERIFIED);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("EMAIL_ALREADY_VERIFIED", json.get("errorCode").asText());
+        assertEquals("이미 인증이 완료된 인증번호입니다. 인증번호를 다시 발송해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 이미 탈퇴한 사용자 → 409 + USER_ALREADY_WITHDRAWN")
+    void confirmEmailVerification_alreadyWithdrawn() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 탈퇴 회원 확인을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.USER_ALREADY_WITHDRAWN);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_ALREADY_WITHDRAWN", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 회원 없음 → 404 + USER_NOT_FOUND")
+    void confirmEmailVerification_userNotFound() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 회원 없음을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubConfirmEmailVerificationError(UserErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 인증 사용자 없음 → 401 + AUTH_TOKEN_NOT_FOUND")
+    void confirmEmailVerification_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/users/me/email/verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"new@example.com\",\"verificationCode\":\"123456\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(userService, never()).confirmEmailVerification(anyLong(), any(EmailVerificationConfirmRequestDTO.class));
         JsonNode json = parse(result);
         assertEquals("ERROR", json.get("status").asText());
         assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());

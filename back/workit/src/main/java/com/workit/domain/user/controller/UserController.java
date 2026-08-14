@@ -3,11 +3,13 @@ package com.workit.domain.user.controller;
 import com.workit.domain.auth.dto.request.ChangePasswordRequestDTO;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
 import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
@@ -235,6 +237,29 @@ public class UserController {
         return GlobalResponseFactory.success(
                 userService.sendEmailVerification(userId, request),
                 "이메일 인증번호가 발송되었습니다.");
+    }
+
+    // 1.9 이메일 인증번호 확인 (로그인 사용자 전용)
+    // - docs: 이메일 인증번호 확인 (POST /api/v1/users/me/email/verification/confirm)
+    // - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+    //   (인증 없이 접근하면 AUTH_TOKEN_NOT_FOUND 401 — CurrentUserArgumentResolver)
+    // - 이메일 변경 전, 발송된 인증번호가 올바른지 확인한다 — 인증번호 검증/만료 확인/인증 완료 상태 저장은
+    //   UserService → Mock Email Verification Service 에서 수행한다 (docs: API 호출 구조)
+    // - Controller 는 요청 수신과 CommonResponse 반환만 담당한다 (인증번호 조회/검증/저장 금지)
+    // - email 누락/형식 오류: INVALID_EMAIL_REQUEST(400), 인증번호 누락/불일치: EMAIL_VERIFICATION_CODE_INVALID(400),
+    //   인증정보 없음: EMAIL_VERIFICATION_NOT_FOUND(400), 인증번호 만료: EMAIL_VERIFICATION_CODE_EXPIRED(400),
+    //   이미 인증 완료: EMAIL_ALREADY_VERIFIED(400), 이미 탈퇴: USER_ALREADY_WITHDRAWN(409),
+    //   회원 없음: USER_NOT_FOUND(404)
+    // - 이 API 는 인증번호 검증 → 인증 완료 상태 저장까지만 담당하며 실제 이메일 변경은 하지 않는다
+    //   (이메일 변경은 별도 PATCH /api/v1/users/me/email API 에서 처리)
+    @PostMapping("/me/email/verification/confirm")
+    public ResponseEntity<CommonResponse<EmailVerificationConfirmResponseDTO>> confirmEmailVerification(
+            @CurrentUser Long userId,
+            @RequestBody EmailVerificationConfirmRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                userService.confirmEmailVerification(userId, request),
+                "이메일 인증이 완료되었습니다.");
     }
 
     // 1.7 휴대폰 번호 변경 (로그인 사용자 전용)

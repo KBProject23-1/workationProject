@@ -124,6 +124,95 @@ class MockEmailVerificationServiceImplTest {
         assertEquals(UserErrorCode.EMAIL_VERIFICATION_SEND_FAILED, ex.getErrorCode());
     }
 
+    // ---------- 인증번호 확인 (confirmVerificationCode) ----------
+
+    @Test
+    @DisplayName("인증번호 확인 성공 - 올바른 인증번호 입력 시 인증 완료(verified=true) 상태로 저장")
+    void confirm_success() {
+        // Given — 인증번호 발급 완료
+        service.issueVerificationCode(EMAIL);
+        String code = store.find(EMAIL).getVerificationCode();
+
+        // When — 발급된 인증번호와 동일한 값을 입력
+        service.confirmVerificationCode(EMAIL, code);
+
+        // Then — 예외 없이 인증 완료되며, 인증정보가 verified=true 로 저장된다
+        //   (docs: 인증 성공 시 인증 완료 상태 저장 — 이후 이메일 변경 API 에서 사용)
+        EmailVerificationSession session = store.find(EMAIL);
+        assertNotNull(session);
+        assertTrue(session.isVerified(), "인증 성공 후 인증정보는 verified=true 여야 한다");
+    }
+
+    @Test
+    @DisplayName("인증번호 확인 - 잘못된 인증번호 → EMAIL_VERIFICATION_CODE_INVALID + verified 유지(false)")
+    void confirm_wrongCode() {
+        // Given — 인증번호 발급 완료
+        service.issueVerificationCode(EMAIL);
+
+        // When & Then — 저장된 인증번호와 다른 값을 입력하면 인증 실패
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.confirmVerificationCode(EMAIL, "000000"));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID, ex.getErrorCode());
+
+        // 인증 실패 시 인증정보가 인증 완료 상태로 변경되지 않아야 한다
+        assertFalse(store.find(EMAIL).isVerified());
+    }
+
+    @Test
+    @DisplayName("인증번호 확인 - 발송된 인증정보가 존재하지 않음 → EMAIL_VERIFICATION_NOT_FOUND")
+    void confirm_notFound() {
+        // Given — 인증번호 미발급 (저장소에 인증정보 없음)
+
+        // When & Then — 인증번호를 입력해도 발송 기록이 없어 인증 실패
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.confirmVerificationCode(EMAIL, "123456"));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_NOT_FOUND, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("인증번호 확인 - 유효시간(5분)이 지난 인증번호 → EMAIL_VERIFICATION_CODE_EXPIRED")
+    void confirm_expired() {
+        // Given — 인증번호 발급 후 만료 시각을 과거로 변경 (유효시간 경과)
+        service.issueVerificationCode(EMAIL);
+        store.find(EMAIL).setExpiresAt(System.currentTimeMillis() - 1000);
+        String code = store.find(EMAIL).getVerificationCode();
+
+        // When & Then — 만료된 인증번호는 올바른 값이어도 사용할 수 없다 (docs)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.confirmVerificationCode(EMAIL, code));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_CODE_EXPIRED, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("인증번호 확인 - 이미 인증 완료된 인증번호 재사용 → EMAIL_ALREADY_VERIFIED (재사용 불가)")
+    void confirm_alreadyVerified() {
+        // Given — 1회 인증 성공 (verified=true 상태)
+        service.issueVerificationCode(EMAIL);
+        String code = store.find(EMAIL).getVerificationCode();
+        service.confirmVerificationCode(EMAIL, code);
+
+        // When & Then — 동일 인증번호로 재인증 시도 시 실패 (docs: 인증 성공 후 동일 인증번호 재사용 불가)
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> service.confirmVerificationCode(EMAIL, code));
+        assertEquals(UserErrorCode.EMAIL_ALREADY_VERIFIED, ex.getErrorCode());
+    }
+
+    @Test
+    @DisplayName("인증번호 확인 - 인증 성공 후 인증 완료 상태가 Store 에 정상적으로 저장된다")
+    void confirm_storesVerifiedStateInStore() {
+        // Given — 인증번호 발급 완료
+        service.issueVerificationCode(EMAIL);
+        String code = store.find(EMAIL).getVerificationCode();
+        assertFalse(store.find(EMAIL).isVerified());
+
+        // When — 인증 확인 성공
+        service.confirmVerificationCode(EMAIL, code);
+
+        // Then — Store 에 저장된 인증정보가 verified=true 상태로 유지된다
+        //   (이후 이메일 변경 API 가 인증 완료된 이메일을 조회/사용 — docs)
+        assertTrue(store.find(EMAIL).isVerified());
+    }
+
     /** 인메모리 EmailVerificationStore — Redis 구현과 동일 계약 (테스트 전용) */
     private static class FakeEmailVerificationStore implements EmailVerificationStore {
 

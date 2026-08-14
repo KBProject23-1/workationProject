@@ -60,7 +60,27 @@ public enum UserErrorCode implements ErrorCode {
     // 이메일 인증번호 발송 - 인증번호 생성/임시 저장 실패 → 500
     // (docs: 인증번호 발급 실패 — Mock 저장소(Redis) 오류 등 발급이 완료되지 못한 경우)
     EMAIL_VERIFICATION_SEND_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
-            "이메일 인증번호 발급에 실패했습니다. 잠시 후 다시 시도해주세요.");
+            "이메일 인증번호 발급에 실패했습니다. 잠시 후 다시 시도해주세요."),
+
+    // 이메일 인증번호 확인 - 해당 이메일에 발송된 인증정보가 존재하지 않음 → 400
+    // (docs: 이메일 인증번호 확인 — 인증번호 발송 기록이 없음)
+    EMAIL_VERIFICATION_NOT_FOUND(HttpStatus.BAD_REQUEST,
+            "발송된 인증번호가 없습니다. 인증번호를 다시 발송해주세요."),
+
+    // 이메일 인증번호 확인 - 인증번호 유효시간(5분) 만료 → 400
+    // (docs: 이메일 인증번호 확인 — 인증번호가 만료됨)
+    EMAIL_VERIFICATION_CODE_EXPIRED(HttpStatus.BAD_REQUEST,
+            "인증번호가 만료되었습니다. 인증번호를 다시 발송해주세요."),
+
+    // 이메일 인증번호 확인 - 입력 인증번호 누락/불일치 → 400
+    // (docs: 이메일 인증번호 확인 — 인증번호 누락, 인증번호가 일치하지 않음)
+    EMAIL_VERIFICATION_CODE_INVALID(HttpStatus.BAD_REQUEST,
+            "인증번호가 올바르지 않습니다."),
+
+    // 이메일 인증번호 확인 - 이미 인증 완료된 인증번호 재사용 → 400
+    // (docs: 이메일 인증번호 확인 — 이미 사용된 인증번호, 재사용 방지)
+    EMAIL_ALREADY_VERIFIED(HttpStatus.BAD_REQUEST,
+            "이미 인증이 완료된 인증번호입니다. 인증번호를 다시 발송해주세요.");
 
     private final HttpStatus status;
     private final String message;

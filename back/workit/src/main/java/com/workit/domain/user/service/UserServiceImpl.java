@@ -5,11 +5,13 @@ import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
 import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
@@ -415,6 +417,67 @@ public class UserServiceImpl implements UserService {
         // 7. 응답 생성 — 인증번호를 발송한 이메일 반환 (docs 응답 data.email)
         //    - 인증번호(verificationCode)는 응답에 포함하지 않는다 (docs: 운영 환경에서 인증번호 응답 미포함)
         return EmailVerificationResponseDTO.of(normalizedEmail);
+    }
+
+    @Override
+    // SELECT 만 수행하고 Redis 임시 저장(side-effect)은 DB 트랜잭션과 무관하게 즉시 반영하므로
+    // 읽기 전용 트랜잭션 (sendEmailVerification 과 동일 — MockEmailVerificationServiceImpl 은 별도 트랜잭션 없음)
+    @Transactional(readOnly = true)
+    public EmailVerificationConfirmResponseDTO confirmEmailVerification(
+            Long userId, EmailVerificationConfirmRequestDTO request) {
+
+        // 1. 로그인 사용자 존재 + 상태 확인 (users.status) — sendEmailVerification/changePhone 과 동일 정책
+        //    - 없음 → USER_NOT_FOUND(404)
+        //    - 이미 WITHDRAWN → USER_ALREADY_WITHDRAWN(409) (탈퇴 회원 인증 확인 차단)
+        //    - BLOCKED/PENDING 등 기타 비활성 → 계정 존재 여부를 노출하지 않고 USER_NOT_FOUND(404)
+        //      (docs 처리 로직: 현재 로그인한 사용자 확인 → 탈퇴 사용자 거부 순서)
+        MyProfileVO user = userMapper.selectMyProfileByUserId(userId);
+        if (user == null) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+        if (USER_STATUS_WITHDRAWN.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_ALREADY_WITHDRAWN);
+        }
+        if (!USER_STATUS_ACTIVE.equals(user.getStatus())) {
+            throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
+        }
+
+        // 2. 요청 값 검증 — email/verificationCode 필수 (null/빈 값/공백 → 400)
+        //    - email: 누락/형식 오류 → INVALID_EMAIL_REQUEST(400) (sendEmailVerification 과 동일 정책)
+        //    - verificationCode: 누락 → EMAIL_VERIFICATION_CODE_INVALID(400)
+        //    - 인증번호 원문은 로그에 출력하지 않는다 (1회성 인증값 — knowledge.md)
+        if (request == null || isBlank(request.getEmail())) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+        if (isBlank(request.getVerificationCode())) {
+            throw new BusinessException(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID);
+        }
+
+        // 3. 이메일 정규화 (trim + lowercase) — 발송 시 정규화된 값과 동일한 key 로 조회하기 위함
+        //    - 형식 오류 → INVALID_EMAIL_REQUEST(400) (EmailValidator 공통 정책)
+        //    - 이메일 원문은 로그에 출력하지 않는다 (민감정보)
+        String normalizedEmail;
+        try {
+            normalizedEmail = EmailValidator.normalize(request.getEmail());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(UserErrorCode.INVALID_EMAIL_REQUEST);
+        }
+
+        // 4. Mock 이메일 인증번호 검증 + 인증 완료 상태 저장 — Mock Email Verification Service 위임
+        //    - 인증정보 없음 → EMAIL_VERIFICATION_NOT_FOUND(400)
+        //    - 인증번호 만료(5분) → EMAIL_VERIFICATION_CODE_EXPIRED(400)
+        //    - 이미 인증 완료된 인증번호 재사용 → EMAIL_ALREADY_VERIFIED(400)
+        //    - 인증번호 불일치 → EMAIL_VERIFICATION_CODE_INVALID(400)
+        //    - 성공 시 해당 이메일을 verified=true 상태로 저장 (이후 이메일 변경 API 에서 사용 — docs)
+        //    - 인증번호는 DB 가 아닌 Mock 임시 저장소에만 보관한다 (docs)
+        emailVerificationService.confirmVerificationCode(normalizedEmail, request.getVerificationCode());
+
+        // 5. Audit 로그 — userId 만 기록 (이메일/인증번호 원문 로그 출력 금지 — knowledge.md)
+        //    - Access Token / Refresh Token 은 발급하지 않으며 읽거나 관리하지 않는다 (docs 보안 주의사항)
+        log.info("이메일 인증번호 확인 성공 - userId={}", userId);
+
+        // 6. 응답 생성 — 인증 완료 여부 반환 (docs 응답 data.verified — 성공 시 true)
+        return EmailVerificationConfirmResponseDTO.of(true);
     }
 
     @Override

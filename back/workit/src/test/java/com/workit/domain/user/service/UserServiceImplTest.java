@@ -5,11 +5,13 @@ import com.workit.domain.auth.provider.IdentityVerificationProvider;
 import com.workit.domain.auth.provider.IdentityVerificationResult;
 import com.workit.domain.auth.service.AuthService;
 import com.workit.domain.user.dto.request.AccountPasswordVerifyRequestDTO;
+import com.workit.domain.user.dto.request.EmailVerificationConfirmRequestDTO;
 import com.workit.domain.user.dto.request.EmailVerificationRequestDTO;
 import com.workit.domain.user.dto.request.PhoneChangeRequestDTO;
 import com.workit.domain.user.dto.request.ProfileOnboardingRequestDTO;
 import com.workit.domain.user.dto.request.ProfileUpdateRequestDTO;
 import com.workit.domain.user.dto.request.UserWithdrawalRequestDTO;
+import com.workit.domain.user.dto.response.EmailVerificationConfirmResponseDTO;
 import com.workit.domain.user.dto.response.EmailVerificationResponseDTO;
 import com.workit.domain.user.dto.response.MyProfileResponseDTO;
 import com.workit.domain.user.dto.response.PhoneChangeResponseDTO;
@@ -1409,6 +1411,165 @@ class UserServiceImplTest {
         // Then — 두 번 모두 발송 처리된다 (같은 이메일의 기존 인증번호 폐기/재발급은
         //   Mock 발송 서비스의 저장소가 같은 key 에 덮어써 처리한다 — docs)
         verify(emailVerificationService, times(2)).issueVerificationCode("new@example.com");
+    }
+
+    // ---------- 이메일 인증번호 확인 ----------
+
+    /** 이메일 인증번호 확인 요청 DTO 생성 헬퍼 — email/verificationCode 전달 */
+    private EmailVerificationConfirmRequestDTO emailVerificationConfirmRequest(String email, String code) {
+        EmailVerificationConfirmRequestDTO request = new EmailVerificationConfirmRequestDTO();
+        request.setEmail(email);
+        request.setVerificationCode(code);
+        return request;
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 성공 - 이메일 정규화 후 Mock 인증 서비스 위임 + 인증 완료 여부(true) 반환")
+    void confirmEmailVerification_success() {
+        // Given — ACTIVE 회원 (사용자 확인 통과)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+
+        // When — 대소문자/공백이 섞인 이메일도 정규화되어 확인된다
+        EmailVerificationConfirmResponseDTO result = userService.confirmEmailVerification(
+                501L, emailVerificationConfirmRequest("  New@Example.com  ", "123456"));
+
+        // Then — 정규화된 이메일과 입력 인증번호가 Mock 인증 서비스로 전달된다
+        verify(emailVerificationService).confirmVerificationCode("new@example.com", "123456");
+        // 응답은 인증 완료 여부 (docs 응답 data.verified — 성공 시 true)
+        assertTrue(result.isVerified());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - email 누락(null/빈 값/공백) → INVALID_EMAIL_REQUEST + 확인 없음")
+    void confirmEmailVerification_missingEmail() {
+        // Given — ACTIVE 회원 (사용자 확인 통과 — docs 처리 로직 순서)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+
+        // When & Then — null 요청 / null 이메일 / 빈 값 / 공백 모두 검증 실패
+        BusinessException nullEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L, null));
+        assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, nullEx.getErrorCode());
+
+        BusinessException nullEmailEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest(null, "123456")));
+        assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, nullEmailEx.getErrorCode());
+
+        BusinessException emptyEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("", "123456")));
+        assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, emptyEx.getErrorCode());
+
+        BusinessException blankEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("   ", "123456")));
+        assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, blankEx.getErrorCode());
+
+        // 검증 실패 시 Mock 인증 서비스가 호출되지 않아야 한다
+        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - verificationCode 누락(null/빈 값/공백) → EMAIL_VERIFICATION_CODE_INVALID + 확인 없음")
+    void confirmEmailVerification_missingCode() {
+        // Given — ACTIVE 회원 (사용자 확인 통과)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+
+        // When & Then — null / 빈 값 / 공백 인증번호 모두 검증 실패
+        BusinessException nullCodeEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new@example.com", null)));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID, nullCodeEx.getErrorCode());
+
+        BusinessException emptyCodeEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new@example.com", "")));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID, emptyCodeEx.getErrorCode());
+
+        BusinessException blankCodeEx = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new@example.com", "   ")));
+        assertEquals(UserErrorCode.EMAIL_VERIFICATION_CODE_INVALID, blankCodeEx.getErrorCode());
+
+        // 검증 실패 시 Mock 인증 서비스가 호출되지 않아야 한다
+        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 잘못된 이메일 형식 → INVALID_EMAIL_REQUEST + 확인 없음")
+    void confirmEmailVerification_invalidFormat() {
+        // Given — ACTIVE 회원 (사용자 확인 통과)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(activeUserWithoutProfile());
+
+        // When & Then — '@' 없음 등 형식 오류
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new.example.com", "123456")));
+        assertEquals(UserErrorCode.INVALID_EMAIL_REQUEST, ex.getErrorCode());
+
+        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 이미 탈퇴한 사용자 → USER_ALREADY_WITHDRAWN + 확인 없음")
+    void confirmEmailVerification_alreadyWithdrawn() {
+        // Given — WITHDRAWN 상태 회원
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(withdrawnUser());
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new@example.com", "123456")));
+        assertEquals(UserErrorCode.USER_ALREADY_WITHDRAWN, ex.getErrorCode());
+
+        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 회원 없음 → USER_NOT_FOUND")
+    void confirmEmailVerification_userNotFound() {
+        // Given — Mapper 가 null 반환 (회원 없음)
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(null);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new@example.com", "123456")));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("이메일 인증번호 확인 - 기타 비활성(차단 등) 회원 → USER_NOT_FOUND (계정 존재 여부 비노출)")
+    void confirmEmailVerification_blockedUser() {
+        // Given — BLOCKED 상태 회원
+        MyProfileVO blocked = activeUserWithoutProfile();
+        blocked.setStatus("BLOCKED");
+        when(userMapper.selectMyProfileByUserId(501L)).thenReturn(blocked);
+
+        // When & Then
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> userService.confirmEmailVerification(501L,
+                        emailVerificationConfirmRequest("new@example.com", "123456")));
+        assertEquals(UserErrorCode.USER_NOT_FOUND, ex.getErrorCode());
+
+        verify(emailVerificationService, never()).confirmVerificationCode(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("보안 - EmailVerificationConfirmRequestDTO toString 에 이메일/인증번호 원문 미노출")
+    void confirmEmailVerification_requestToStringHidesSecret() {
+        // Given
+        EmailVerificationConfirmRequestDTO request =
+                emailVerificationConfirmRequest("secret@example.com", "123456");
+
+        // When
+        String text = request.toString();
+
+        // Then — 이메일(개인정보)/인증번호(1회성 인증값)는 로그/toString 노출 금지 (knowledge.md)
+        assertFalse(text.contains("secret@example.com"));
+        assertFalse(text.contains("123456"));
     }
 
     /** SHA-256 hex 변환 — 저장될 phone_number_hash 기대값 계산 (Service 와 동일 hex 인코딩) */
