@@ -49,6 +49,7 @@ public class SettlementServiceImpl implements SettlementService {
     // =====================================================================================
 
     @Override
+    // 조회지만 importAppPayments 가 지출을 유입시키므로 readOnly 를 붙이면 안 된다
     @Transactional
     public SettlementResponseDTO getSettlement(Long userId, Long workationId, BudgetType budgetType) {
 
@@ -77,6 +78,7 @@ public class SettlementServiceImpl implements SettlementService {
     // =====================================================================================
 
     @Override
+    // buildDocument 안에서 지출을 유입시키므로 readOnly 를 붙이면 안 된다
     @Transactional
     public byte[] exportExcel(Long userId, Long workationId) {
         SettlementDocumentVO doc = buildDocument(userId, workationId,
@@ -93,6 +95,7 @@ public class SettlementServiceImpl implements SettlementService {
     // =====================================================================================
 
     @Override
+    // buildDocument 안에서 지출을 유입시키므로 readOnly 를 붙이면 안 된다
     @Transactional
     public byte[] exportPdf(Long userId, Long workationId) {
         SettlementDocumentVO doc = buildDocument(userId, workationId,
@@ -125,7 +128,8 @@ public class SettlementServiceImpl implements SettlementService {
         return SettlementDocumentVO.builder()
                 .workation(workation)
                 .userName(PersonalDataCipher.decrypt(settlementMapper.selectUserName(userId)))
-                .companyName(settlementMapper.selectCompanyName(userId))                .cardLabels(settlementMapper.selectUsedCardLabels(workationId, BudgetType.WORK))
+                .companyName(settlementMapper.selectCompanyName(userId))
+                .cardLabels(settlementMapper.selectUsedCardLabels(workationId, BudgetType.WORK))
                 .summary(summaries.isEmpty()
                         ? SettlementSummaryDTO.of(BudgetType.WORK, Collections.emptyList())
                         : summaries.get(0))

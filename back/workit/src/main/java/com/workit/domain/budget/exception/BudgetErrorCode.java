@@ -19,6 +19,8 @@ public enum BudgetErrorCode implements ErrorCode {
     BUDGET_AMOUNT_NEGATIVE    (HttpStatus.BAD_REQUEST, "배정 금액은 0원 이상이어야 합니다."),
     BUDGET_CATEGORY_DUPLICATED(HttpStatus.BAD_REQUEST, "같은 카테고리를 두 번 배정할 수 없습니다."),
     BUDGET_CATEGORY_IN_USE    (HttpStatus.BAD_REQUEST, "이미 지출이 등록된 카테고리를 목록에서 제외할 수 없습니다."),
+    BUDGET_CATEGORY_REQUIRED  (HttpStatus.BAD_REQUEST, "카테고리를 선택해 주세요."),
+    BUDGET_TYPE_REQUIRED      (HttpStatus.BAD_REQUEST, "예산 유형을 지정해 주세요."),
 
     /* 403 */
     BUDGET_ETC_DELETE_DENIED  (HttpStatus.FORBIDDEN,   "기타 카테고리는 삭제할 수 없습니다."),

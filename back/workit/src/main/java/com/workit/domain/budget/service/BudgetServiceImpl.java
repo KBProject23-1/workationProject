@@ -164,7 +164,7 @@ public class BudgetServiceImpl implements BudgetService {
         BigDecimal targetAmount = dto.getTargetAmount();
 
         if (categoryId == null) {
-            throw new IllegalArgumentException("카테고리를 선택해 주세요.");
+            throw new BusinessException(BudgetErrorCode.BUDGET_CATEGORY_REQUIRED);
         }
         if (targetAmount == null || targetAmount.compareTo(BigDecimal.ZERO) < 0) {
             throw new BusinessException(BudgetErrorCode.BUDGET_AMOUNT_NEGATIVE);
@@ -252,7 +252,7 @@ public class BudgetServiceImpl implements BudgetService {
         for (BudgetItemRequestDTO item : items) {
 
             if (item.getExpenseCategoryId() == null) {
-                throw new IllegalArgumentException("카테고리를 선택해 주세요.");
+                throw new BusinessException(BudgetErrorCode.BUDGET_CATEGORY_REQUIRED);
             }
             if (item.getTargetAmount() == null
                     || item.getTargetAmount().compareTo(BigDecimal.ZERO) < 0) {
@@ -304,7 +304,7 @@ public class BudgetServiceImpl implements BudgetService {
 
     private BudgetType requireBudgetType(BudgetType budgetType) {
         if (budgetType == null) {
-            throw new IllegalArgumentException("예산 유형을 지정해 주세요.");
+            throw new BusinessException(BudgetErrorCode.BUDGET_TYPE_REQUIRED);
         }
         return budgetType;
     }

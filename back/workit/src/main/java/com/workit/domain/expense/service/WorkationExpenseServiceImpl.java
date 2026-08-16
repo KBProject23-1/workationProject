@@ -56,6 +56,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     // =====================================================================================
 
     @Override
+    // 조회지만 importAppPayments 가 지출을 유입시키므로 readOnly 를 붙이면 안 된다
     @Transactional
     public ExpenseListResponseDTO getExpenseList(Long userId, Long workationId, BudgetType budgetType,
                                                 Long expenseCategoryId, Boolean uncheckedOnly,
@@ -225,7 +226,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         Long categoryId = dto.getExpenseCategoryId();
 
         if (categoryId == null) {
-            throw new IllegalArgumentException("카테고리를 선택해 주세요.");
+            throw new BusinessException(ExpenseErrorCode.CATEGORY_REQUIRED);
         }
         validateCategory(userId, target.getBudgetType(), categoryId);
 
@@ -280,7 +281,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         Long categoryId = dto.getExpenseCategoryId();
 
         if (categoryId == null) {
-            throw new IllegalArgumentException("변경할 예산 유형의 카테고리를 선택해 주세요.");
+            throw new BusinessException(ExpenseErrorCode.CATEGORY_REQUIRED,
+                    "변경할 예산 유형의 카테고리를 선택해 주세요.");
         }
 
         // 예산 유형이 바뀌면 카테고리 마스터도 달라지므로 새 유형 기준으로 검증한다
@@ -405,7 +407,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
 
     private BudgetType requireBudgetType(BudgetType budgetType) {
         if (budgetType == null) {
-            throw new IllegalArgumentException("예산 유형을 지정해 주세요.");
+            throw new BusinessException(ExpenseErrorCode.BUDGET_TYPE_REQUIRED);
         }
         return budgetType;
     }
@@ -413,10 +415,11 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     private void validateMerchantName(String merchantName) {
 
         if (merchantName == null || merchantName.trim().isEmpty()) {
-            throw new IllegalArgumentException("가맹점명을 입력해 주세요.");
+            throw new BusinessException(ExpenseErrorCode.MERCHANT_NAME_REQUIRED);
         }
+        // 제한 길이는 상수라 메시지를 만들어 넘긴다
         if (merchantName.length() > MAX_MERCHANT_NAME_LENGTH) {
-            throw new IllegalArgumentException(
+            throw new BusinessException(ExpenseErrorCode.MERCHANT_NAME_TOO_LONG,
                     "가맹점명은 " + MAX_MERCHANT_NAME_LENGTH + "자를 넘을 수 없습니다.");
         }
     }
@@ -429,7 +432,8 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
 
     private void validateMemo(String memo) {
         if (memo != null && memo.length() > MAX_MEMO_LENGTH) {
-            throw new IllegalArgumentException("메모는 " + MAX_MEMO_LENGTH + "자를 넘을 수 없습니다.");
+            throw new BusinessException(ExpenseErrorCode.MEMO_TOO_LONG,
+                    "메모는 " + MAX_MEMO_LENGTH + "자를 넘을 수 없습니다.");
         }
     }
 
@@ -438,7 +442,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     private void validateSpentDate(LocalDate spentDate, WorkationVO workation) {
 
         if (spentDate == null) {
-            throw new IllegalArgumentException("지출 일자를 입력해 주세요.");
+            throw new BusinessException(ExpenseErrorCode.SPENT_DATE_REQUIRED);
         }
         if (spentDate.isBefore(workation.getStartDate()) || spentDate.isAfter(workation.getEndDate())) {
             throw new BusinessException(ExpenseErrorCode.SPENT_DATE_OUT_OF_PERIOD);
@@ -448,7 +452,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     private void validateCategory(Long userId, BudgetType budgetType, Long expenseCategoryId) {
 
         if (expenseCategoryId == null) {
-            throw new IllegalArgumentException("카테고리를 선택해 주세요.");
+            throw new BusinessException(ExpenseErrorCode.CATEGORY_REQUIRED);
         }
         if (expenseMapper.countValidCategory(budgetType, userId, expenseCategoryId) == 0) {
             throw new BusinessException(ExpenseErrorCode.CATEGORY_TYPE_MISMATCH);

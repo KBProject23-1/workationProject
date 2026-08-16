@@ -15,6 +15,12 @@ public enum WorkationErrorCode implements ErrorCode {
     /* 400 */
     REGION_NOT_FOUND   (HttpStatus.BAD_REQUEST, "존재하지 않는 지역입니다."),
     EXPENSE_OUT_OF_PERIOD (HttpStatus.BAD_REQUEST, "이미 등록된 지출이 변경한 기간을 벗어납니다."),
+    TITLE_REQUIRED     (HttpStatus.BAD_REQUEST, "워케이션 제목을 입력해 주세요."),
+    TITLE_TOO_LONG     (HttpStatus.BAD_REQUEST, "워케이션 제목은 100자를 넘을 수 없습니다."),
+    PERIOD_REQUIRED    (HttpStatus.BAD_REQUEST, "워케이션 기간을 입력해 주세요."),
+    PERIOD_INVALID     (HttpStatus.BAD_REQUEST, "종료일은 시작일 이후여야 합니다."),
+    BUDGET_REQUIRED    (HttpStatus.BAD_REQUEST, "예산을 입력해 주세요."),
+    BUDGET_NEGATIVE    (HttpStatus.BAD_REQUEST, "예산은 0원 이상이어야 합니다."),
 
     /* 403 */
     ACCESS_DENIED      (HttpStatus.FORBIDDEN,   "본인의 워케이션만 접근할 수 있습니다."),

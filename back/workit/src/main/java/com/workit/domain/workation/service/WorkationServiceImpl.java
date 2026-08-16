@@ -31,6 +31,7 @@ public class WorkationServiceImpl implements WorkationService {
 
     private static final int DEFAULT_PAGE_SIZE = 10;
     private static final int MAX_PAGE_SIZE = 50;
+    private static final int MAX_TITLE_LENGTH = 100;
 
     // 숙박 상품만 "잘 곳이 없는 날" 계산에 쓴다
     private static final String ROOM_PRODUCT_TYPE = "ROOM";
@@ -219,7 +220,7 @@ public class WorkationServiceImpl implements WorkationService {
         LocalDate to = (endDate != null) ? endDate : workation.getEndDate();
 
         if (to.isBefore(from)) {
-            throw new IllegalArgumentException("종료일은 시작일 이후여야 합니다.");
+            throw new BusinessException(WorkationErrorCode.PERIOD_INVALID);
         }
 
         List<WorkationReservationVO> reservations =
@@ -323,16 +324,16 @@ public class WorkationServiceImpl implements WorkationService {
                                         Long regionId, BigDecimal businessBudget, BigDecimal personalBudget) {
 
         if (title == null || title.trim().isEmpty()) {
-            throw new IllegalArgumentException("워케이션 제목을 입력해 주세요.");
+            throw new BusinessException(WorkationErrorCode.TITLE_REQUIRED);
         }
-        if (title.length() > 100) {
-            throw new IllegalArgumentException("워케이션 제목은 100자를 넘을 수 없습니다.");
+        if (title.length() > MAX_TITLE_LENGTH) {
+            throw new BusinessException(WorkationErrorCode.TITLE_TOO_LONG);
         }
         if (startDate == null || endDate == null) {
-            throw new IllegalArgumentException("워케이션 기간을 입력해 주세요.");
+            throw new BusinessException(WorkationErrorCode.PERIOD_REQUIRED);
         }
         if (endDate.isBefore(startDate)) {
-            throw new IllegalArgumentException("종료일은 시작일 이후여야 합니다.");
+            throw new BusinessException(WorkationErrorCode.PERIOD_INVALID);
         }
         if (regionId == null || workationMapper.countRegion(regionId) == 0) {
             throw new BusinessException(WorkationErrorCode.REGION_NOT_FOUND);
@@ -341,12 +342,15 @@ public class WorkationServiceImpl implements WorkationService {
         validateBudget(personalBudget, "개인 예산");
     }
 
+    // 어느 쪽 예산인지는 errorCode 로 구분되지 않으므로 메시지에 법인/개인을 담아 보낸다
     private void validateBudget(BigDecimal amount, String label) {
         if (amount == null) {
-            throw new IllegalArgumentException(label + "을 입력해 주세요.");
+            throw new BusinessException(WorkationErrorCode.BUDGET_REQUIRED,
+                    label + "을 입력해 주세요.");
         }
         if (amount.compareTo(BigDecimal.ZERO) < 0) {
-            throw new IllegalArgumentException(label + "은 0원 이상이어야 합니다.");
+            throw new BusinessException(WorkationErrorCode.BUDGET_NEGATIVE,
+                    label + "은 0원 이상이어야 합니다.");
         }
     }
 }
