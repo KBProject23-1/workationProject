@@ -51,7 +51,7 @@
         워케이션마다 다시 받으면 두 번째부터 같은 문항을 또 답해야 한다.
         workationId 파라미터는 호출부 시그니처를 유지하려고 남겨 둔 것이고 쓰지 않는다.
     -->
-    <select id="countSurveyByUserAndWorkation" resultType="int">
+    <select id="countSurveyByUser" resultType="int">
         SELECT COUNT(*)
           FROM user_surveys
          WHERE user_id = #{userId}
@@ -72,7 +72,12 @@
          WHERE id = #{surveyId}
     </select>
 
-    <select id="selectLatestSurveyByUserAndWorkation" resultMap="userSurveyMap">
+    <!--
+        설문은 사용자의 취향이라 워케이션보다 오래 산다.
+        워케이션이 바뀌거나 정산이 끝나도 마지막 응답을 그대로 이어서 쓴다.
+        user_surveys.workation_id 는 최초 작성 시점을 남기는 값이고 조회 조건이 아니다.
+    -->
+    <select id="selectLatestSurveyByUser" resultMap="userSurveyMap">
         SELECT id, user_id, workation_id, created_at, updated_at
           FROM user_surveys
          WHERE user_id = #{userId}

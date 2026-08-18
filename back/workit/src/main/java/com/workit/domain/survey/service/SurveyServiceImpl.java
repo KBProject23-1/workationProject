@@ -62,7 +62,8 @@ public class SurveyServiceImpl implements SurveyService {
             throw new BusinessException(SurveyErrorCode.SURVEY_ACCESS_DENIED);
         }
 
-        if (surveyMapper.countSurveyByUserAndWorkation(userId, activeWorkation.getId()) > 0) {
+        // 설문은 사용자당 1개다. 두 번째 워케이션부터는 기존 응답을 수정해서 쓴다
+        if (surveyMapper.countSurveyByUser(userId) > 0) {
             throw new BusinessException(SurveyErrorCode.SURVEY_ALREADY_EXISTS);
         }
 
@@ -90,12 +91,10 @@ public class SurveyServiceImpl implements SurveyService {
     public SurveyResultResponseDTO getMySurveyResult(Long userId) {
         validateUserId(userId);
 
-        WorkationVO activeWorkation = findActiveWorkation(userId);
-        if (activeWorkation == null) {
-            throw new BusinessException(SurveyErrorCode.SURVEY_ACCESS_DENIED);
-        }
-
-        UserSurveyVO survey = surveyMapper.selectLatestSurveyByUserAndWorkation(userId, activeWorkation.getId());
+        // 진행 중 워케이션을 요구하지 않는다.
+        // 설문은 사용자의 취향이라 정산이 끝나거나 워케이션이 없어도 조회할 수 있어야 한다.
+        // (내 정보 > 나의 워케이션 스타일 진입점)
+        UserSurveyVO survey = surveyMapper.selectLatestSurveyByUser(userId);
         if (survey == null) {
             throw new BusinessException(SurveyErrorCode.SURVEY_NOT_FOUND);
         }
