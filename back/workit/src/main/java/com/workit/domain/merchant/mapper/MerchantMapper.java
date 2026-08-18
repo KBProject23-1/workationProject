@@ -64,7 +64,7 @@ public interface MerchantMapper {
             @Param("endDate") LocalDate endDate,
             @Param("requiredDateCount") Integer requiredDateCount,
             @Param("requiredQuantity") Integer requiredQuantity,
-            @Param("guestCount") Integer guestCount
+            @Param("headcount") Integer headcount
     );
 
     MerchantDetailVO selectMerchantOfficeDetails(

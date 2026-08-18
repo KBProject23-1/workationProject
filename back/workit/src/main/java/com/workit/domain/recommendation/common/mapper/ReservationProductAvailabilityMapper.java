@@ -14,6 +14,9 @@ public interface ReservationProductAvailabilityMapper {
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             @Param("includeEndDate") boolean includeEndDate,
-            @Param("requiredInventoryDateCount") Integer requiredInventoryDateCount
+            @Param("requiredInventoryDateCount") Integer requiredInventoryDateCount,
+            @Param("requiredQuantity") int requiredQuantity,
+            @Param("requiredHeadcount") int requiredHeadcount,
+            @Param("roomCount") int roomCount
     );
 }

@@ -38,6 +38,7 @@ public class MerchantController {
             @RequestParam(value = "startDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam(value = "endDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
             @RequestParam(value = "headcount", required = false) Integer headcount,
+            @RequestParam(value = "guestCount", required = false) Integer guestCount,
             @RequestParam(value = "roomCount", required = false) Integer roomCount,
             @RequestParam(value = "minPrice", required = false) Long minPrice,
             @RequestParam(value = "maxPrice", required = false) Long maxPrice,
@@ -55,7 +56,7 @@ public class MerchantController {
                 .category(category)
                 .startDate(startDate)
                 .endDate(endDate)
-                .headcount(headcount)
+                .headcount(headcount != null ? headcount : guestCount)
                 .roomCount(roomCount)
                 .minPrice(minPrice)
                 .maxPrice(maxPrice)
@@ -80,6 +81,7 @@ public class MerchantController {
             @RequestParam(value = "startDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam(value = "endDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
             @RequestParam(value = "roomCount", required = false) Integer roomCount,
+            @RequestParam(value = "headcount", required = false) Integer headcount,
             @RequestParam(value = "guestCount", required = false) Integer guestCount
     ) {
         return GlobalResponseFactory.success(
@@ -89,7 +91,7 @@ public class MerchantController {
                         startDate,
                         endDate,
                         roomCount,
-                        guestCount
+                        headcount != null ? headcount : guestCount
                 )
         );
     }
@@ -100,6 +102,7 @@ public class MerchantController {
             @PathVariable("merchantId") Long merchantId,
             @RequestParam(value = "startDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam(value = "endDate", required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
+            @RequestParam(value = "headcount", required = false) Integer headcount,
             @RequestParam(value = "guestCount", required = false) Integer guestCount
     ) {
         return GlobalResponseFactory.success(
@@ -108,7 +111,7 @@ public class MerchantController {
                         merchantId,
                         startDate,
                         endDate,
-                        guestCount
+                        headcount != null ? headcount : guestCount
                 )
         );
     }

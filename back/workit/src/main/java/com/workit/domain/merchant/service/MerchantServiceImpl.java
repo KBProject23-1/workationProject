@@ -86,6 +86,7 @@ public class MerchantServiceImpl implements MerchantService {
             validatePeriod(startDate, endDate);
         }
 
+        int safeHeadcount = headcount == null ? 1 : headcount;
         int safeRoomCount = condition.getRoomCount() == null ? 1 : condition.getRoomCount();
 
         MerchantSortType safeSort = condition.getSort() == null
@@ -111,7 +112,7 @@ public class MerchantServiceImpl implements MerchantService {
                     startDate,
                     endDate,
                     requiredDateCount,
-                    headcount,
+                    safeHeadcount,
                     safeRoomCount,
                     minPrice,
                     maxPrice,
@@ -158,7 +159,7 @@ public class MerchantServiceImpl implements MerchantService {
             LocalDate startDate,
             LocalDate endDate,
             Integer roomCount,
-            Integer guestCount
+            Integer headcount
     ) {
         try {
             if (merchantId == null || merchantId < 1) {
@@ -172,13 +173,16 @@ public class MerchantServiceImpl implements MerchantService {
 
             validatePeriod(startDate, endDate);
             validateRoomCount(roomCount);
-            validateGuestCount(guestCount);
+            validateHeadcount(headcount);
+
+            int safeRoomCount = roomCount == null ? 1 : roomCount;
+            int safeHeadcount = headcount == null ? 1 : headcount;
 
             Integer requiredDateCount = null;
             Integer requiredQuantity = null;
             if (startDate != null && endDate != null) {
                 requiredDateCount = (int) ChronoUnit.DAYS.between(startDate, endDate);
-                requiredQuantity = roomCount == null ? 1 : roomCount;
+                requiredQuantity = safeRoomCount;
             }
 
             List<MerchantProductVO> reservationProducts =
@@ -188,8 +192,8 @@ public class MerchantServiceImpl implements MerchantService {
                                     merchantId,
                                     startDate,
                                     endDate,
-                                    guestCount,
-                                    roomCount,
+                                    safeHeadcount,
+                                    safeRoomCount,
                                     requiredDateCount,
                                     requiredQuantity,
                                     false
@@ -236,7 +240,7 @@ public class MerchantServiceImpl implements MerchantService {
             Long merchantId,
             LocalDate startDate,
             LocalDate endDate,
-            Integer guestCount
+            Integer headcount
     ) {
         try {
             if (merchantId == null || merchantId < 1) {
@@ -247,10 +251,12 @@ public class MerchantServiceImpl implements MerchantService {
                 throw new BusinessException(MerchantErrorCode.INVALID_PERIOD);
             }
             validatePeriod(startDate, endDate);
-            validateGuestCount(guestCount);
+            validateHeadcount(headcount);
+
+            int safeHeadcount = headcount == null ? 1 : headcount;
 
             Integer requiredDateCount = null;
-            Integer requiredQuantity = guestCount;
+            Integer requiredQuantity = 1;
             if (startDate != null && endDate != null) {
                 requiredDateCount = (int) ChronoUnit.DAYS.between(startDate, endDate) + 1;
             }
@@ -266,7 +272,7 @@ public class MerchantServiceImpl implements MerchantService {
                     endDate,
                     requiredDateCount,
                     requiredQuantity,
-                    guestCount
+                    safeHeadcount
             );
             List<MerchantItemResponseDTO> productItems = officeProducts == null
                     ? Collections.emptyList()
@@ -435,12 +441,6 @@ public class MerchantServiceImpl implements MerchantService {
     private void validateRoomCount(Integer roomCount) {
         if (roomCount != null && roomCount < 1) {
             throw new IllegalArgumentException("방 개수는 1 이상이어야 합니다.");
-        }
-    }
-
-    private void validateGuestCount(Integer guestCount) {
-        if (guestCount != null && guestCount < 1) {
-            throw new IllegalArgumentException("인원 수는 1 이상이어야 합니다.");
         }
     }
 

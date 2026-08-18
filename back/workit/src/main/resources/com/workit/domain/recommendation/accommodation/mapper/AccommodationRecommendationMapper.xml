@@ -211,6 +211,7 @@
           LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
           LEFT JOIN merchants sm ON sm.id = rr.secondary_reference_merchant_id
          WHERE rr.user_id = #{userId}
+           AND rr.workation_id = #{workationId}
            AND rr.recommendation_type = 'ACCOMMODATION'
         <if test="referenceMerchantId != null">
            AND rr.reference_merchant_id = #{referenceMerchantId}
@@ -243,6 +244,20 @@
           FROM recommendation_results result
           JOIN merchants m ON m.id = result.merchant_id
          WHERE result.recommendation_request_id = #{requestId}
+           AND EXISTS (
+               SELECT 1
+                 FROM reservation_products rp
+                 JOIN product_daily_inventories pdi ON pdi.product_id = rp.id
+                WHERE rp.merchant_id = result.merchant_id
+                  AND rp.product_detail_type = 'ROOM'
+                  AND rp.max_headcount * #{roomCount} &gt;= #{headcount}
+                  AND pdi.inventory_date &gt;= #{startDate}
+                  AND pdi.inventory_date &lt; #{endDate}
+                GROUP BY rp.id
+               HAVING COUNT(DISTINCT pdi.inventory_date) = #{requiredDateCount}
+                  AND MIN(CASE WHEN pdi.is_available = 1
+                      AND pdi.remaining_capacity &gt;= #{roomCount} THEN 1 ELSE 0 END) = 1
+           )
         <if test="cursorRanking != null and cursorId != null">
            AND (result.ranking &gt; #{cursorRanking}
                 OR (result.ranking = #{cursorRanking} AND result.id &gt; #{cursorId}))

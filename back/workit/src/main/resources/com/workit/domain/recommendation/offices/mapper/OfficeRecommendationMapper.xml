@@ -390,10 +390,27 @@
                    ELSE 0
                END AS bookmarked
         FROM recommendation_results rr
+        JOIN recommendation_requests rec_request
+          ON rec_request.id = rr.recommendation_request_id
+        JOIN workations w
+          ON w.id = rec_request.workation_id
         JOIN merchants m ON m.id = rr.merchant_id
         JOIN offices o ON o.merchant_id = m.id
         LEFT JOIN reviews r ON r.merchant_id = m.id AND r.status = 'ACTIVE'
         WHERE rr.recommendation_request_id = #{recommendationRequestId}
+          AND EXISTS (
+              SELECT 1
+              FROM reservation_products rp
+              JOIN product_daily_inventories pdi ON pdi.product_id = rp.id
+              WHERE rp.merchant_id = rr.merchant_id
+                AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM')
+                AND pdi.inventory_date &gt;= w.start_date
+                AND pdi.inventory_date &lt;= w.end_date
+              GROUP BY rp.id
+              HAVING COUNT(DISTINCT pdi.inventory_date) = DATEDIFF(w.end_date, w.start_date) + 1
+                 AND MIN(CASE WHEN pdi.is_available = 1
+                     AND pdi.remaining_capacity &gt;= 1 THEN 1 ELSE 0 END) = 1
+          )
           <if test="cursorRanking != null and cursorId != null">
               AND (
                   rr.ranking <![CDATA[ > ]]> #{cursorRanking}
@@ -420,7 +437,9 @@
                  o.noise_level,
                  rr.calculated_at,
                  m.latitude,
-                 m.longitude
+                 m.longitude,
+                 w.start_date,
+                 w.end_date
         ORDER BY rr.ranking ASC, rr.id ASC
         LIMIT #{size}
     </select>

@@ -397,8 +397,11 @@
         </if>
         WHERE rp.merchant_id = o.merchant_id
           AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM')
-          <if test="guestCount != null">
-            AND rp.max_headcount >= #{guestCount}
+          <if test="headcount != null">
+            AND (
+                rp.product_detail_type = 'OFFICE_SEAT'
+                OR rp.max_headcount >= #{headcount}
+            )
           </if>
         <if test="startDate != null and endDate != null">
             AND pdi.inventory_date &gt;= #{startDate}
@@ -414,11 +417,12 @@
                  rp.thumbnail_url
         HAVING COUNT(DISTINCT pdi.inventory_date) = #{requiredDateCount}
            AND MIN(CASE WHEN pdi.is_available = 1
-                AND pdi.remaining_capacity &gt; 0
-                <if test="requiredQuantity != null">
-                AND pdi.remaining_capacity &gt;= #{requiredQuantity}
-                </if>
-           THEN 1 ELSE 0 END) = 1
+                AND (
+                    (rp.product_detail_type = 'OFFICE_SEAT'
+                        AND pdi.remaining_capacity &gt;= #{headcount})
+                    OR (rp.product_detail_type = 'MEETING_ROOM'
+                        AND pdi.remaining_capacity &gt;= #{requiredQuantity})
+                ) THEN 1 ELSE 0 END) = 1
         </if>
         ORDER BY rp.id ASC
     </select>

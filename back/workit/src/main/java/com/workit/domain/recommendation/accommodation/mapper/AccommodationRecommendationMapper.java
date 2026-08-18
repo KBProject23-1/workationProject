@@ -6,6 +6,7 @@ import com.workit.domain.recommendation.accommodation.vo.RecommendationRequestVO
 import com.workit.domain.recommendation.accommodation.vo.RecommendationResultVO;
 import org.apache.ibatis.annotations.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface AccommodationRecommendationMapper {
@@ -34,10 +35,16 @@ public interface AccommodationRecommendationMapper {
                                                       @Param("userId") Long userId);
 
     RecommendationRequestVO selectLatestAccommodationRequest(@Param("userId") Long userId,
+                                                           @Param("workationId") Long workationId,
                                                            @Param("referenceMerchantId") Long referenceMerchantId);
 
     List<RecommendationResultVO> selectRecommendationResults(@Param("requestId") Long requestId,
                                                              @Param("cursorRanking") Integer cursorRanking,
                                                              @Param("cursorId") Long cursorId,
+                                                             @Param("startDate") LocalDate startDate,
+                                                             @Param("endDate") LocalDate endDate,
+                                                             @Param("requiredDateCount") int requiredDateCount,
+                                                             @Param("headcount") int headcount,
+                                                             @Param("roomCount") int roomCount,
                                                              @Param("limit") int limit);
 }
