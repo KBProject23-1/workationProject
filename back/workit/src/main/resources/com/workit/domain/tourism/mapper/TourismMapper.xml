@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.tourism.mapper.TourismMapper">
+
+    <select id="selectRegions" resultType="com.workit.domain.tourism.vo.TourismRegionVO">
+        SELECT id, name FROM region ORDER BY LENGTH(name) DESC, id
+    </select>
+
+    <select id="selectMerchantIdByContentId" resultType="long">
+        SELECT merchant_id
+          FROM tourism_merchant_sources
+         WHERE content_id = #{contentId}
+    </select>
+
+    <select id="shouldFetchDescription" resultType="boolean">
+        SELECT NOT EXISTS (
+            SELECT 1
+              FROM tourism_merchant_sources tms
+             WHERE tms.content_id = #{contentId}
+               AND tms.detail_modified_time IS NOT NULL
+               AND tms.detail_modified_time &lt;=&gt; #{modifiedTime}
+        )
+    </select>
+
+    <insert id="insertMerchant"
+            parameterType="com.workit.domain.tourism.vo.TourismMerchantVO"
+            useGeneratedKeys="true" keyProperty="merchantId">
+        INSERT INTO merchants (
+            region_id, name, taxpayer_identification_number, address, category,
+            latitude, longitude, phone_number, rating, thumbnail_url, price
+        ) VALUES (
+            #{regionId}, #{name}, NULL, #{address}, #{category},
+            #{latitude}, #{longitude}, #{phoneNumber}, NULL, #{thumbnailUrl}, 0
+        )
+    </insert>
+
+    <update id="updateMerchant"
+            parameterType="com.workit.domain.tourism.vo.TourismMerchantVO">
+        UPDATE merchants
+           SET region_id = #{regionId},
+               name = #{name},
+               address = #{address},
+               category = #{category},
+               latitude = #{latitude},
+               longitude = #{longitude},
+               phone_number = COALESCE(#{phoneNumber}, phone_number),
+               thumbnail_url = COALESCE(#{thumbnailUrl}, thumbnail_url)
+         WHERE id = #{merchantId}
+    </update>
+
+    <insert id="upsertTourismSource">
+        INSERT INTO tourism_merchant_sources (
+            merchant_id, content_id, modified_time, last_seen_sync_id,
+            detail_modified_time, is_active
+        ) VALUES (
+            #{merchantId}, #{contentId}, #{modifiedTime}, #{syncId},
+            #{detailModifiedTime}, 1
+        )
+        ON DUPLICATE KEY UPDATE
+            merchant_id = VALUES(merchant_id),
+            modified_time = VALUES(modified_time),
+            last_seen_sync_id = COALESCE(
+                VALUES(last_seen_sync_id), last_seen_sync_id),
+            detail_modified_time = COALESCE(
+                VALUES(detail_modified_time), detail_modified_time),
+            is_active = 1
+    </insert>
+
+    <insert id="upsertActivity">
+        INSERT INTO activities (merchant_id, activity_type, description)
+        VALUES (#{merchantId}, #{activityType}, #{description})
+        ON DUPLICATE KEY UPDATE
+            activity_type = VALUES(activity_type),
+            description = COALESCE(VALUES(description), description)
+    </insert>
+
+    <insert id="upsertRestaurant">
+        INSERT INTO restaurants (merchant_id, food_type, price_level, description)
+        VALUES (#{merchantId}, #{foodType}, #{priceLevel}, #{description})
+        ON DUPLICATE KEY UPDATE
+            food_type = VALUES(food_type),
+            price_level = VALUES(price_level),
+            description = COALESCE(VALUES(description), description)
+    </insert>
+
+    <insert id="upsertAccommodation">
+        INSERT INTO accommodations (
+            merchant_id, accommodation_type, description, check_in_time, check_out_time
+        ) VALUES (
+            #{merchantId}, #{accommodationType}, #{description},
+            #{checkInTime}, #{checkOutTime}
+        )
+        ON DUPLICATE KEY UPDATE
+            accommodation_type = VALUES(accommodation_type),
+            description = COALESCE(VALUES(description), description),
+            check_in_time = COALESCE(VALUES(check_in_time), check_in_time),
+            check_out_time = COALESCE(VALUES(check_out_time), check_out_time)
+    </insert>
+
+    <delete id="deleteActivity">
+        DELETE FROM activities WHERE merchant_id = #{merchantId}
+    </delete>
+
+    <delete id="deleteRestaurant">
+        DELETE FROM restaurants WHERE merchant_id = #{merchantId}
+    </delete>
+
+    <delete id="deleteAccommodation">
+        DELETE FROM accommodations WHERE merchant_id = #{merchantId}
+    </delete>
+
+    <update id="deactivateMerchant">
+        UPDATE tourism_merchant_sources
+           SET is_active = 0
+         WHERE content_id = #{contentId}
+           AND is_active = 1
+    </update>
+
+    <update id="deactivateMissing">
+        UPDATE tourism_merchant_sources tms
+        INNER JOIN activities a ON a.merchant_id = tms.merchant_id
+           SET tms.is_active = 0
+         WHERE a.activity_type = #{activityType}
+           AND tms.is_active = 1
+           AND (tms.last_seen_sync_id IS NULL
+                OR tms.last_seen_sync_id &lt;&gt; #{syncId})
+    </update>
+
+    <update id="deactivateMissingPlaceType">
+        UPDATE tourism_merchant_sources tms
+        INNER JOIN merchants m ON m.id = tms.merchant_id
+           SET tms.is_active = 0
+         WHERE m.category = #{placeType}
+           AND tms.is_active = 1
+           AND (tms.last_seen_sync_id IS NULL
+                OR tms.last_seen_sync_id &lt;&gt; #{syncId})
+    </update>
+
+    <insert id="insertSyncRun" parameterType="com.workit.domain.tourism.vo.TourismSyncRunVO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO tourism_sync_runs (mode, status, target_dates)
+        VALUES (#{mode}, #{status}, #{targetDates})
+    </insert>
+
+    <update id="completeSyncRun">
+        UPDATE tourism_sync_runs
+           SET status = #{status}, processed_count = #{processedCount},
+               deactivated_count = #{deactivatedCount}, error_message = #{errorMessage},
+               finished_at = NOW()
+         WHERE id = #{id}
+    </update>
+
+    <sql id="syncColumns">
+        id, mode, status, target_dates, processed_count, deactivated_count,
+        error_message, started_at, finished_at
+    </sql>
+
+    <select id="selectSyncRun" resultType="com.workit.domain.tourism.vo.TourismSyncRunVO">
+        SELECT <include refid="syncColumns"/> FROM tourism_sync_runs WHERE id = #{id}
+    </select>
+
+    <select id="selectLatestSyncRun" resultType="com.workit.domain.tourism.vo.TourismSyncRunVO">
+        SELECT <include refid="syncColumns"/>
+          FROM tourism_sync_runs ORDER BY id DESC LIMIT 1
+    </select>
+</mapper>

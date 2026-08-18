@@ -21,6 +21,8 @@
                  AND b.is_deleted IS NULL
                ) AS bookmarked
         FROM merchants m
+        LEFT JOIN tourism_merchant_sources tms
+               ON tms.merchant_id = m.id
         LEFT JOIN accommodations a
                ON a.merchant_id = m.id
               AND m.category = 'ACCOMMODATION'
@@ -36,7 +38,7 @@
         LEFT JOIN reviews r
                ON r.merchant_id = m.id
                AND r.status = 'ACTIVE'
-        WHERE 1 = 1
+        WHERE (tms.merchant_id IS NULL OR tms.is_active = 1)
         <choose>
             <when test="category == 'ACCOMMODATION'">
                 AND m.category = 'ACCOMMODATION'

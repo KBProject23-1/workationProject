@@ -99,9 +99,13 @@
                NULL AS difficulty
           FROM merchants m
           JOIN activities a ON a.merchant_id = m.id
+     LEFT JOIN tourism_merchant_sources tms ON tms.merchant_id = m.id
      LEFT JOIN reviews r ON r.merchant_id = m.id AND r.status = 'ACTIVE'
          WHERE m.region_id = #{regionId}
            AND m.category = 'ACTIVITY'
+           AND (tms.merchant_id IS NULL OR tms.is_active = 1)
+           AND m.latitude IS NOT NULL
+           AND m.longitude IS NOT NULL
          GROUP BY m.id, m.name, m.category, m.address, m.thumbnail_url,
                   m.price, m.rating, m.latitude, m.longitude, a.activity_type
          ORDER BY m.id ASC

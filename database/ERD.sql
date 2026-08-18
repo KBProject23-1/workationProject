@@ -545,7 +545,7 @@ CREATE TABLE `accommodations`
 (
     `merchant_id`        BIGINT PRIMARY KEY COMMENT '가맹점 고유 번호(PK, FK)',
     `accommodation_type` ENUM ( 'HOTEL', 'PENSION', 'RESORT', 'GUESTHOUSE', 'POOL_VILLA' ) NOT NULL,
-    `description`        TEXT                                                              NULL,
+    `description`        LONGTEXT                                                          NULL,
     `check_in_time`      TIME                                                              NULL,
     `check_out_time`     TIME                                                              NULL,
     CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
@@ -564,6 +564,7 @@ CREATE TABLE `restaurants`
     `merchant_id` BIGINT PRIMARY KEY COMMENT '가맹점 고유 번호(PK, FK)',
     `food_type`   ENUM ( 'KOREAN', 'JAPANESE', 'CHINESE', 'WESTERN', 'CAFE', 'DESSERT', 'BAR' ) NOT NULL,
     `price_level` TINYINT                                                                       NOT NULL,
+    `description` LONGTEXT                                                                      NULL,
     CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
 
 );
@@ -576,8 +577,48 @@ CREATE TABLE `activities`
     'CAFE_TEA_HOUSE', 'NATURAL_PARK', 'MOUNTAIN_SCENERY', 'WATER_SENERY',
     'NATURAL_ECOLOGY', 'NONE'
 ) NOT NULL,
+    `description` LONGTEXT NULL COMMENT 'TourAPI 상세보기 통합 내용',
     CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
 );
+
+-- TourAPI 동기화 실행 이력
+CREATE TABLE `tourism_sync_runs`
+(
+    `id`                BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `mode`              VARCHAR(20) NOT NULL,
+    `status`            VARCHAR(20) NOT NULL,
+    `target_dates`      VARCHAR(40) NULL,
+    `processed_count`   INT NOT NULL DEFAULT 0,
+    `deactivated_count` INT NOT NULL DEFAULT 0,
+    `error_message`     VARCHAR(1000) NULL,
+    `started_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `finished_at`       DATETIME NULL,
+    KEY `ix_tourism_sync_runs_started_at` (`started_at`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+
+-- merchants를 변경하지 않고 TourAPI 원본과 동기화 상태를 연결한다.
+CREATE TABLE `tourism_merchant_sources`
+(
+    `id`                   BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `merchant_id`          BIGINT NOT NULL,
+    `content_id`           VARCHAR(30) NOT NULL COMMENT 'TourAPI contentid',
+    `modified_time`        VARCHAR(14) NULL COMMENT 'TourAPI modifiedtime',
+    `last_seen_sync_id`    BIGINT NULL COMMENT '마지막 FULL 동기화 실행 ID',
+    `detail_modified_time` VARCHAR(14) NULL COMMENT '상세정보 반영 modifiedtime',
+    `is_active`            TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT `fk_tourism_merchant_sources_merchant`
+        FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE,
+    UNIQUE KEY `ux_tourism_sources_merchant` (`merchant_id`),
+    UNIQUE KEY `ux_tourism_sources_content` (`content_id`),
+    KEY `ix_tourism_sources_active_sync` (`is_active`, `last_seen_sync_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE `recommendation_requests`
 (
@@ -1224,11 +1265,3 @@ SELECT 'PERSONAL', 'ACTIVITY', id
 FROM `expense_categories`
 WHERE `budget_type` = 'PERSONAL'
   AND `code` = 'LEISURE';
-
-ALTER TABLE activities
-    ADD COLUMN description VARCHAR(500) NULL COMMENT '여가 활동 설명'
-        AFTER activity_type;
-
-ALTER TABLE restaurants
-    ADD COLUMN description VARCHAR(500) NULL COMMENT '여가 활동 설명'
-        AFTER price_level;
