@@ -19,6 +19,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -378,7 +379,12 @@ public class TourApiClient {
         }
         String trimmed = value.trim();
         if (trimmed.matches(".*%[0-9A-Fa-f]{2}.*")) {
-            return URLDecoder.decode(trimmed, StandardCharsets.UTF_8);
+            try {
+                return URLDecoder.decode(trimmed, StandardCharsets.UTF_8.name());
+            } catch (UnsupportedEncodingException exception) {
+                // UTF-8은 모든 Java 구현이 반드시 지원하므로 실행될 수 없는 방어 코드다.
+                throw new IllegalStateException("UTF-8 디코딩을 지원하지 않습니다.", exception);
+            }
         }
         return trimmed;
     }

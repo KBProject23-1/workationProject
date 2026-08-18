@@ -317,7 +317,10 @@ public class OfficeRecommendationServiceImpl implements OfficeRecommendationServ
                 workation.getStartDate(),
                 workation.getEndDate(),
                 true,
-                null
+                (int) ChronoUnit.DAYS.between(workation.getStartDate(), workation.getEndDate()) + 1,
+                1,
+                1,
+                1
         );
 
         List<OfficeCandidateVO> candidates = availableMerchantIds == null || availableMerchantIds.isEmpty()

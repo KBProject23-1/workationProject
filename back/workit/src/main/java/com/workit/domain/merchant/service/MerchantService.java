@@ -22,7 +22,7 @@ public interface MerchantService {
             LocalDate checkInDate,
             LocalDate checkOutDate,
             Integer roomCount,
-            Integer guestCount
+            Integer headcount
     );
 
     MerchantDetailResponseDTO findOfficeProducts(
@@ -30,7 +30,7 @@ public interface MerchantService {
             Long merchantId,
             LocalDate startDate,
             LocalDate endDate,
-            Integer guestCount
+            Integer headcount
     );
 
     MerchantDetailCommonResponseDTO findRestaurantProducts(

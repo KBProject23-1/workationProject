@@ -35,6 +35,8 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
 
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 50;
+    private static final int DEFAULT_HEADCOUNT = 1;
+    private static final int DEFAULT_ROOM_COUNT = 1;
 
     private final AccommodationRecommendationMapper recommendationMapper;
     private final ReservationProductAvailabilityMapper reservationProductAvailabilityMapper;
@@ -66,7 +68,8 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
         RecommendationMerchantVO reference = recommendationMapper.selectConfirmedOffice(userId,
                 condition.getWorkationId());
         ReferenceType referenceType = reference == null ? ReferenceType.REGION_ONLY : ReferenceType.AUTO_MERCHANT;
-        return toCommon(createRecommendation(userId, condition, reference, referenceType));
+        return toCommon(createRecommendation(
+                userId, condition, reference, referenceType));
     }
 
     @Override
@@ -75,10 +78,10 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
                                                                                 Long referenceMerchantId,
                                                                                 String cursor,
                                                                                 int size) {
-        RecommendationRequestVO request = recommendationMapper.selectLatestAccommodationRequest(userId,
-                referenceMerchantId);
+        AccommodationConditionVO condition = getReadyCondition(userId);
+        RecommendationRequestVO request = recommendationMapper.selectLatestAccommodationRequest(
+                userId, condition.getWorkationId(), referenceMerchantId);
         if (request == null) {
-            AccommodationConditionVO condition = getReadyCondition(userId);
             RecommendationMerchantVO reference;
             ReferenceType referenceType;
 
@@ -93,9 +96,11 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
                 referenceType = ReferenceType.USER_SELECTED;
             }
 
-            return toCommon(createRecommendation(userId, condition, reference, referenceType));
+            return toCommon(createRecommendation(
+                    userId, condition, reference, referenceType));
         }
-        return toCommon(findPage(request, cursor, normalizeSize(size)));
+        return toCommon(findPage(
+                request, condition, cursor, normalizeSize(size)));
     }
 
     @Override
@@ -120,7 +125,8 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
         if (reference == null) {
             throw new BusinessException(AccommodationRecommendationErrorCode.REFERENCE_MERCHANT_NOT_FOUND);
         }
-        return toCommon(createRecommendation(userId, condition, reference, ReferenceType.USER_SELECTED));
+        return toCommon(createRecommendation(
+                userId, condition, reference, ReferenceType.USER_SELECTED));
     }
 
     private RecommendationListResponseDTO<AccommodationRecommendationResponseDTO.Item> toCommon(
@@ -164,7 +170,10 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
                 condition.getStartDate(),
                 condition.getEndDate(),
                 false,
-                (int) ChronoUnit.DAYS.between(condition.getStartDate(), condition.getEndDate())
+                (int) ChronoUnit.DAYS.between(condition.getStartDate(), condition.getEndDate()),
+                DEFAULT_ROOM_COUNT,
+                DEFAULT_HEADCOUNT,
+                DEFAULT_ROOM_COUNT
         );
 
         if (availableMerchantIds == null || availableMerchantIds.isEmpty()) {
@@ -200,15 +209,20 @@ public class AccommodationRecommendationServiceImpl implements AccommodationReco
         recommendationMapper.insertRecommendationResults(request.getId(), results);
 
         RecommendationRequestVO saved = recommendationMapper.selectRecommendationRequest(request.getId(), userId);
-        return findPage(saved, null, DEFAULT_SIZE);
+        return findPage(saved, condition, null, DEFAULT_SIZE);
     }
 
     private AccommodationRecommendationResponseDTO findPage(RecommendationRequestVO request,
+                                                          AccommodationConditionVO condition,
                                                           String cursor,
                                                           int size) {
         Cursor decoded = decodeCursor(cursor);
+        int requiredDateCount = (int) ChronoUnit.DAYS.between(
+                condition.getStartDate(), condition.getEndDate());
         List<RecommendationResultVO> fetched = recommendationMapper.selectRecommendationResults(request.getId(),
-                decoded.ranking, decoded.id, size + 1);
+                decoded.ranking, decoded.id,
+                condition.getStartDate(), condition.getEndDate(), requiredDateCount,
+                DEFAULT_HEADCOUNT, DEFAULT_ROOM_COUNT, size + 1);
         boolean hasNext = fetched.size() > size;
         List<RecommendationResultVO> content = hasNext
                 ? new ArrayList<>(fetched.subList(0, size)) : fetched;

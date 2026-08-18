@@ -14,6 +14,9 @@
           <if test="productDetailType != null and productDetailType != ''">
              AND rp.product_detail_type = #{productDetailType}
           </if>
+          <if test="merchantCategory == 'ACCOMMODATION'">
+             AND rp.max_headcount * #{roomCount} &gt;= #{requiredHeadcount}
+          </if>
            AND pdi.inventory_date &gt;= #{startDate}
           <if test="includeEndDate">
              AND pdi.inventory_date &lt;= #{endDate}
@@ -22,11 +25,12 @@
              AND pdi.inventory_date &lt; #{endDate}
           </if>
            AND pdi.is_available = 1
-           AND pdi.remaining_capacity &gt; 0
+           AND pdi.remaining_capacity &gt;= #{requiredQuantity}
          <if test="requiredInventoryDateCount != null">
          GROUP BY rp.id
          HAVING COUNT(DISTINCT pdi.inventory_date) = #{requiredInventoryDateCount}
-            AND MIN(CASE WHEN pdi.is_available = 1 AND pdi.remaining_capacity &gt; 0 THEN 1 ELSE 0 END) = 1
+            AND MIN(CASE WHEN pdi.is_available = 1
+                AND pdi.remaining_capacity &gt;= #{requiredQuantity} THEN 1 ELSE 0 END) = 1
          </if>
     </select>
 

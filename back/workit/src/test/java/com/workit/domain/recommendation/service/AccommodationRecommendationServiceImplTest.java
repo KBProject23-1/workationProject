@@ -76,11 +76,11 @@ class AccommodationRecommendationServiceImplTest {
         savedResult.setTotalScore(new BigDecimal("86.15"));
         savedResult.setRanking(1);
 
-        when(recommendationMapper.selectLatestAccommodationRequest(1L, null)).thenReturn(null);
+        when(recommendationMapper.selectLatestAccommodationRequest(1L, 5L, null)).thenReturn(null);
         when(recommendationMapper.selectAccommodationCondition(1L)).thenReturn(condition);
         when(recommendationMapper.selectConfirmedOffice(1L, 5L)).thenReturn(null);
         when(availabilityMapper.selectAvailableMerchantIdsByPeriod(
-                4L, "ACCOMMODATION", "ROOM", condition.getStartDate(), condition.getEndDate(), false, 10
+                4L, "ACCOMMODATION", "ROOM", condition.getStartDate(), condition.getEndDate(), false, 10, 1, 1, 1
         )).thenReturn(Collections.singletonList(2L));
         when(recommendationMapper.selectAvailableAccommodationsByMerchantIds(Collections.singletonList(2L)))
                 .thenReturn(Collections.singletonList(candidate));
@@ -90,7 +90,8 @@ class AccommodationRecommendationServiceImplTest {
             return null;
         }).when(recommendationMapper).insertRecommendationRequest(any(RecommendationRequestVO.class));
         when(recommendationMapper.selectRecommendationRequest(101L, 1L)).thenReturn(savedRequest);
-        when(recommendationMapper.selectRecommendationResults(101L, null, null, 21))
+        when(recommendationMapper.selectRecommendationResults(
+                101L, null, null, condition.getStartDate(), condition.getEndDate(), 10, 1, 1, 21))
                 .thenReturn(Collections.singletonList(savedResult));
 
         RecommendationListResponseDTO<AccommodationRecommendationResponseDTO.Item> response =
