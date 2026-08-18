@@ -28,8 +28,10 @@
                       AND rp.merchant_id = m.id
                ) AS reserved
           FROM merchants m
+     LEFT JOIN tourism_merchant_sources tms ON tms.merchant_id = m.id
          WHERE m.name LIKE CONCAT('%', #{keyword}, '%')
            AND m.region_id = #{regionId}
+           AND (tms.merchant_id IS NULL OR tms.is_active = 1)
          ORDER BY reserved DESC,
                   m.name ASC,
                   m.id ASC
