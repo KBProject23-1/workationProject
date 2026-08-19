@@ -349,4 +349,17 @@
           AND status = 'ACTIVE'
     </update>
 
+    <update id="updateMerchantRatingByReviewId">
+        UPDATE merchants m
+        INNER JOIN reviews target_review
+                ON target_review.merchant_id = m.id
+               AND target_review.review_id = #{reviewId}
+        SET m.rating = (
+            SELECT COALESCE(ROUND(AVG(r.rating), 1), 0.0)
+            FROM reviews r
+            WHERE r.merchant_id = m.id
+              AND r.status = 'ACTIVE'
+        )
+    </update>
+
 </mapper>

@@ -190,6 +190,7 @@ class ReviewServiceImplTest {
 
         assertEquals(10L, mapper.insertedReview.getReservationId());
         assertEquals(5, mapper.insertedReview.getRating());
+        assertEquals(100L, mapper.updatedRatingReviewId);
     }
 
     @Test
@@ -269,6 +270,7 @@ class ReviewServiceImplTest {
         service.addTransactionReview(1L, 30L, request);
 
         assertEquals(30L, mapper.insertedReview.getTransactionId());
+        assertEquals(100L, mapper.updatedRatingReviewId);
     }
 
     @Test
@@ -318,6 +320,7 @@ class ReviewServiceImplTest {
         service.removeReview(1L, 51L);
 
         assertEquals(1, mapper.softDeleteCount);
+        assertEquals(51L, mapper.updatedRatingReviewId);
     }
 
     @Test
@@ -340,6 +343,8 @@ class ReviewServiceImplTest {
 
         ReviewService service = new ReviewServiceImpl(mapper);
         service.modifyReview(1L, 52L, request);
+
+        assertEquals(52L, mapper.updatedRatingReviewId);
     }
 
     private MerchantReviewStatisticsVO createStatistics() {
@@ -366,6 +371,7 @@ class ReviewServiceImplTest {
         private OwnedReviewVO ownedReview;
         private ReviewVO insertedReview;
         private int softDeleteCount;
+        private Long updatedRatingReviewId;
 
         private StubReviewMapper(
                 boolean merchantExists,
@@ -481,6 +487,12 @@ class ReviewServiceImplTest {
         @Override
         public int updateReviewStatusDeleted(Long userId, Long reviewId) {
             softDeleteCount++;
+            return 1;
+        }
+
+        @Override
+        public int updateMerchantRatingByReviewId(Long reviewId) {
+            updatedRatingReviewId = reviewId;
             return 1;
         }
     }
