@@ -56,6 +56,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final LedgerService ledgerService;
     private final PaymentGatewayClient paymentGatewayClient;
     private final PinValidator pinValidator;
+    private final PaymentTransactionRecorder paymentTransactionRecorder;
 
     // ===== 충전 =====
     @Override
@@ -93,8 +94,9 @@ public class PaymentServiceImpl implements PaymentService {
         walletMapper.increaseBalance(userId, amount);
 
         // 3) 복식부기 원장 기입: BANK DEBIT(나감) / WALLET CREDIT(들어옴)
-        BigDecimal accountBalanceAfter = account.getBalance().subtract(amount);
-        BigDecimal walletBalanceAfter = wallet.getBalance().add(amount);
+        // 동시성 하에서 실제 balance 와 어긋나지 않도록 update 후 재조회한 값을 쓴다 (사전 스냅샷 값 X)
+        BigDecimal accountBalanceAfter = accountMapper.findAccountById(request.getAccountId(), userId).getBalance();
+        BigDecimal walletBalanceAfter = walletMapper.findByUserId(userId).getBalance();
         ledgerService.post(chargeTx.getId(),
                 LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, account.getId(), amount, accountBalanceAfter),
                 LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter));
@@ -144,8 +146,9 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         // 3) 복식부기 원장 기입: WALLET DEBIT(나감) / BANK CREDIT(들어옴)
-        BigDecimal walletBalanceAfter = wallet.getBalance().subtract(amount);
-        BigDecimal accountBalanceAfter = targetAccount.getBalance().add(amount);
+        // 동시성 하에서 실제 balance 와 어긋나지 않도록 update 후 재조회한 값을 쓴다 (사전 스냅샷 값 X)
+        BigDecimal walletBalanceAfter = walletMapper.findByUserId(userId).getBalance();
+        BigDecimal accountBalanceAfter = accountMapper.findAccountById(targetAccount.getId(), userId).getBalance();
         ledgerService.post(refundTx.getId(),
                 LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, walletBalanceAfter),
                 LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_BANK, targetAccount.getId(), amount, accountBalanceAfter));
@@ -157,90 +160,24 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     // ===== 결제 =====
+    // 메서드 전체를 @Transactional 로 감싸지 않는다 — 카드 분기(payWithCard)의 PG 호출을
+    // DB 트랜잭션 밖에서 수행해야 하기 때문이다(이유는 PaymentTransactionRecorder 클래스 주석 참고).
+    // 지갑 분기는 그 자체로 원자적이어야 하므로 PaymentTransactionRecorder.payWithWallet(하나의 @Transactional)에 위임한다.
     @Override
-    @Transactional
     public PaymentResponse pay(Long userId, PaymentRequest request) {
 
         validatePaymentRequest(request);
         validatePaymentPin(userId, request.getDeviceId(), request.getPinNumber());
 
         if ("WALLET".equals(request.getPaymentSourceType())) {
-            return payWithWallet(userId, request);
+            return paymentTransactionRecorder.payWithWallet(userId, request);
         } else {
             return payWithCard(userId, request);
         }
     }
 
-    private PaymentResponse payWithWallet(Long userId, PaymentRequest request) {
-        BigDecimal amount = request.getAmount();
-
-        WalletVO wallet = walletMapper.findByUserId(userId);
-        if (wallet == null) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_WALLET_NOT_FOUND);
-        }
-
-        // 1) REQUESTED 결제 거래 생성 — 멱등키 중복이면 자동충전/차감 전에 먼저 거부(409)
-        TransactionVO paymentTx = TransactionVO.forWalletPayment(userId, wallet, request);
-        assignMerchantCategory(paymentTx);
-        try {
-            transactionMapper.insertTransaction(paymentTx);
-        } catch (DuplicateKeyException e) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
-        }
-
-        // 2) 잔액 부족 시 자동충전 (주계좌 -> 지갑). 내부 서브거래로 별도 기록 + 원장 기입
-        BigDecimal shortage = amount.subtract(wallet.getBalance());
-        boolean isAutoCharged = shortage.compareTo(BigDecimal.ZERO) > 0;
-        BigDecimal autoChargedAmount = null;
-
-        if (isAutoCharged) {
-            // 부족분이 최소 충전금액(1만원)보다 적으면 1만원으로 채움
-            BigDecimal actualChargeAmount = shortage.compareTo(MIN_CHARGE_AMOUNT) < 0
-                    ? MIN_CHARGE_AMOUNT
-                    : shortage;
-
-            BankAccountVO primaryAccount = accountMapper.findPrimaryAccount(userId);
-            if (primaryAccount == null) {
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_PRIMARY_ACCOUNT_NOT_FOUND_FOR_AUTO_CHARGE);
-            }
-
-            int accountUpdatedRows = accountMapper.decreaseBalance(primaryAccount.getId(), userId, actualChargeAmount);
-            if (accountUpdatedRows == 0) {
-                throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_ACCOUNT_BALANCE);
-            }
-
-            walletMapper.increaseBalance(userId, actualChargeAmount);
-            autoChargedAmount = actualChargeAmount;
-
-            // 자동충전은 내부 원자 충전이라 PAID 로 즉시 생성(forAutoCharge). 단, 잔액이 움직였으므로 원장은 기입한다.
-            TransactionVO depositTx = TransactionVO.forAutoCharge(userId, wallet, primaryAccount, actualChargeAmount);
-            transactionMapper.insertTransaction(depositTx);
-            BigDecimal accBalanceAfter = primaryAccount.getBalance().subtract(actualChargeAmount);
-            BigDecimal walBalanceAfter = wallet.getBalance().add(actualChargeAmount);
-            ledgerService.post(depositTx.getId(),
-                    LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, primaryAccount.getId(), actualChargeAmount, accBalanceAfter),
-                    LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), actualChargeAmount, walBalanceAfter));
-        }
-
-        // 3) 지갑 차감
-        int walletUpdatedRows = walletMapper.decreaseBalance(userId, amount);
-        if (walletUpdatedRows == 0) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_INSUFFICIENT_WALLET_BALANCE);
-        }
-
-        WalletVO updatedWallet = walletMapper.findByUserId(userId);
-
-        // 4) 결제 원장: WALLET DEBIT(나감) / MERCHANT CREDIT(들어옴). 가맹점 잔액은 미보유 -> balance_after null
-        ledgerService.post(paymentTx.getId(),
-                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), amount, updatedWallet.getBalance()),
-                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
-
-        // 5) PAID 로 전이
-        markPaid(paymentTx, userId);
-
-        return PaymentResponse.ofWallet(paymentTx, updatedWallet.getBalance(), isAutoCharged, autoChargedAmount);
-    }
-
+    // 카드결제(PG 2단계). DB 기입은 PaymentTransactionRecorder 의 짧은 개별 트랜잭션들로 분리하고,
+    // PG authorize()/capture() 호출은 그 사이에서 트랜잭션 없이 수행한다.
     private PaymentResponse payWithCard(Long userId, PaymentRequest request) {
         if (request.getCardId() == null) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_CARD_ID_REQUIRED);
@@ -257,49 +194,59 @@ public class PaymentServiceImpl implements PaymentService {
                 : ("WORK".equals(card.getCardType()) ? Boolean.TRUE : null);
         BigDecimal amount = request.getAmount();
 
-        // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409)
+        // 1) REQUESTED 카드결제 거래 생성 (멱등키 중복 -> 409). 짧은 트랜잭션으로 PG 호출 전에 즉시 커밋.
         TransactionVO paymentTx = TransactionVO.forCardPayment(userId, card, request, isBusinessExpense);
-        assignMerchantCategory(paymentTx);
-        try {
-            transactionMapper.insertTransaction(paymentTx);
-        } catch (DuplicateKeyException e) {
-            throw new BusinessException(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST);
-        }
+        paymentTransactionRecorder.assignMerchantCategory(paymentTx);
+        paymentTransactionRecorder.createRequestedCardPayment(paymentTx);
 
-        // 2) PG 승인(authorize) — 실패 시 트랜잭션 롤백(거래 미생성). 승인번호/PG거래ID 기록 + AUTHORIZED 전이
+        // 2) PG 승인(authorize) — 트랜잭션 밖. 실패 시 REQUESTED -> FAILED 로 명시적으로 종료.
         PgAuthResult auth;
         try {
             auth = paymentGatewayClient.authorize(userId, card.getId(), amount, request.getMerchantName());
         } catch (PgException e) {
+            paymentTransactionRecorder.markCardPaymentFailed(paymentTx, userId);
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_AUTH_FAILED);
         }
-        // REQUESTED -> AUTHORIZED 전이 (상태머신 규칙 검증)
-        assertTransition(paymentTx.getStatus(), TransactionStatus.AUTHORIZED);
-        transactionMapper.applyPgAuthorization(paymentTx.getId(), userId, auth.getPgTransactionId(), auth.getApprovalNumber());
-        paymentTx.setPgTransactionId(auth.getPgTransactionId());
-        paymentTx.setApprovedNumber(auth.getApprovalNumber());
-        paymentTx.setStatus(TransactionStatus.AUTHORIZED.name());
+        // REQUESTED -> AUTHORIZED 전이 + 승인번호/PG거래ID 기록 (짧은 트랜잭션).
+        // PG 승인은 이미 성공했으므로, 이 DB 기록 자체가 실패(데드락 등)해도 그냥 던지면 안 된다 —
+        // 예외가 그대로 올라가면 DeadlockRetrier 가 pay() 를 통째로 재시도하는데, 이번엔 멱등키가
+        // 이미 첫 시도에서 커밋돼 있어 409만 뜨고 거래는 영원히 REQUESTED 에 멈춘 채 PG 승인만 살아남는다.
+        // 승인 취소(cancel)로 보상 후 FAILED 로 명시적으로 종료해 이 상태를 막는다.
+        try {
+            paymentTransactionRecorder.recordCardAuthorization(paymentTx, userId, auth);
+        } catch (RuntimeException e) {
+            paymentGatewayClient.cancel(auth.getPgTransactionId());
+            paymentTransactionRecorder.markCardPaymentFailed(paymentTx, userId);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PROCESSING_FAILED);
+        }
 
-        // 3) PG 매입(capture) — 실패 시 승인 취소(cancel)로 보상 후 롤백
+        // 3) PG 매입(capture) — 트랜잭션 밖. 실패 시 승인 취소(cancel) 보상 후 AUTHORIZED -> FAILED 로 종료.
         try {
             paymentGatewayClient.capture(auth.getPgTransactionId(), amount);
         } catch (PgException e) {
             paymentGatewayClient.cancel(auth.getPgTransactionId());
+            paymentTransactionRecorder.markCardPaymentFailed(paymentTx, userId);
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PG_CAPTURE_FAILED);
         }
 
-        // 4) 원장: CARD DEBIT / MERCHANT CREDIT. 카드는 외부 발급사 자금이라 내부 잔액 이동 없음 -> balance_after null
-        ledgerService.post(paymentTx.getId(),
-                LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_CARD, card.getId(), amount, null),
-                LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_MERCHANT, paymentTx.getMerchantId(), amount, null));
-
-        // 5) PAID 로 전이 (매입 완료)
-        markPaid(paymentTx, userId);
+        // 4) 원장 기입(CARD DEBIT / MERCHANT CREDIT) + PAID 전이. 짧은 트랜잭션.
+        // 매입(capture)도 이미 성공했으므로, 위와 동일한 이유로 실패 시 승인 취소로 보상 후 FAILED 종료.
+        try {
+            paymentTransactionRecorder.recordCardCaptureAndComplete(paymentTx, userId, amount);
+        } catch (RuntimeException e) {
+            paymentGatewayClient.cancel(auth.getPgTransactionId());
+            paymentTransactionRecorder.markCardPaymentFailed(paymentTx, userId);
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PROCESSING_FAILED);
+        }
 
         return PaymentResponse.ofCard(paymentTx);
     }
 
     // ===== 결제 취소 =====
+    // 카드결제 취소의 PG cancel() 호출(아래)도 payWithCard 와 같은 이유로 트랜잭션 밖에 두는 게 이상적이지만,
+    // 이 메서드의 유일한 호출부인 ReservationServiceImpl.saveReservationCancellation() 이 이미 자체
+    // @Transactional 로 감싸고 있어(REQUIRES_NEW 아닌 기본 전파) 여기서만 분리해도 실제로는 그 바깥 트랜잭션에
+    // 합류돼 효과가 없다. 온전히 고치려면 reservation 도메인 호출부까지 같이 바꿔야 해서 이번 범위에서는 제외.
     @Override
     @Transactional
     public CancelResponse cancelPayment(Long userId, Long transactionId) {
@@ -342,22 +289,6 @@ public class PaymentServiceImpl implements PaymentService {
 
         TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
         return CancelResponse.of(cancelled, amount, refundedTo);
-    }
-
-    // ===== 카테고리 스냅샷 =====
-    /**
-     * 결제 시점의 가맹점 카테고리를 거래에 스냅샷으로 저장한다.
-     * 나중에 가맹점 정보가 바뀌거나 삭제돼도 거래 당시 분류가 남도록 조회 시 조인이 아닌 저장 값을 쓴다.
-     * INSERT 가 category_assigned 를 명시적으로 넣어 null 이면 컬럼 DEFAULT('기타')가 무시되므로,
-     * merchantId 가 없거나 매칭 가맹점이 없으면 여기서 '기타'로 채워 의미 있는 기본값을 남긴다.
-     */
-    private static final String DEFAULT_CATEGORY = "기타";
-
-    private void assignMerchantCategory(TransactionVO tx) {
-        String category = tx.getMerchantId() != null
-                ? transactionMapper.findMerchantCategoryById(tx.getMerchantId())
-                : null;
-        tx.setCategoryAssigned(category != null ? category : DEFAULT_CATEGORY);
     }
 
     // ===== 상태 전이 (상태머신 규칙 강제) =====
@@ -445,6 +376,9 @@ public class PaymentServiceImpl implements PaymentService {
         }
         if (request.getPaymentSourceType() == null) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PAYMENT_SOURCE_TYPE_REQUIRED);
+        }
+        if (!"WALLET".equals(request.getPaymentSourceType()) && !"CARD".equals(request.getPaymentSourceType())) {
+            throw new BusinessException(TransactionErrorCode.TRANSACTION_PAYMENT_SOURCE_TYPE_INVALID);
         }
         if (request.getPinNumber() == null) {
             throw new BusinessException(TransactionErrorCode.TRANSACTION_PIN_REQUIRED);

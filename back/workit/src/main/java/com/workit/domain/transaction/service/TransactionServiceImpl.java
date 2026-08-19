@@ -72,7 +72,9 @@ public class TransactionServiceImpl implements TransactionService {
 
         boolean reviewSupported = "RESTAURANT".equals(transaction.getMerchantCategory())
                 || "ACTIVITY".equals(transaction.getMerchantCategory());
-        LocalDateTime reviewDeadline = reviewSupported
+        // approvedAt 은 PAID 전이 시점에만 채워진다 — REQUESTED/FAILED/CANCELED 거래는 null 이므로
+        // 상태 체크(findReviewAction) 전에 먼저 참조해 NPE 나지 않도록 여기서부터 null 가드.
+        LocalDateTime reviewDeadline = (reviewSupported && transaction.getApprovedAt() != null)
                 ? transaction.getApprovedAt().plusDays(30)
                 : null;
         TransactionReviewAction reviewAction = findReviewAction(

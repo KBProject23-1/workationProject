@@ -10,6 +10,7 @@ import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.account.vo.LinkableAccountVO;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -66,7 +67,14 @@ public class AccountServiceImpl implements AccountService {
             newAccount.setBalance(generateMockBalance());
             newAccount.setIsPrimary(isPrimary);
 
-            accountMapper.insertAccount(newAccount);
+            try {
+                accountMapper.insertAccount(newAccount);
+            } catch (DuplicateKeyException e) {
+                // UQ_bank_accounts_active_account: 이미 연동된 계좌를 재연동 시도(더블클릭/재시도, 진짜 동시성 경합 포함)
+                // -> 깔끔한 비즈니스 에러로 변환. is_linked=0 가드(findLinkableAccountById)는 순차 재시도만 막고
+                // 진짜 동시 요청(둘 다 커밋 전 읽음)은 못 막으므로, DB 유니크 제약이 최종 방어선이다.
+                throw new BusinessException(AccountErrorCode.ACCOUNT_ALREADY_LINKED);
+            }
             accountMapper.markLinkableAccountAsLinked(linkableId);
 
             BankAccountVO saved = accountMapper.findAccountById(newAccount.getId(), userId);

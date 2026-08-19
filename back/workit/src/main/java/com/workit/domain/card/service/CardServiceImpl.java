@@ -10,6 +10,7 @@ import com.workit.domain.card.vo.CardVO;
 import com.workit.domain.card.vo.LinkableCardVO;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -88,7 +89,12 @@ public class CardServiceImpl implements CardService {
                 newCard.setCardType(linkable.getCardType());
                 newCard.setIsPrimary(isPrimary);
 
-                cardMapper.insertCard(newCard);
+                try {
+                    cardMapper.insertCard(newCard);
+                } catch (DuplicateKeyException e) {
+                    // UQ_cards_user_card_number: 이미 연동된 카드를 재연동 시도(더블클릭/재시도) -> 깔끔한 비즈니스 에러로 변환
+                    throw new BusinessException(CardErrorCode.CARD_ALREADY_LINKED);
+                }
                 saved = cardMapper.findCardById(newCard.getId(), userId);
             }
 
