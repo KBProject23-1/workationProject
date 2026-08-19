@@ -68,4 +68,6 @@ public interface ReviewMapper {
 
     int updateReviewStatusDeleted(@Param("userId") Long userId,
                                   @Param("reviewId") Long reviewId);
+
+    int updateMerchantRatingByReviewId(@Param("reviewId") Long reviewId);
 }

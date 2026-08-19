@@ -157,6 +157,7 @@ public class ReviewServiceImpl implements ReviewService {
         ReviewVO review = createReview(userId, source.getMerchantId(), request);
         review.setReservationId(reservationId);
         insertReview(review);
+        reviewMapper.updateMerchantRatingByReviewId(review.getReviewId());
         return ReviewCreateResponseDTO.from(review);
     }
 
@@ -194,6 +195,7 @@ public class ReviewServiceImpl implements ReviewService {
         ReviewVO review = createReview(userId, source.getMerchantId(), request);
         review.setTransactionId(transactionId);
         insertReview(review);
+        reviewMapper.updateMerchantRatingByReviewId(review.getReviewId());
         return ReviewCreateResponseDTO.from(review);
     }
 
@@ -233,6 +235,7 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         reviewMapper.updateReview(reviewId, request);
+        reviewMapper.updateMerchantRatingByReviewId(reviewId);
         return ReviewUpdateResponseDTO.of(reviewId);
     }
 
@@ -250,6 +253,7 @@ public class ReviewServiceImpl implements ReviewService {
         }
 
         reviewMapper.updateReviewStatusDeleted(userId, reviewId);
+        reviewMapper.updateMerchantRatingByReviewId(reviewId);
     }
 
     // 별점 1점부터 5점까지 누락 없이 분포 구성
