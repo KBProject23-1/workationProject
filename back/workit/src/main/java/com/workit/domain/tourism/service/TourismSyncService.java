@@ -39,6 +39,10 @@ public class TourismSyncService {
     private final AtomicBoolean syncing = new AtomicBoolean(false);
 
     public TourismSyncRunVO sync(TourismSyncMode mode) {
+        return sync(mode, null);
+    }
+
+    public TourismSyncRunVO sync(TourismSyncMode mode, TourismPlaceType targetPlaceType) {
         if (!tourApiClient.isConfigured()) {
             throw new BusinessException(TourismErrorCode.API_KEY_NOT_CONFIGURED);
         }
@@ -63,12 +67,14 @@ public class TourismSyncService {
             List<TourismRegionVO> regions = tourismMapper.selectRegions();
             validateTargetRegions(regions);
             if (safeMode == TourismSyncMode.FULL) {
-                for (TourismCategory category : TourismCategory.values()) {
-                    processed += fetchAll(category, TourismTargetRegion.JEJU, true, null,
-                            run.getId(), regions);
-                    deactivated += tourismMapper.deactivateMissing(category, run.getId());
+                if (includesActivities(targetPlaceType)) {
+                    for (TourismCategory category : TourismCategory.values()) {
+                        processed += fetchAll(category, TourismTargetRegion.JEJU, true, null,
+                                run.getId(), regions);
+                        deactivated += tourismMapper.deactivateMissing(category, run.getId());
+                    }
                 }
-                for (TourismPlaceType placeType : jejuPlaceTypes()) {
+                for (TourismPlaceType placeType : requestedPlaceTypes(targetPlaceType)) {
                     processed += fetchAll(placeType, TourismTargetRegion.JEJU, true,
                             null, run.getId(), regions);
                     deactivated += tourismMapper.deactivateMissingPlaceType(
@@ -76,13 +82,15 @@ public class TourismSyncService {
                 }
             } else {
                 for (String date : dates) {
-                    for (TourismCategory category : TourismCategory.values()) {
-                        processed += fetchAll(category, TourismTargetRegion.JEJU,
-                                true, date, null, regions);
-                        processed += fetchAll(category, TourismTargetRegion.JEJU,
-                                false, date, null, regions);
+                    if (includesActivities(targetPlaceType)) {
+                        for (TourismCategory category : TourismCategory.values()) {
+                            processed += fetchAll(category, TourismTargetRegion.JEJU,
+                                    true, date, null, regions);
+                            processed += fetchAll(category, TourismTargetRegion.JEJU,
+                                    false, date, null, regions);
+                        }
                     }
-                    for (TourismPlaceType placeType : jejuPlaceTypes()) {
+                    for (TourismPlaceType placeType : requestedPlaceTypes(targetPlaceType)) {
                         processed += fetchAll(placeType, TourismTargetRegion.JEJU,
                                 true, date, null, regions);
                         processed += fetchAll(placeType, TourismTargetRegion.JEJU,
@@ -206,6 +214,20 @@ public class TourismSyncService {
     private List<TourismPlaceType> jejuPlaceTypes() {
         return Arrays.asList(TourismPlaceType.RESTAURANT,
                 TourismPlaceType.ACCOMMODATION);
+    }
+
+    private boolean includesActivities(TourismPlaceType targetPlaceType) {
+        return targetPlaceType == null || targetPlaceType == TourismPlaceType.ACTIVITY;
+    }
+
+    private List<TourismPlaceType> requestedPlaceTypes(TourismPlaceType targetPlaceType) {
+        if (targetPlaceType == null) {
+            return jejuPlaceTypes();
+        }
+        if (targetPlaceType == TourismPlaceType.ACTIVITY) {
+            return Collections.emptyList();
+        }
+        return Collections.singletonList(targetPlaceType);
     }
 
     private Long resolveRegionId(TourismTargetRegion targetRegion,

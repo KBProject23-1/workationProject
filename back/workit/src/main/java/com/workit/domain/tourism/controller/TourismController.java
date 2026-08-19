@@ -45,4 +45,29 @@ public class TourismController {
         return GlobalResponseFactory.success(
                 tourismSyncService.sync(mode), "관광 데이터 동기화가 완료되었습니다.");
     }
+
+    @PostMapping("/sync/activities")
+    public ResponseEntity<CommonResponse<TourismSyncRunVO>> syncActivities(
+            @RequestParam(value = "mode", defaultValue = "INCREMENTAL") TourismSyncMode mode) {
+        return syncByPlaceType(mode, TourismPlaceType.ACTIVITY, "여가");
+    }
+
+    @PostMapping("/sync/restaurants")
+    public ResponseEntity<CommonResponse<TourismSyncRunVO>> syncRestaurants(
+            @RequestParam(value = "mode", defaultValue = "INCREMENTAL") TourismSyncMode mode) {
+        return syncByPlaceType(mode, TourismPlaceType.RESTAURANT, "음식점");
+    }
+
+    @PostMapping("/sync/accommodations")
+    public ResponseEntity<CommonResponse<TourismSyncRunVO>> syncAccommodations(
+            @RequestParam(value = "mode", defaultValue = "INCREMENTAL") TourismSyncMode mode) {
+        return syncByPlaceType(mode, TourismPlaceType.ACCOMMODATION, "숙소");
+    }
+
+    private ResponseEntity<CommonResponse<TourismSyncRunVO>> syncByPlaceType(
+            TourismSyncMode mode, TourismPlaceType placeType, String label) {
+        return GlobalResponseFactory.success(
+                tourismSyncService.sync(mode, placeType),
+                label + " 데이터 동기화가 완료되었습니다.");
+    }
 }

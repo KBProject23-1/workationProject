@@ -94,6 +94,21 @@ FULL 동기화는 여가 9개 카테고리와 음식점·숙소의 제주 데이
 `tourism_merchant_sources.is_active=0`으로 바뀌고 추천·목록에서 숨겨집니다.
 `merchants` 행은 삭제하지 않으므로 기존 북마크나 리뷰의 외래키는 유지됩니다.
 
+호출 한도를 나눠 사용하거나 실패한 종류만 다시 수집하려면 유형별 API를 호출합니다.
+
+```http
+POST /api/v1/tourism/sync/activities?mode=FULL
+POST /api/v1/tourism/sync/restaurants?mode=FULL
+POST /api/v1/tourism/sync/accommodations?mode=FULL
+```
+
+- `activities`: 여가 9개 카테고리만 수집
+- `restaurants`: 음식점(`contentTypeId=39`)만 수집
+- `accommodations`: 숙소(`contentTypeId=32`)만 수집
+
+유형별 API도 같은 동기화 잠금을 사용하므로 두 종류를 동시에 실행할 수 없습니다.
+한 요청이 완료된 다음 다음 종류를 호출해야 합니다.
+
 ## 4. 변경분 수집
 
 직접 변경분만 갱신하려면 다음 API를 호출합니다.
@@ -105,6 +120,14 @@ POST /api/v1/tourism/sync?mode=INCREMENTAL
 INCREMENTAL은 전일과 당일의 변경된 활성·비활성 데이터를 조회합니다. 같은
 `contentid`가 있으면 기존 merchant를 UPDATE하고, 처음 본 `contentid`면 새
 merchant를 INSERT합니다.
+
+유형별 API에도 `mode=INCREMENTAL`을 사용할 수 있습니다.
+
+```http
+POST /api/v1/tourism/sync/activities?mode=INCREMENTAL
+POST /api/v1/tourism/sync/restaurants?mode=INCREMENTAL
+POST /api/v1/tourism/sync/accommodations?mode=INCREMENTAL
+```
 
 수동 API와 매일 오전 3시 자동 실행은 모두 여가·음식점·숙소를 함께 갱신합니다.
 

@@ -182,6 +182,68 @@ class TourismSyncServiceTest {
         assertEquals("[대표메뉴]\n갈치조림", itemCaptor.getValue().getDescription());
     }
 
+    @Test
+    void restaurantSyncRequestsOnlyRestaurants() {
+        when(mapper.selectRegions()).thenReturn(targetRegions());
+        when(client.fetch(TourismPlaceType.RESTAURANT, TourismTargetRegion.JEJU,
+                1, true, null, 10L))
+                .thenReturn(new TourApiPage(Collections.emptyList(), 100, 0));
+        TourismSyncRunVO completed = completedRun();
+        when(mapper.selectSyncRun(10L)).thenReturn(completed);
+
+        service.sync(TourismSyncMode.FULL, TourismPlaceType.RESTAURANT);
+
+        verify(client).fetch(TourismPlaceType.RESTAURANT, TourismTargetRegion.JEJU,
+                1, true, null, 10L);
+        verify(client, never()).fetch(any(TourismCategory.class),
+                any(TourismTargetRegion.class), anyInt(), eq(true), isNull(), eq(10L));
+        verify(client, never()).fetch(eq(TourismPlaceType.ACCOMMODATION),
+                any(TourismTargetRegion.class), anyInt(), eq(true), isNull(), eq(10L));
+    }
+
+    @Test
+    void accommodationSyncRequestsOnlyAccommodations() {
+        when(mapper.selectRegions()).thenReturn(targetRegions());
+        when(client.fetch(TourismPlaceType.ACCOMMODATION, TourismTargetRegion.JEJU,
+                1, true, null, 10L))
+                .thenReturn(new TourApiPage(Collections.emptyList(), 100, 0));
+        TourismSyncRunVO completed = completedRun();
+        when(mapper.selectSyncRun(10L)).thenReturn(completed);
+
+        service.sync(TourismSyncMode.FULL, TourismPlaceType.ACCOMMODATION);
+
+        verify(client).fetch(TourismPlaceType.ACCOMMODATION, TourismTargetRegion.JEJU,
+                1, true, null, 10L);
+        verify(client, never()).fetch(any(TourismCategory.class),
+                any(TourismTargetRegion.class), anyInt(), eq(true), isNull(), eq(10L));
+        verify(client, never()).fetch(eq(TourismPlaceType.RESTAURANT),
+                any(TourismTargetRegion.class), anyInt(), eq(true), isNull(), eq(10L));
+    }
+
+    @Test
+    void activitySyncRequestsOnlyActivityCategories() {
+        when(mapper.selectRegions()).thenReturn(targetRegions());
+        when(client.fetch(any(TourismCategory.class), eq(TourismTargetRegion.JEJU),
+                eq(1), eq(true), isNull(), eq(10L)))
+                .thenReturn(new TourApiPage(Collections.emptyList(), 100, 0));
+        TourismSyncRunVO completed = completedRun();
+        when(mapper.selectSyncRun(10L)).thenReturn(completed);
+
+        service.sync(TourismSyncMode.FULL, TourismPlaceType.ACTIVITY);
+
+        verify(client).fetch(TourismCategory.WATER_SPORTS, TourismTargetRegion.JEJU,
+                1, true, null, 10L);
+        verify(client, never()).fetch(any(TourismPlaceType.class),
+                any(TourismTargetRegion.class), anyInt(), eq(true), isNull(), eq(10L));
+    }
+
+    private TourismSyncRunVO completedRun() {
+        TourismSyncRunVO completed = new TourismSyncRunVO();
+        completed.setId(10L);
+        completed.setStatus("SUCCESS");
+        return completed;
+    }
+
     private List<TourismRegionVO> targetRegions() {
         TourismRegionVO busan = region(1L, "부산");
         TourismRegionVO gangneung = region(2L, "강릉");
