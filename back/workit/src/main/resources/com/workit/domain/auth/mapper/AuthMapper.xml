@@ -11,11 +11,14 @@
     <select id="selectTermsList"
             resultType="com.workit.domain.auth.vo.TermsVO">
         SELECT id,
+               version,
                title,
                content,
                required,
-               created_at
+               created_at,
+               active
         FROM terms
+        WHERE active = 1
         ORDER BY required DESC, id ASC
     </select>
 
@@ -102,23 +105,21 @@
             parameterType="com.workit.domain.auth.vo.UserVO"
             useGeneratedKeys="true"
             keyProperty="id">
-        INSERT INTO users (email_hash, email_encrypt, name_encrypt,
+        INSERT INTO users (email_hash, email_encrypt, name_hash, name_encrypt,
                            phone_number_hash, phone_number_encrypt)
-        VALUES (#{emailHash}, #{emailEncrypt}, #{nameEncrypt},
+        VALUES (#{emailHash}, #{emailEncrypt}, #{nameHash}, #{nameEncrypt},
                 #{phoneNumberHash}, #{phoneNumberEncrypt})
     </insert>
 
     <!--
         회원가입 완료 - user_auth insert.
-        - user_id 는 users insert 후 생성된 PK
-        - password_hash(BCrypt), identity_ci_hash(SHA-256), identity_ci_encrypt(AES-256) 는 Service Layer 에서 처리
+        - user_id 는 users insert 후 생성된 PK (PK = FK)
+        - password_hash(BCrypt), identity_ci_hash(SHA-256) 는 Service Layer 에서 처리
     -->
     <insert id="insertUserAuth"
-            parameterType="com.workit.domain.auth.vo.UserAuthVO"
-            useGeneratedKeys="true"
-            keyProperty="id">
-        INSERT INTO user_auth (user_id, password_hash, identity_ci_hash, identity_ci_encrypt)
-        VALUES (#{userId}, #{passwordHash}, #{identityCiHash}, #{identityCiEncrypt})
+            parameterType="com.workit.domain.auth.vo.UserAuthVO">
+        INSERT INTO user_auth (user_id, password_hash, identity_ci_hash)
+        VALUES (#{userId}, #{passwordHash}, #{identityCiHash})
     </insert>
 
     <!--
@@ -127,9 +128,7 @@
         - company_name 은 선택값이라 회원가입 시점에는 insert 하지 않는다
     -->
     <insert id="insertUserProfile"
-            parameterType="com.workit.domain.auth.vo.UserProfileVO"
-            useGeneratedKeys="true"
-            keyProperty="id">
+            parameterType="com.workit.domain.auth.vo.UserProfileVO">
         INSERT INTO user_profile (user_id, nickname)
         VALUES (#{userId}, #{nickname})
     </insert>
@@ -159,6 +158,7 @@
             resultType="com.workit.domain.auth.vo.LoginUserVO">
         SELECT u.id,
                u.status,
+               u.name_hash,
                u.name_encrypt,
                a.password_hash,
                a.identity_ci_hash
@@ -178,6 +178,7 @@
             resultType="com.workit.domain.auth.vo.LoginUserVO">
         SELECT u.id,
                u.status,
+               u.name_hash,
                u.name_encrypt,
                a.password_hash,
                a.identity_ci_hash
@@ -238,8 +239,8 @@
     -->
     <update id="updatePasswordHash">
         UPDATE user_auth
-        SET password_hash = #{passwordHash},
-            updated_at    = CURRENT_TIMESTAMP
+        SET password_hash      = #{passwordHash},
+            password_changed_at = NOW()
         WHERE user_id = #{userId}
     </update>
 
@@ -295,7 +296,8 @@
     -->
     <update id="updateUserDevicePinHash">
         UPDATE user_device
-        SET pin_hash = #{pinHash}
+        SET pin_hash       = #{pinHash},
+            pin_updated_at = NOW()
         WHERE user_id = #{userId}
     </update>
 
@@ -310,5 +312,18 @@
         FROM user_device
         WHERE user_id = #{userId}
     </select>
+
+    <!--
+        로그인 성공 시 last_login_at 갱신.
+        - user_id + device_id (UNIQUE) 기준으로 해당 기기의 최종 로그인 일시를 현재 시각으로 갱신
+        - PASSWORD 로그인(deviceId 제공) 및 PIN 로그인 성공 시 호출
+        - deviceId 가 등록되지 않은 신규 기기인 경우 행 수 0 반환 (갱신 없음)
+    -->
+    <update id="updateLastLoginAt">
+        UPDATE user_device
+        SET last_login_at = NOW()
+        WHERE user_id = #{userId}
+          AND device_id = #{deviceId}
+    </update>
 
 </mapper>

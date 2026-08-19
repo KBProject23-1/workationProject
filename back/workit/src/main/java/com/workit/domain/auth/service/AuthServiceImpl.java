@@ -310,6 +310,7 @@ public class AuthServiceImpl implements AuthService {
         UserVO user = new UserVO();
         user.setEmailHash(emailHash);
         user.setEmailEncrypt(PersonalDataCipher.encrypt(normalizedEmail));
+        user.setNameHash(sha256Hex(verificationResult.getName()));
         user.setNameEncrypt(PersonalDataCipher.encrypt(verificationResult.getName()));
         user.setPhoneNumberHash(sha256Hex(verificationResult.getPhoneNumber()));
         user.setPhoneNumberEncrypt(PersonalDataCipher.encrypt(verificationResult.getPhoneNumber()));
@@ -321,7 +322,6 @@ public class AuthServiceImpl implements AuthService {
         userAuth.setUserId(user.getId());
         userAuth.setPasswordHash(passwordHash);
         userAuth.setIdentityCiHash(ciHash);
-        userAuth.setIdentityCiEncrypt(PersonalDataCipher.encrypt(verificationResult.getCi()));
         authMapper.insertUserAuth(userAuth);
 
         // user_profile insert (기본 닉네임 — 닉네임 입력 기능 제거, 서버가 자동 생성)
@@ -399,6 +399,14 @@ public class AuthServiceImpl implements AuthService {
         //      (계정 상태가 외부에 노출되지 않도록 통일)
         if (!USER_STATUS_ACTIVE.equals(loginUser.getStatus())) {
             throw new BusinessException(AuthErrorCode.INVALID_CREDENTIALS);
+        }
+
+        // 3-1. 기기별 마지막 로그인 일시 갱신 (user_device.last_login_at)
+        //    - PASSWORD 로그인: deviceId 가 제공된 경우에만 갱신 (미제공 시 갱신 안함)
+        //    - PIN 로그인: deviceId 가 항상 제공되므로 항상 갱신
+        //    - 미등록 기기(신규 PASSWORD 로그인)의 경우 UPDATE 행 수 0 — 무시
+        if (!isBlank(request.getDeviceId())) {
+            authMapper.updateLastLoginAt(loginUser.getId(), request.getDeviceId());
         }
 
         // 4. JWT 발급 + 응답 생성 (JwtTokenProvider 재사용 — Payload: sub(userId), role, tokenType, iat, exp)
@@ -648,10 +656,11 @@ public class AuthServiceImpl implements AuthService {
 
         // 4-1. PASS 인증 이름과 가입 이름 일치 확인 — Mock CI 는 휴대폰 번호 기반(MOCK-CI-{sha256(phone)})
         //      이므로 휴대폰 번호를 알면 이름이 달라도 CI 가 일치한다. 계정 소유자 본인 확인을 위해
-        //      PASS 인증에 입력된 이름과 가입 시 등록된 이름(users.name_encrypt 복호화)을 함께 대조한다.
+        //      PASS 인증에 입력된 이름의 SHA-256 해시와 가입 시 저장된 name_hash를 대조한다.
+        //      (knowledge.md: 검색용 개인정보는 hash — 복호화 없이 검증)
         //      - 이름 불일치 → VERIFICATION_FAILED(400) (docs — 원인 비노출)
-        String registeredName = PersonalDataCipher.decrypt(user.getNameEncrypt());
-        if (!registeredName.equals(result.getName())) {
+        String passNameHash = sha256Hex(result.getName());
+        if (!passNameHash.equals(user.getNameHash())) {
             throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
         }
 

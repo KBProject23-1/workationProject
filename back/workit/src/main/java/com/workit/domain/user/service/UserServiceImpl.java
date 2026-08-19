@@ -155,10 +155,10 @@ public class UserServiceImpl implements UserService {
         // 6. Audit 로그 — userId 만 기록 (닉네임/회사명 등 로그 출력 금지 — knowledge.md)
         log.info("프로필 최초 등록 성공 - userId={}", userId);
 
-        // 7. 응답 생성 — profileId 는 insert 후 채워진 PK (useGeneratedKeys)
-        //    - insert 성공 후 userProfile 필드 값을 그대로 사용 (저장된 trim/정규화 값)
+        // 7. 응답 생성 — profileId 는 user_profile.user_id (PK = FK)
+        //    - user_profile 테이블의 PK가 user_id 이므로 별도 autogeneration 없음
         return ProfileOnboardingResponseDTO.of(
-                userProfile.getId(), userId, userProfile.getNickname(), userProfile.getCompanyName());
+                userId, userId, userProfile.getNickname(), userProfile.getCompanyName());
     }
 
     @Override
@@ -298,15 +298,14 @@ public class UserServiceImpl implements UserService {
                 identityVerificationProvider.verify(request.getIdentityVerificationId());
 
         // 4. 본인인증 이름 대조 — PASS 인증이 현재 사용자 본인 인증인지 확인
-        //    - Mock PASS 세션은 사용자와 연결되어 있지 않으므로, 인증된 이름(복호화)과
-        //      DB 에 저장된 사용자 이름(users.name_encrypt 복호화)이 일치해야 한다
-        //      (docs: "본인인증 이름을 복호화하여 DB에 조회된 사용자인지 확인" —
-        //       verifyPasswordReset 의 이름 일치 확인과 동일 패턴)
+        //    - Mock PASS 세션은 사용자와 연결되어 있지 않으므로, 인증된 이름의 SHA-256 해시와
+        //      DB 에 저장된 name_hash가 일치해야 한다
+        //      (knowledge.md: 검색용 개인정보는 hash — 복호화 없이 검증)
         //    - 휴대폰 번호 변경은 인증된 새 번호(새 CI)를 사용하므로 CI 대조는 사용하지 않는다
         //      (Mock CI 는 휴대폰 기반 결정값 — 번호 변경 시 기존 identity_ci_hash 와 달라짐)
         //    - 다른 사용자에게 발급된 identityVerificationId → VERIFICATION_FAILED(400) (원인 비노출)
-        String registeredName = PersonalDataCipher.decrypt(user.getNameEncrypt());
-        if (!registeredName.equals(verificationResult.getName())) {
+        String passNameHash = sha256Hex(verificationResult.getName());
+        if (!passNameHash.equals(user.getNameHash())) {
             throw new BusinessException(AuthErrorCode.VERIFICATION_FAILED);
         }
 

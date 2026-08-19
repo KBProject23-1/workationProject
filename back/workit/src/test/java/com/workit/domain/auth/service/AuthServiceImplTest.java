@@ -692,10 +692,8 @@ class AuthServiceImplTest {
         // password 는 BCrypt 해시 (원문과 다르고 matches 검증 통과 — AES 암호화 금지)
         assertNotEquals("password123!", userAuth.getPasswordHash());
         assertTrue(PasswordEncryptor.matches("password123!", userAuth.getPasswordHash()));
-        // CI hash / encrypt (세션에서 복원한 CI 재암호화 저장)
+        // CI hash (세션에서 복원한 CI 해시 저장)
         assertEquals(CI_HASH_1234567890, userAuth.getIdentityCiHash());
-        assertEquals("MOCK-CI-imp_ver_1234567890",
-                PersonalDataCipher.decrypt(userAuth.getIdentityCiEncrypt()));
 
         // user_profile insert 검증 — 닉네임 입력 기능 제거로 서버가 기본 닉네임(워케이너{userId}) 자동 생성
         ArgumentCaptor<UserProfileVO> profileCaptor = ArgumentCaptor.forClass(UserProfileVO.class);
@@ -1726,6 +1724,7 @@ class AuthServiceImplTest {
         LoginUserVO user = new LoginUserVO();
         user.setId(userId);
         user.setStatus(status);
+        user.setNameHash(sha256("홍길동"));
         user.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
         user.setPasswordHash(PasswordEncryptor.encode("password123!"));
         user.setIdentityCiHash(identityCiHash);

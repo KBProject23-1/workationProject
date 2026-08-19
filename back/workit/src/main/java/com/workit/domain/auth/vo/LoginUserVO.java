@@ -30,6 +30,9 @@ public class LoginUserVO {
     /** 회원 상태 (ACTIVE, PENDING, BLOCKED, WITHDRAWN) — ACTIVE 만 로그인 허용 */
     private String status;
 
+    /** 이름 SHA-256 해시 (검색/대조용 — 응답 name 은 Service 에서 복호화) */
+    private String nameHash;
+
     /** 이름 AES-256 암호화본 (응답 name 은 Service 에서 복호화) */
     private String nameEncrypt;
 

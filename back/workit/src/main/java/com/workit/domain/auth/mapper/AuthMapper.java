@@ -192,4 +192,15 @@ public interface AuthMapper {
      * @return 등록된 기기의 pin_hash(BCrypt) 목록, 없으면 빈 목록
      */
     List<String> selectPinHashesByUserId(Long userId);
+
+    /**
+     * 로그인 성공 시 user_device.last_login_at 갱신
+     * - user_id + device_id (UNIQUE) 기준으로 해당 기기의 최종 로그인 일시를 현재 시각으로 갱신
+     * - PASSWORD 로그인 시 deviceId 가 있는 경우와 PIN 로그인 시 호출한다
+     * - deviceId 가 등록되지 않은 신규 기기(初次 PASSWORD 로그인)인 경우 호출하지 않는다
+     *   (PIN 설정(setupPin) 시 INSERT 시점의 DB 기본값(CURRENT_TIMESTAMP)이 사용된다)
+     *
+     * @return 갱신된 행 수 (0 이면 등록되지 않은 기기)
+     */
+    int updateLastLoginAt(@Param("userId") Long userId, @Param("deviceId") String deviceId);
 }

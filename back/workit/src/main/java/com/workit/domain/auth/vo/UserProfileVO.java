@@ -7,7 +7,7 @@ import lombok.ToString;
 import java.time.LocalDateTime;
 
 // user_profile 테이블 매핑 VO (회원가입 완료 시 insert 용도)
-// ERD 기준 컬럼: id, user_id, nickname, company_name, created_at, updated_at
+// ERD 기준 컬럼: user_id(PK), nickname, company_name, created_at, updated_at
 // - nickname: UNIQUE — 회원가입 시 서버가 기본값(워케이너{userId})으로 자동 생성 (닉네임 입력 기능 제거)
 // - company_name: 선택 입력 — 회원가입 시점에는 저장하지 않는다
 @Getter
@@ -15,10 +15,7 @@ import java.time.LocalDateTime;
 @ToString
 public class UserProfileVO {
 
-    /** 프로필 고유 번호(PK) — insert 후 MyBatis useGeneratedKeys 로 채워진다 */
-    private Long id;
-
-    /** 회원 고유 번호 (FK, users.id 참조, 1:1) */
+    /** 회원 고유 번호 (PK, FK, users.id 참조, 1:1) */
     private Long userId;
 
     /** 닉네임 (UNIQUE) */
@@ -26,10 +23,4 @@ public class UserProfileVO {
 
     /** 소속 회사명 (선택) */
     private String companyName;
-
-    /** 프로필 생성 일시 */
-    private LocalDateTime createdAt;
-
-    /** 프로필 수정 일시 */
-    private LocalDateTime updatedAt;
 }

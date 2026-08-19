@@ -17,9 +17,10 @@
         SELECT u.id                  AS user_id,
                u.status,
                u.email_encrypt,
+               u.name_hash,
                u.name_encrypt,
                u.phone_number_encrypt,
-               up.id                 AS profile_id,
+               up.user_id             AS profile_id,
                up.nickname,
                up.company_name
         FROM users u
@@ -45,9 +46,7 @@
         - created_at/updated_at 은 DB 기본값(CURRENT_TIMESTAMP) 사용
     -->
     <insert id="insertUserProfile"
-            parameterType="com.workit.domain.user.vo.UserProfileVO"
-            useGeneratedKeys="true"
-            keyProperty="id">
+            parameterType="com.workit.domain.user.vo.UserProfileVO">
         INSERT INTO user_profile (user_id, nickname, company_name)
         VALUES (#{userId}, #{nickname}, #{companyName})
     </insert>
@@ -99,8 +98,7 @@
     <update id="updateUserStatusToWithdrawn">
         UPDATE users
         SET status     = 'WITHDRAWN',
-            deleted_at = NOW(),
-            updated_at = CURRENT_TIMESTAMP
+            deleted_at = NOW()
         WHERE id = #{userId}
           AND status != 'WITHDRAWN'
     </update>
@@ -129,8 +127,9 @@
     -->
     <update id="updateUserPhoneNumber">
         UPDATE users
-        SET phone_number_hash    = #{phoneNumberHash},
-            phone_number_encrypt = #{phoneNumberEncrypt}
+        SET phone_number_hash        = #{phoneNumberHash},
+            phone_number_encrypt     = #{phoneNumberEncrypt},
+            phone_number_changed_at  = NOW()
         WHERE id = #{userId}
           AND status != 'WITHDRAWN'
     </update>
@@ -161,8 +160,9 @@
     -->
     <update id="updateUserEmail">
         UPDATE users
-        SET email_hash    = #{emailHash},
-            email_encrypt = #{emailEncrypt}
+        SET email_hash        = #{emailHash},
+            email_encrypt     = #{emailEncrypt},
+            email_changed_at  = NOW()
         WHERE id = #{userId}
           AND status != 'WITHDRAWN'
     </update>
