@@ -16,6 +16,7 @@ public enum TransactionErrorCode implements ErrorCode {
     TRANSACTION_INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "결제 금액이 올바르지 않습니다."),
     TRANSACTION_MAX_AMOUNT_EXCEEDED(HttpStatus.BAD_REQUEST, "1회 결제 가능 금액은 최대 200만원입니다."),
     TRANSACTION_PAYMENT_SOURCE_TYPE_REQUIRED(HttpStatus.BAD_REQUEST, "결제 수단을 선택해주세요."),
+    TRANSACTION_PAYMENT_SOURCE_TYPE_INVALID(HttpStatus.BAD_REQUEST, "결제 수단은 WALLET 또는 CARD 여야 합니다."),
     TRANSACTION_PIN_REQUIRED(HttpStatus.BAD_REQUEST, "PIN 번호를 입력해주세요."),
     TRANSACTION_DEVICE_ID_REQUIRED(HttpStatus.BAD_REQUEST, "기기 정보가 필요합니다."),
     TRANSACTION_PIN_INVALID(HttpStatus.BAD_REQUEST, "PIN 번호가 유효하지 않습니다."),
@@ -32,7 +33,8 @@ public enum TransactionErrorCode implements ErrorCode {
 
     // 카드결제 PG(외부 결제망) 관련
     TRANSACTION_PG_AUTH_FAILED(HttpStatus.BAD_GATEWAY, "카드 결제 승인에 실패했습니다. 잠시 후 다시 시도해주세요."),
-    TRANSACTION_PG_CAPTURE_FAILED(HttpStatus.BAD_GATEWAY, "카드 결제 매입에 실패했습니다. 승인이 취소되었습니다.");
+    TRANSACTION_PG_CAPTURE_FAILED(HttpStatus.BAD_GATEWAY, "카드 결제 매입에 실패했습니다. 승인이 취소되었습니다."),
+    TRANSACTION_PROCESSING_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "결제 처리 중 오류가 발생했습니다. 승인이 취소되었습니다. 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String message;

@@ -393,7 +393,9 @@ CREATE TABLE `bank_accounts`
     `balance_updated_at`   TIMESTAMP      NULL DEFAULT CURRENT_TIMESTAMP COMMENT '계좌 잔액 업데이트 시간',
     `is_deleted`           TINYINT(1)     NULL DEFAULT 0 COMMENT '등록 계좌 삭제 여부',
     `primary_active_user_id` BIGINT GENERATED ALWAYS AS (CASE WHEN is_primary = 1 AND is_deleted = 0 THEN user_id END) STORED COMMENT '유저당 활성 대표계좌 1개 강제용(직접 조회 X)',
-    CONSTRAINT `UQ_bank_accounts_primary_per_user` UNIQUE (`primary_active_user_id`)
+    `active_account_identity` VARCHAR(70) GENERATED ALWAYS AS (CASE WHEN is_deleted = 0 THEN CONCAT(user_id, ':', account_number) END) STORED COMMENT '연동 사용자+계좌번호 조합. 삭제되지 않은 계좌만 유니크(중복 연동 방지, 직접 조회 X)',
+    CONSTRAINT `UQ_bank_accounts_primary_per_user` UNIQUE (`primary_active_user_id`),
+    CONSTRAINT `UQ_bank_accounts_active_account` UNIQUE (`active_account_identity`)
 );
 
 -- 5. 카드 테이블 (card_companies 외래키 포함)

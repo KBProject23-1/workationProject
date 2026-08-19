@@ -1,24 +1,16 @@
 package com.workit.domain.account.util;
 
+import com.workit.global.util.Masker;
+
 public final class AccountNumberMasker {
+
+    private static final int FRONT_LEN = 3;
+    private static final int BACK_LEN = 4;
 
     private AccountNumberMasker() {
     }
 
     public static String mask(String accountNumber) {
-        if (accountNumber == null || accountNumber.length() < 8) {
-            return accountNumber;
-        }
-        int len = accountNumber.length();
-        String front = accountNumber.substring(0, 3);
-        String back = accountNumber.substring(len - 4);
-
-        StringBuilder maskedBuilder = new StringBuilder();
-        for (int i = 0; i < len - 7; i++) {
-            maskedBuilder.append("*");
-        }
-        String masked = maskedBuilder.toString();
-
-        return front + masked + back;
+        return Masker.mask(accountNumber, FRONT_LEN, BACK_LEN);
     }
 }

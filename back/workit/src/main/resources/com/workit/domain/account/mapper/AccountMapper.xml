@@ -36,12 +36,13 @@
         WHERE la.user_id = #{userId} AND la.is_linked = 0
     </select>
 
+    <!-- is_linked=0 가드: findAvailableAccounts 와 동일 조건. 이미 연동된 계좌를 재연동(중복 bank_accounts 생성)하지 못하게 막는다 -->
     <select id="findLinkableAccountById" resultMap="LinkableAccountResultMap">
         SELECT la.id, la.user_id, la.bank_code, b.name AS bank_name, b.logo_url AS bank_logo_url,
         la.account_number, la.product_name, la.is_linked
         FROM linkable_accounts la
         JOIN banks b ON la.bank_code = b.code
-        WHERE la.id = #{linkableAccountId} AND la.user_id = #{userId}
+        WHERE la.id = #{linkableAccountId} AND la.user_id = #{userId} AND la.is_linked = 0
     </select>
 
     <update id="markLinkableAccountAsLinked">

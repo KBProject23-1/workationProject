@@ -7,6 +7,7 @@ public enum CardErrorCode implements ErrorCode {
 
     LINKABLE_CARD_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 연동 가능 카드입니다."),
     CARD_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 카드입니다."),
+    CARD_ALREADY_LINKED(HttpStatus.CONFLICT, "이미 연동된 카드입니다."),
     CARD_NICKNAME_REQUIRED(HttpStatus.BAD_REQUEST, "별칭을 입력해주세요."),
     CARD_NICKNAME_TOO_LONG(HttpStatus.BAD_REQUEST, "별칭은 100자를 초과할 수 없습니다.");
 
