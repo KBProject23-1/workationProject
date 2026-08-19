@@ -1,10 +1,12 @@
 INSERT INTO terms (
+    version,
     title,
     content,
     required,
     created_at
 )
 VALUES (
+        '1.0',
            '개인정보 제3자 제공 동의',
            '
        제1조 (목적)
@@ -72,6 +74,6 @@ VALUES (
        다만 해당 서비스 이용을 위해 필요한 경우 일부 기능 이용이 제한될 수 있습니다.
 
        ',
-           0,
+           1,
            NOW()
        );

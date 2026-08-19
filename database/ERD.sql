@@ -7,15 +7,17 @@ USE workit;
 CREATE TABLE `users`
 (
     `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
-    `email_hash`           VARCHAR(100) NOT NULL COMMENT '유저 이메일 (로그인 ID) SHA-256',
-    `email_encrypt`        VARCHAR(400) NOT NULL COMMENT '유저 이메일 (로그인 ID) AES',
-    `name_encrypt`         VARCHAR(100) NOT NULL COMMENT '유저 이름 AES',
-    `phone_number_hash`    VARCHAR(255) NOT NULL COMMENT '유저 핸드폰 번호 SHA-256',
-    `phone_number_encrypt` VARCHAR(255) NOT NULL COMMENT '유저 핸드폰 번호 AES',
-    `status`               VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
-    `created_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
-    `updated_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 업데이트 시간',
-    `deleted_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 삭제 시간',
+    `email_hash`                 VARCHAR(100) NOT NULL COMMENT '회원 이메일 (로그인 ID) SHA-256',
+    `email_encrypt`              VARCHAR(400) NOT NULL COMMENT '회원 이메일 (로그인 ID) AES',
+    `name_hash`                  VARCHAR(100) NOT NULL COMMENT '회원 이름 SHA-256',
+    `name_encrypt`               VARCHAR(100) NOT NULL COMMENT '회원 이름 AES',
+    `phone_number_hash`          VARCHAR(255) NOT NULL COMMENT '회원 핸드폰 번호 SHA-256',
+    `phone_number_encrypt`       VARCHAR(255) NOT NULL COMMENT '회원 핸드폰 번호 AES',
+    `status`                     VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
+    `created_at`                 DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '회원 계정 생성 시간',
+    `email_changed_at`           DATETIME         NULL DEFAULT NULL COMMENT '회원 이메일 최종 수정 시각',
+    `phone_number_changed_at`    DATETIME         NULL DEFAULT NULL COMMENT '회원 핸드폰 번호 최종 수정 시각',
+    `deleted_at`                 DATETIME         NULL DEFAULT NULL COMMENT '회원 탈퇴 시각',
 
 
     -- 제약 조건 설정
@@ -28,17 +30,14 @@ CREATE TABLE `users`
 
 CREATE TABLE `user_auth`
 (
-    `id`                  BIGINT       NOT NULL AUTO_INCREMENT COMMENT '인증 정보 고유 번호(PK)',
-    `user_id`             BIGINT       NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
-    `password_hash`       VARCHAR(255) NOT NULL COMMENT '유저 비밀번호 (BCrypt 암호화)',
-    `identity_ci_hash`    VARCHAR(255) NOT NULL COMMENT '유저 PASS 인증 식별값 SHA-256 (1인1계정 검증)',
-    `identity_ci_encrypt` VARCHAR(255) NOT NULL COMMENT '유저 PASS 인증 식별값 AES',
-    `created_at`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 생성 시간',
-    `updated_at`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '유저 계정 업데이트 시간',
+    `user_id`                      BIGINT       NOT NULL COMMENT '회원 고유 번호 (PK, FK, users.id 참조)',
+    `password_hash`                VARCHAR(255) NOT NULL COMMENT '회원 비밀번호 (BCrypt 암호화)',
+    `identity_ci_hash`             VARCHAR(255) NOT NULL COMMENT '회원 PASS 인증 식별값 SHA-256 (1인1계정 검증)',
+    `password_changed_at`          DATETIME         NULL DEFAULT NULL COMMENT '회원 비밀번호 업데이트 시간',
 
 
     -- 제약 조건 설정
-    PRIMARY KEY (`id`),
+    PRIMARY KEY (`user_id`),
     UNIQUE KEY `ux_users_pass_ci` (`identity_ci_hash`), -- PASS CI값 중복 가입 방지 (원천 차단)
     CONSTRAINT `fk_user_auth_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE = InnoDB
@@ -47,15 +46,15 @@ CREATE TABLE `user_auth`
 
 CREATE TABLE `user_profile`
 (
-    `id`           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '프로필 고유 번호(PK)',
-    `user_id`      BIGINT       NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
-    `nickname`     VARCHAR(50)  NOT NULL COMMENT '유저 닉네임',
-    `company_name` VARCHAR(100) NULL COMMENT '소속 회사명 (선택 입력 가능)',
+    `user_id`      BIGINT       NOT NULL COMMENT '회원 고유 번호 (PK, FK, users.id 참조)',
+    `nickname`     VARCHAR(50)  NOT NULL COMMENT '회원 닉네임',
+    `company_name` VARCHAR(100)     NULL COMMENT '소속 회사명 (선택 입력 가능)',
     `created_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '프로필 최초 생성 일시',
-    `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '프로필 최종 수정 일시',
+    `updated_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                       ON UPDATE CURRENT_TIMESTAMP COMMENT '프로필 최종 수정 일시',
 
     -- 제약 조건 설정
-    PRIMARY KEY (`id`),
+    PRIMARY KEY (`user_id`),
     UNIQUE KEY `ux_user_profile_user_id` (`user_id`),   -- 1:1 관계 강제 (한 유저당 프로필은 단 하나)
     UNIQUE KEY `ux_user_profile_nickname` (`nickname`), -- 닉네임 중복 원천 차단
     CONSTRAINT `fk_user_profile_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
@@ -69,9 +68,10 @@ CREATE TABLE `user_device`
     `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '기기 등록 고유 번호(PK)',
     `user_id`       BIGINT       NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
     `device_id`     VARCHAR(100) NOT NULL COMMENT '브라우저 고유 식별 UUID',
-    `device_name`   VARCHAR(100) NOT NULL COMMENT '사용자 기기 정보 (예: Chrome / Windows)',
+    `device_name`   VARCHAR(100) NOT NULL COMMENT '회원 기기 정보 (예: Chrome / Windows)',
     `pin_hash`      CHAR(60)     NOT NULL COMMENT '자산 거래용 6자리 핀번호 (BCrypt 암호화문)',
-    `last_login_at` DATETIME     NULL COMMENT '해당 기기 최종 로그인 일시',
+    `pin_updated_at`DATETIME         NULL DEFAULT NULL COMMENT 'PIN 최종 변경 일시',
+    `last_login_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '해당 기기 최종 로그인 일시',
     `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '기기 최초 인증 등록 일시',
 
     -- 제약 조건 설정
@@ -85,12 +85,15 @@ CREATE TABLE `user_device`
 CREATE TABLE `terms`
 (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '약관 고유 번호(PK)',
+    `version`    VARCHAR(20)  NOT NULL COMMENT '약관 버전',
     `title`      VARCHAR(100) NOT NULL COMMENT '약관 제목',
     `content`    LONGTEXT     NOT NULL COMMENT '약관 본문 상세 내용',
     `required`   TINYINT(1)   NOT NULL COMMENT '필수 여부 (0:선택, 1:필수)',
     `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '약관 등록 일시',
+    `active`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '약관 활성화 여부 (0: 비활성, 1: 활성)',
 
-    PRIMARY KEY (`id`)
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_terms_title_version` (`title`, `version`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='서비스 약관 종류 마스터 테이블';
@@ -104,8 +107,9 @@ CREATE TABLE `user_terms_agreements`
 
     -- 제약 조건 설정
     PRIMARY KEY (`id`),
+    UNIQUE KEY `ux_user_terms_agreements_user_term` (`user_id`, `term_id`),
     CONSTRAINT `fk_user_terms_agreements_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-    CONSTRAINT `fk_user_terms_agreements_term_id` FOREIGN KEY (`term_id`) REFERENCES `terms` (`id`) ON DELETE CASCADE
+    CONSTRAINT `fk_user_terms_agreements_term_id` FOREIGN KEY (`term_id`) REFERENCES `terms` (`id`) ON DELETE RESTRICT
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='회원별 약관 동의 이력 매핑 테이블 (비식별 관계)';
@@ -113,13 +117,15 @@ CREATE TABLE `user_terms_agreements`
 CREATE TABLE `user_notification_settings`
 (
     `user_id`            BIGINT     NOT NULL COMMENT '회원 고유번호 (PK 겸 FK, users.id 참조)',
-    `system_notify`      TINYINT(1) NOT NULL DEFAULT 1 COMMENT '시스템 알림 ON(1) / OFF(0)',
-    `budget_warning`     TINYINT(1) NOT NULL DEFAULT 1 COMMENT '예산 경고 알림 ON(1) / OFF(0)',
-    `transfer_notify`    TINYINT(1) NOT NULL DEFAULT 1 COMMENT '송금(입출금) 알림 ON(1) / OFF(0)',
+    `budget_notify`      TINYINT(1) NOT NULL DEFAULT 1 COMMENT '예산 경고 알림 ON(1) / OFF(0)',
+    `transfer_notify`    TINYINT(1) NOT NULL DEFAULT 1 COMMENT '충전/환불 알림 ON(1) / OFF(0)',
     `payment_notify`     TINYINT(1) NOT NULL DEFAULT 1 COMMENT '결제 알림 ON(1) / OFF(0)',
-    `event_notify`       TINYINT(1) NOT NULL DEFAULT 0 COMMENT '이벤트/광고 알림 ON(1) / OFF(0)',
-    `reservation_notify` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '예약 알림 ON(1) / OFF(0)',
-    `review_notify`      TINYINT(1) NOT NULL DEFAULT 1 COMMENT '리뷰 작성 요청 알림 ON(1) / OFF(0)',
+    `workation_notify`   TINYINT(1) NOT NULL DEFAULT 1 COMMENT '워케이션 진행 파트 알림 ON(1) / OFF(0)',
+    `settlement_notify`  TINYINT(1) NOT NULL DEFAULT 1 COMMENT '정산 알림 ON(1) / OFF(0)',
+    `schedule_notify`    TINYINT(1) NOT NULL DEFAULT 1 COMMENT '일정 알림 ON(1) / OFF(0)',
+    `updated_at`         DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                    ON UPDATE CURRENT_TIMESTAMP COMMENT '알림 설정 변경 일시',
+
 
     -- 제약 조건 설정
     PRIMARY KEY (`user_id`),
@@ -130,14 +136,16 @@ CREATE TABLE `user_notification_settings`
 
 CREATE TABLE `notification_histories`
 (
-    `id`         BIGINT                                                                             NOT NULL AUTO_INCREMENT COMMENT '알림 이력 고유 번호(PK)',
-    `user_id`    BIGINT                                                                             NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
-    `type`       ENUM ('SYSTEM', 'BUDGET', 'TRANSFER', 'PAYMENT', 'EVENT', 'RESERVATION', 'REVIEW') NOT NULL COMMENT '알림 카테고리 타입',
-    `important`  TINYINT(1)                                                                         NOT NULL DEFAULT 0 COMMENT '중요 알림 여부 (0:일반, 1:중요)',
-    `title`      VARCHAR(100)                                                                       NOT NULL COMMENT '알림 제목',
-    `content`    TEXT                                                                               NOT NULL COMMENT '알림 본문 내용',
-    `read`       TINYINT(1)                                                                         NOT NULL DEFAULT 0 COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',
-    `created_at` DATETIME                                                                           NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '알림 수신 일시',
+    `id`                BIGINT            NOT NULL AUTO_INCREMENT COMMENT '알림 이력 고유 번호(PK)',
+    `user_id`           BIGINT            NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
+    `category`          VARCHAR(30)       NOT NULL COMMENT '알림 카테고리 타입',
+    `important`         TINYINT(1)        NOT NULL DEFAULT 0 COMMENT '중요 알림 여부 (0:일반, 1:중요)',
+    `title`             VARCHAR(100)      NOT NULL COMMENT '알림 제목',
+    `content`           TEXT              NOT NULL COMMENT '알림 본문 내용',
+    `reference_type`    VARCHAR(30)           NULL COMMENT '알림이 참조하는 대상 타입',
+    `reference_id`      BIGINT                NULL COMMENT '알림이 참조하는 대상 데이터 ID',
+    `read`              TINYINT(1)        NOT NULL DEFAULT 0 COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',
+    `created_at`        DATETIME          NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '알림 수신 일시',
 
     -- 제약 조건 설정
     PRIMARY KEY (`id`),
@@ -305,22 +313,17 @@ CREATE TABLE `workation_expenses`
 -- 7. 가맹점 업종
 -- =========================================================================================
 
-CREATE TABLE `merchant_category_mappings`
-(
-    `id`                  BIGINT                    NOT NULL AUTO_INCREMENT COMMENT '매핑 고유 번호(PK)',
-    `budget_type`         ENUM ('WORK', 'PERSONAL') NOT NULL COMMENT '법인용 / 개인용 구분',
-    `merchant_category`   VARCHAR(30)               NOT NULL COMMENT '가맹점 업종 코드 (merchants.category 값)',
-    `expense_category_id` BIGINT                    NOT NULL COMMENT '지출 카테고리 고유 번호 (FK, expense_categories.id 참조)',
-    `created_at`          DATETIME                  NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '매핑 등록 일시',
-
-    -- 제약 조건 설정
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `ux_merchant_category_mappings_type_category` (`budget_type`, `merchant_category`), -- 업종당 기본 매핑은 유형별 1건
-    KEY `ix_merchant_category_mappings_category` (`expense_category_id`),
-    CONSTRAINT `fk_merchant_category_mappings_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_unicode_ci COMMENT ='가맹점 업종별 카테고리 기본 매핑 테이블 (자동분류 기준)';
+CREATE TABLE `merchant_category_mappings` (
+                                              `id` bigint NOT NULL AUTO_INCREMENT COMMENT '매핑 고유 번호(PK)',
+                                              `budget_type` enum('WORK','PERSONAL') COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '법인용 / 개인용 구분',
+                                              `merchant_category` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '가맹점 업종 코드 (merchants.category 값)',
+                                              `expense_category_id` bigint NOT NULL COMMENT '지출 카테고리 고유 번호 (FK, expense_categories.id 참조)',
+                                              `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '매핑 등록 일시',
+                                              PRIMARY KEY (`id`),
+                                              UNIQUE KEY `ux_merchant_category_mappings_type_category` (`budget_type`,`merchant_category`),
+                                              KEY `ix_merchant_category_mappings_category` (`expense_category_id`),
+                                              CONSTRAINT `fk_merchant_category_mappings_category_id` FOREIGN KEY (`expense_category_id`) REFERENCES `expense_categories` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='가맹점 업종별 카테고리 기본 매핑 테이블 (자동분류 기준)';
 
 
 -- =========================================================================================
@@ -507,230 +510,208 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- 9. 추천 관련 테이블
 --    merchants, restaurants, accommodations, offices, activities, merchant_tags, tags, recommendation_result, recommendation_requests
 -- =========================================================================================================================================
-CREATE TABLE `merchants`
-(
-    `id`                             BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `region_id`                      BIGINT                                                       NOT NULL COMMENT '지역 코드 번호(FK)',
-    `name`                           VARCHAR(150)                                                 NOT NULL,
-    `taxpayer_identification_number` VARCHAR(10)                                                  NULL COMMENT '사업자등록번호',
-    `address`                        VARCHAR(255)                                                 NOT NULL COMMENT '주소',
-    `category`                       ENUM ( 'ACCOMMODATION', 'RESTAURANT', 'OFFICE', 'ACTIVITY' ) NOT NULL,
-    `latitude`                       DOUBLE                                                       NOT NULL,
-    `longitude`                      DOUBLE                                                       NOT NULL,
-    `phone_number`                   VARCHAR(20)                                                  NULL,
-    `rating`                         DECIMAL(2, 1)                                                NULL DEFAULT 0.0,
-    `thumbnail_url`                  VARCHAR(255)                                                 NULL,
-    `price`                          BIGINT                                                       NOT NULL,
-    CONSTRAINT CHECK (rating BETWEEN 0.0 AND 5.0),
-    CONSTRAINT CHECK (price >= 0),
-    CONSTRAINT FOREIGN KEY (region_id) REFERENCES region (id) ON DELETE CASCADE
-);
+CREATE TABLE `merchants` (
+                             `id` bigint NOT NULL AUTO_INCREMENT,
+                             `region_id` bigint NOT NULL COMMENT '지역 코드 번호(FK)',
+                             `name` varchar(150) NOT NULL,
+                             `taxpayer_identification_number` varchar(12) DEFAULT NULL COMMENT '사업자등록번호',
+                             `address` varchar(255) NOT NULL COMMENT '주소',
+                             `category` enum('ACCOMMODATION','RESTAURANT','OFFICE','ACTIVITY') NOT NULL,
+                             `latitude` double NOT NULL,
+                             `longitude` double NOT NULL,
+                             `phone_number` varchar(20) DEFAULT NULL,
+                             `rating` decimal(2,1) DEFAULT '0.0',
+                             `thumbnail_url` varchar(255) DEFAULT NULL,
+                             `price` bigint NOT NULL,
+                             PRIMARY KEY (`id`),
+                             KEY `region_id` (`region_id`),
+                             CONSTRAINT `merchants_ibfk_1` FOREIGN KEY (`region_id`) REFERENCES `region` (`id`) ON DELETE CASCADE,
+                             CONSTRAINT `merchants_chk_1` CHECK ((`rating` between 0.0 and 5.0)),
+                             CONSTRAINT `merchants_chk_2` CHECK ((`price` >= 0))
+) ENGINE=InnoDB AUTO_INCREMENT=1840 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `tags`
-(
-    `id`   BIGINT AUTO_INCREMENT PRIMARY KEY NOT NULL,
-    `name` VARCHAR(50)                       NOT NULL
-);
+CREATE TABLE `tags` (
+                        `id` bigint NOT NULL AUTO_INCREMENT,
+                        `name` varchar(50) NOT NULL,
+                        PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `merchant_tags`
-(
-    `merchant_id` BIGINT NOT NULL,
-    `tag_id`      BIGINT NOT NULL,
-    PRIMARY KEY (merchant_id, tag_id),
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE,
-    CONSTRAINT FOREIGN KEY (tag_id) REFERENCES tags (id) ON DELETE CASCADE
-);
+CREATE TABLE `merchant_tags` (
+                                 `merchant_id` bigint NOT NULL,
+                                 `tag_id` bigint NOT NULL,
+                                 PRIMARY KEY (`merchant_id`,`tag_id`),
+                                 KEY `tag_id` (`tag_id`),
+                                 CONSTRAINT `merchant_tags_ibfk_1` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE,
+                                 CONSTRAINT `merchant_tags_ibfk_2` FOREIGN KEY (`tag_id`) REFERENCES `tags` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 
-CREATE TABLE `accommodations`
-(
-    `merchant_id`        BIGINT PRIMARY KEY COMMENT '가맹점 고유 번호(PK, FK)',
-    `accommodation_type` ENUM ( 'HOTEL', 'PENSION', 'RESORT', 'GUESTHOUSE', 'POOL_VILLA' ) NOT NULL,
-    `description`        LONGTEXT                                                          NULL,
-    `check_in_time`      TIME                                                              NULL,
-    `check_out_time`     TIME                                                              NULL,
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
-);
+CREATE TABLE `accommodations` (
+                                  `merchant_id` bigint NOT NULL COMMENT '가맹점 고유 번호(PK, FK)',
+                                  `accommodation_type` enum('HOTEL','PENSION','RESORT','GUESTHOUSE','POOL_VILLA') NOT NULL,
+                                  `description` longtext COMMENT 'TourAPI 상세보기 통합 내용',
+                                  `check_in_time` time DEFAULT NULL,
+                                  `check_out_time` time DEFAULT NULL,
+                                  PRIMARY KEY (`merchant_id`),
+                                  CONSTRAINT `accommodations_ibfk_1` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `offices`
-(
-    `merchant_id` BIGINT PRIMARY KEY,
-    `description` TEXT                             NULL,
-    `noise_level` ENUM ('QUIET', 'OPEN', 'COLLAB') NOT NULL,
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
-);
+CREATE TABLE `offices` (
+                           `merchant_id` bigint NOT NULL,
+                           `description` longtext,
+                           `noise_level` enum('QUIET','OPEN','COLLAB') NOT NULL,
+                           PRIMARY KEY (`merchant_id`),
+                           CONSTRAINT `offices_ibfk_1` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `restaurants`
-(
-    `merchant_id` BIGINT PRIMARY KEY COMMENT '가맹점 고유 번호(PK, FK)',
-    `food_type`   ENUM ( 'KOREAN', 'JAPANESE', 'CHINESE', 'WESTERN', 'CAFE', 'DESSERT', 'BAR' ) NOT NULL,
-    `price_level` TINYINT                                                                       NOT NULL,
-    `description` LONGTEXT                                                                      NULL,
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
+CREATE TABLE `restaurants` (
+                               `merchant_id` bigint NOT NULL COMMENT '가맹점 고유 번호(PK, FK)',
+                               `food_type` enum('KOREAN','JAPANESE','CHINESE','WESTERN','CAFE','DESSERT','BAR') NOT NULL,
+                               `price_level` tinyint NOT NULL,
+                               `description` longtext COMMENT 'TourAPI 상세보기 통합 내용',
+                               PRIMARY KEY (`merchant_id`),
+                               CONSTRAINT `restaurants_ibfk_1` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-);
-
-CREATE TABLE `activities`
-(
-    `merchant_id`   BIGINT PRIMARY KEY,
-    `activity_type` ENUM (
-    'WATER_SPORTS', 'LAND_SPORTS', 'RURAL_EXPERIENCE', 'WELLNESS_TOURISM',
-    'CAFE_TEA_HOUSE', 'NATURAL_PARK', 'MOUNTAIN_SCENERY', 'WATER_SENERY',
-    'NATURAL_ECOLOGY', 'NONE'
-) NOT NULL,
-    `description` LONGTEXT NULL COMMENT 'TourAPI 상세보기 통합 내용',
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id) ON DELETE CASCADE
-);
+CREATE TABLE `activities` (
+                              `merchant_id` bigint NOT NULL,
+                              `activity_type` enum('WATER_SPORTS','LAND_SPORTS','RURAL_EXPERIENCE','WELLNESS_TOURISM','CAFE_TEA_HOUSE','NATURAL_PARK','MOUNTAIN_SCENERY','WATER_SENERY','NATURAL_ECOLOGY','NONE') NOT NULL,
+                              `description` longtext COMMENT 'TourAPI 상세보기 통합 내용',
+                              PRIMARY KEY (`merchant_id`),
+                              CONSTRAINT `activities_ibfk_1` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- TourAPI 동기화 실행 이력
-CREATE TABLE `tourism_sync_runs`
-(
-    `id`                BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `mode`              VARCHAR(20) NOT NULL,
-    `status`            VARCHAR(20) NOT NULL,
-    `target_dates`      VARCHAR(40) NULL,
-    `processed_count`   INT NOT NULL DEFAULT 0,
-    `deactivated_count` INT NOT NULL DEFAULT 0,
-    `error_message`     VARCHAR(1000) NULL,
-    `started_at`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `finished_at`       DATETIME NULL,
-    KEY `ix_tourism_sync_runs_started_at` (`started_at`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_unicode_ci;
+CREATE TABLE `tourism_sync_runs` (
+                                     `id` bigint NOT NULL AUTO_INCREMENT,
+                                     `mode` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+                                     `status` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+                                     `target_dates` varchar(40) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                                     `processed_count` int NOT NULL DEFAULT '0',
+                                     `deactivated_count` int NOT NULL DEFAULT '0',
+                                     `error_message` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                                     `started_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                     `finished_at` datetime DEFAULT NULL,
+                                     PRIMARY KEY (`id`),
+                                     KEY `ix_tourism_sync_runs_started_at` (`started_at`)
+) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- merchants를 변경하지 않고 TourAPI 원본과 동기화 상태를 연결한다.
-CREATE TABLE `tourism_merchant_sources`
-(
-    `id`                   BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `merchant_id`          BIGINT NOT NULL,
-    `content_id`           VARCHAR(30) NOT NULL COMMENT 'TourAPI contentid',
-    `modified_time`        VARCHAR(14) NULL COMMENT 'TourAPI modifiedtime',
-    `last_seen_sync_id`    BIGINT NULL COMMENT '마지막 FULL 동기화 실행 ID',
-    `detail_modified_time` VARCHAR(14) NULL COMMENT '상세정보 반영 modifiedtime',
-    `is_active`            TINYINT(1) NOT NULL DEFAULT 1,
-    `created_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT `fk_tourism_merchant_sources_merchant`
-        FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE,
-    UNIQUE KEY `ux_tourism_sources_merchant` (`merchant_id`),
-    UNIQUE KEY `ux_tourism_sources_content` (`content_id`),
-    KEY `ix_tourism_sources_active_sync` (`is_active`, `last_seen_sync_id`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_unicode_ci;
+CREATE TABLE `tourism_merchant_sources` (
+                                            `id` bigint NOT NULL AUTO_INCREMENT,
+                                            `merchant_id` bigint NOT NULL,
+                                            `content_id` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'TourAPI contentid',
+                                            `modified_time` varchar(14) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'TourAPI modifiedtime',
+                                            `last_seen_sync_id` bigint DEFAULT NULL COMMENT '마지막 FULL 동기화 실행 ID',
+                                            `detail_modified_time` varchar(14) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '상세정보 반영 modifiedtime',
+                                            `is_active` tinyint(1) NOT NULL DEFAULT '1',
+                                            `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                            `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                            PRIMARY KEY (`id`),
+                                            UNIQUE KEY `ux_tourism_sources_merchant` (`merchant_id`),
+                                            UNIQUE KEY `ux_tourism_sources_content` (`content_id`),
+                                            KEY `ix_tourism_sources_active_sync` (`is_active`,`last_seen_sync_id`),
+                                            CONSTRAINT `fk_tourism_merchant_sources_merchant` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=14466 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `recommendation_requests`
-(
-    `id`                              BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id`                         BIGINT                                                                     NOT NULL COMMENT '회원 고유 번호(FK)',
-    `workation_id`                    BIGINT                                                                     NOT NULL COMMENT '워케이션 고유 번호(FK)',
-    `reference_merchant_id`           BIGINT                                                                     NULL COMMENT '단일 기준 장소 또는 숙소 ID',
-    `secondary_reference_merchant_id` BIGINT                                                                     NULL COMMENT '두 번째 기준 장소(주로 저녁 추천 시 공유오피스)',
-    `recommendation_type`             ENUM ('ACCOMMODATION', 'OFFICE', 'RESTAURANT', 'ACTIVITY' )                NOT NULL,
-    `reference_type`                  ENUM ( 'AUTO_MERCHANT', 'AUTO_MIDPOINT' , 'USER_SELECTED', 'REGION_ONLY' ) NOT NULL,
-    `meal_type`                       ENUM ('BREAKFAST', 'LUNCH', 'DINNER')                                      NULL,
-    `created_at`                      TIMESTAMP                                                                  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `reference_latitude`              DECIMAL(10, 8)                                                             NULL COMMENT '추천 계산 당시 사용한 기준 좌표의 위도(중간 좌표 저장용)',
-    `reference_longitude`             DECIMAL(11, 8)                                                             NULL COMMENT '추천 계산 당시 사용한 기준 좌표의 경도(중간 좌표 저장용)',
-    CONSTRAINT FOREIGN KEY (user_id)
-        REFERENCES users (id),
-    CONSTRAINT FOREIGN KEY (workation_id)
-        REFERENCES workations (id),
-    CONSTRAINT FOREIGN KEY (reference_merchant_id)
-        REFERENCES merchants (id),
-    CONSTRAINT FOREIGN KEY (secondary_reference_merchant_id)
-        REFERENCES merchants (id)
-);
+CREATE TABLE `recommendation_requests` (
+                                           `id` bigint NOT NULL AUTO_INCREMENT,
+                                           `user_id` bigint NOT NULL COMMENT '회원 고유 번호(FK)',
+                                           `workation_id` bigint NOT NULL COMMENT '워케이션 고유 번호(FK)',
+                                           `reference_merchant_id` bigint DEFAULT NULL COMMENT '단일 기준 장소 또는 숙소 ID',
+                                           `secondary_reference_merchant_id` bigint DEFAULT NULL COMMENT '두 번째 기준 장소(주로 저녁 추천 시 공유오피스)',
+                                           `recommendation_type` enum('ACCOMMODATION','OFFICE','RESTAURANT','ACTIVITY') NOT NULL,
+                                           `reference_type` enum('AUTO_MERCHANT','AUTO_MIDPOINT','USER_SELECTED','REGION_ONLY') NOT NULL,
+                                           `meal_type` enum('BREAKFAST','LUNCH','DINNER') DEFAULT NULL,
+                                           `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                           `reference_latitude` decimal(10,8) DEFAULT NULL COMMENT '추천 계산 당시 사용한 기준 좌표의 위도(중간 좌표 저장용)',
+                                           `reference_longitude` decimal(11,8) DEFAULT NULL COMMENT '추천 계산 당시 사용한 기준 좌표의 경도(중간 좌표 저장용)',
+                                           PRIMARY KEY (`id`),
+                                           KEY `user_id` (`user_id`),
+                                           KEY `workation_id` (`workation_id`),
+                                           KEY `reference_merchant_id` (`reference_merchant_id`),
+                                           KEY `secondary_reference_merchant_id` (`secondary_reference_merchant_id`),
+                                           CONSTRAINT `recommendation_requests_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+                                           CONSTRAINT `recommendation_requests_ibfk_2` FOREIGN KEY (`workation_id`) REFERENCES `workations` (`id`),
+                                           CONSTRAINT `recommendation_requests_ibfk_3` FOREIGN KEY (`reference_merchant_id`) REFERENCES `merchants` (`id`),
+                                           CONSTRAINT `recommendation_requests_ibfk_4` FOREIGN KEY (`secondary_reference_merchant_id`) REFERENCES `merchants` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=51 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `recommendation_results`
-(
-    `id`                        BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `recommendation_request_id` BIGINT        NOT NULL,
-    `merchant_id`               BIGINT        NOT NULL,
-    `price_score`               DECIMAL(5, 2) NULL,
-    `preference_score`          DECIMAL(5, 2) NULL,
-    `accessibility_score`       DECIMAL(5, 2) NULL,
-    `rating_score`              DECIMAL(5, 2) NULL,
-    `total_score`               DECIMAL(5, 2) NOT NULL,
-    `ranking`                   INT           NOT NULL,
-    `distance`                  DECIMAL(10, 3) NULL
-        COMMENT '직선거리(km), REGION_ONLY는 NULL',
-    `calculated_at`             TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT FOREIGN KEY (recommendation_request_id) REFERENCES recommendation_requests (id) ON DELETE CASCADE,
-    CONSTRAINT FOREIGN KEY (merchant_id) REFERENCES merchants (id)
-);
+CREATE TABLE `recommendation_results` (
+                                          `id` bigint NOT NULL AUTO_INCREMENT,
+                                          `recommendation_request_id` bigint NOT NULL,
+                                          `merchant_id` bigint NOT NULL,
+                                          `price_score` decimal(5,2) DEFAULT NULL,
+                                          `preference_score` decimal(5,2) DEFAULT NULL,
+                                          `accessibility_score` decimal(5,2) DEFAULT NULL,
+                                          `rating_score` decimal(5,2) DEFAULT NULL,
+                                          `total_score` decimal(5,2) NOT NULL,
+                                          `ranking` int NOT NULL,
+                                          `distance` decimal(10,3) DEFAULT NULL COMMENT '직선거리(km), REGION_ONLY는 NULL',
+                                          `calculated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                          PRIMARY KEY (`id`),
+                                          KEY `recommendation_request_id` (`recommendation_request_id`),
+                                          KEY `merchant_id` (`merchant_id`),
+                                          CONSTRAINT `recommendation_results_ibfk_1` FOREIGN KEY (`recommendation_request_id`) REFERENCES `recommendation_requests` (`id`) ON DELETE CASCADE,
+                                          CONSTRAINT `recommendation_results_ibfk_2` FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=3373 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 
-CREATE TABLE `survey_questions`
-(
-    `id`             BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `question_code`  VARCHAR(20)                                                            NOT NULL COMMENT '질문 식별 코드',
-    `question`       VARCHAR(200)                                                           NOT NULL COMMENT '질문 내용',
-    `category`       ENUM ( 'COMMON', 'ACCOMMODATION', 'RESTAURANT', 'OFFICE', 'ACTIVITY' ) NOT NULL,
-    question_type    ENUM ('SINGLE_CHOICE','MULTIPLE_CHOICE')                               NOT NULL DEFAULT 'SINGLE_CHOICE' COMMENT '질문 선택 유형',
-    min_select_count TINYINT                                                                NOT NULL DEFAULT 1 COMMENT '최소 선택 개수',
-    max_select_count TINYINT                                                                NOT NULL DEFAULT 1 COMMENT '최대 선택 개수',
-    created_at       TIMESTAMP                                                              NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at       TIMESTAMP                                                              NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 
-);
+CREATE TABLE `survey_questions` (
+                                    `id` bigint NOT NULL AUTO_INCREMENT,
+                                    `question_code` varchar(20) NOT NULL COMMENT '질문 식별 코드',
+                                    `question` varchar(200) NOT NULL COMMENT '질문 내용',
+                                    `category` enum('COMMON','ACCOMMODATION','RESTAURANT','OFFICE','ACTIVITY') NOT NULL,
+                                    `question_type` enum('SINGLE_CHOICE','MULTIPLE_CHOICE') NOT NULL DEFAULT 'SINGLE_CHOICE' COMMENT '질문 선택 유형',
+                                    `min_select_count` tinyint NOT NULL DEFAULT '1' COMMENT '최소 선택 개수',
+                                    `max_select_count` tinyint NOT NULL DEFAULT '1' COMMENT '최대 선택 개수',
+                                    `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                    PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `user_surveys`
-(
-    `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id`      BIGINT    NOT NULL,
-    `workation_id` BIGINT    NULL COMMENT '설문을 작성한 워케이션. 삭제되면 NULL 로 연결만 끊고 답변은 남긴다',
-    `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT FOREIGN KEY (user_id)
-        REFERENCES users (id),
-    -- 설문은 사용자의 취향이라 워케이션보다 오래 산다.
-    -- CASCADE 면 첫 워케이션을 삭제할 때 설문과 답변이 함께 사라져
-    -- 다음 워케이션에서 추천을 받을 수 없다.
-    CONSTRAINT FOREIGN KEY (workation_id)
-        REFERENCES workations (id)
-        ON DELETE SET NULL
-        ON UPDATE CASCADE
-);
+CREATE TABLE `user_surveys` (
+                                `id` bigint NOT NULL AUTO_INCREMENT,
+                                `user_id` bigint NOT NULL,
+                                `workation_id` bigint DEFAULT NULL COMMENT '설문을 작성한 워케이션. 삭제되면 NULL 로 연결만 끊고 답변은 남긴다',
+                                `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                PRIMARY KEY (`id`),
+                                KEY `user_id` (`user_id`),
+                                KEY `fk_user_surveys_workation_id` (`workation_id`),
+                                CONSTRAINT `fk_user_surveys_workation_id` FOREIGN KEY (`workation_id`) REFERENCES `workations` (`id`) ON DELETE SET NULL ON UPDATE CASCADE,
+                                CONSTRAINT `user_surveys_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `survey_options`
-(
-    `id`          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `question_id` BIGINT      NOT NULL,
-    `tag_id`      BIGINT      NULL,
-    `option_code` VARCHAR(40) NOT NULL,
-    `option_name` VARCHAR(20) NULL,
-    `weight`      TINYINT     NOT NULL,
-    CONSTRAINT FOREIGN KEY (question_id) REFERENCES survey_questions (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
-    CONSTRAINT FOREIGN KEY (tag_id) REFERENCES tags (id)
-        ON DELETE SET NULL
-        ON UPDATE CASCADE
-);
+CREATE TABLE `survey_options` (
+                                  `id` bigint NOT NULL AUTO_INCREMENT,
+                                  `question_id` bigint NOT NULL,
+                                  `tag_id` bigint DEFAULT NULL,
+                                  `option_code` varchar(40) NOT NULL,
+                                  `option_name` varchar(20) DEFAULT NULL,
+                                  `weight` tinyint NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  KEY `question_id` (`question_id`),
+                                  KEY `tag_id` (`tag_id`),
+                                  CONSTRAINT `survey_options_ibfk_1` FOREIGN KEY (`question_id`) REFERENCES `survey_questions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+                                  CONSTRAINT `survey_options_ibfk_2` FOREIGN KEY (`tag_id`) REFERENCES `tags` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=20 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
-CREATE TABLE `user_survey_answers`
-(
-    `id`         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `survey_id`  BIGINT    NOT NULL,
-    `option_id`  BIGINT    NOT NULL,
-    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT FOREIGN KEY (survey_id)
-        REFERENCES user_surveys (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
-
-    CONSTRAINT FOREIGN KEY (option_id)
-        REFERENCES survey_options (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE
-);
+CREATE TABLE `user_survey_answers` (
+                                       `id` bigint NOT NULL AUTO_INCREMENT,
+                                       `survey_id` bigint NOT NULL,
+                                       `option_id` bigint NOT NULL,
+                                       `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                       PRIMARY KEY (`id`),
+                                       KEY `survey_id` (`survey_id`),
+                                       KEY `option_id` (`option_id`),
+                                       CONSTRAINT `user_survey_answers_ibfk_1` FOREIGN KEY (`survey_id`) REFERENCES `user_surveys` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+                                       CONSTRAINT `user_survey_answers_ibfk_2` FOREIGN KEY (`option_id`) REFERENCES `survey_options` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=103 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 -- =========================================================================================
@@ -763,8 +744,8 @@ CREATE TABLE `schedules`
 
     CONSTRAINT `FK_SCHEDULES_WORKATION`
         FOREIGN KEY (`workation_id`) REFERENCES `workations` (`id`)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
+            ON DELETE CASCADE
+            ON UPDATE CASCADE,
 
     CONSTRAINT `FK_SCHEDULES_MERCHANT`
         FOREIGN KEY (`merchant_id`) REFERENCES `merchants` (`id`)
@@ -797,7 +778,7 @@ CREATE TABLE `reservation_products`
 
     CONSTRAINT `CK_RESERVATION_PRODUCTS_MAX_HEADCOUNT`
         CHECK (`max_headcount` > 0)
-        
+
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
@@ -1009,25 +990,19 @@ DELETED: 사용자가 삭제한 리뷰',
         ON UPDATE CASCADE
 );
 
-CREATE TABLE `bookmarks`
-(
-    `id`           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `users_id`     BIGINT    NOT NULL COMMENT '회원 고유 번호(PK)',
-    `merchants_id` BIGINT    NOT NULL,
-    `created_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at`   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP,
-    `is_deleted`   TIMESTAMP NULL,
-    CONSTRAINT FOREIGN KEY (users_id)
-        REFERENCES users (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE,
-    CONSTRAINT FOREIGN KEY (merchants_id)
-        REFERENCES merchants (id)
-        ON DELETE CASCADE
-        ON UPDATE CASCADE
-
-);
+CREATE TABLE `bookmarks` (
+                             `id` bigint NOT NULL AUTO_INCREMENT,
+                             `users_id` bigint NOT NULL COMMENT '회원 고유 번호(PK)',
+                             `merchants_id` bigint NOT NULL,
+                             `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                             `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                             `is_deleted` timestamp NULL DEFAULT NULL,
+                             PRIMARY KEY (`id`),
+                             KEY `users_id` (`users_id`),
+                             KEY `merchants_id` (`merchants_id`),
+                             CONSTRAINT `bookmarks_ibfk_1` FOREIGN KEY (`users_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+                             CONSTRAINT `bookmarks_ibfk_2` FOREIGN KEY (`merchants_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
 

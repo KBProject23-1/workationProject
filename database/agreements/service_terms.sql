@@ -1,5 +1,6 @@
 INSERT INTO terms
 (
+    version,
     title,
     content,
     required,
@@ -7,6 +8,7 @@ INSERT INTO terms
 )
 VALUES
     (
+     '1.0',
         'WorkIt 서비스 이용약관',
         '
         제1조(목적)

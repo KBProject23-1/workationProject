@@ -1,10 +1,12 @@
 INSERT INTO terms (
+    version,
     title,
     content,
     required,
     created_at
 )
 VALUES (
+        '1.0',
     '마케팅 정보 수신 동의',
     '
 제1조 (목적)
@@ -51,6 +53,6 @@ VALUES (
 동의 철회 이후에는 마케팅 목적의 정보 제공을 중단합니다.
 
 ',
-    1,
+    0,
     NOW()
 );

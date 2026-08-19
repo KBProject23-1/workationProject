@@ -1,10 +1,12 @@
 INSERT INTO terms (
+    version,
     title,
     content,
     required,
     created_at
 )
 VALUES (
+        '1.0',
            '개인정보 수집 및 이용 동의',
            '
        제1조 (목적)
