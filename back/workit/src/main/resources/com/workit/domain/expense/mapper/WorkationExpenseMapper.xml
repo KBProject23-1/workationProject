@@ -188,21 +188,73 @@
     <!--
         업무 / 개인 구분.
 
-        결제 시점에 사용자가 고른 값(transactions.is_business_expense)이 있으면 그것을 따르고,
-        없으면 결제한 카드 종류로 판단한다.
+        판단 순서
+          ① 결제 시점에 사용자가 고른 값(transactions.is_business_expense)
+          ② 결제 카드의 card_type
+          ③ 법인카드를 가진 사용자면 여기서 끝. 개인카드·지갑 결제는 개인이다
+          ④ 법인카드가 없으면 카드로 나눌 수 없다. 예약 이력과 가맹점 업종으로 추정한다
 
-        법인카드가 없는 사용자는 개인카드로 업무 결제를 하기 때문에
-        카드 종류만으로는 업무인지 개인인지 알 수 없다.
+        법인카드가 없는 사용자는 개인카드 하나로 업무와 개인을 섞어 쓴다.
+        ③ 에서 멈추면 워케이션 지출 전부가 개인으로 들어가 정산이 성립하지 않는다.
 
         is_business_expense 는 DEFAULT 1 이라, 결제 파트가 값을 채우지 않으면
         전부 업무로 들어온다. 미선택 건은 NULL 로 두는 것을 전제로 한다.
     -->
-    <sql id="importBudgetType">
+    <sql id="hasWorkCard">
+        EXISTS (
+            SELECT 1
+              FROM cards wc
+             WHERE wc.user_id   = #{userId}
+               AND wc.card_type = 'WORK'
+               AND (wc.is_deleted = 0 OR wc.is_deleted IS NULL)
+        )
+    </sql>
+
+    <!--
+        예약 결제용.
+
+        이 앱으로 숙소나 공유오피스를 예약했다는 것은 그 워케이션 때문이다.
+        개인 여행이면 워케이션에 묶어 예약할 이유가 없어 업무로 본다
+    -->
+    <sql id="importBudgetTypeReservation">
         CASE
             WHEN t.is_business_expense = 1 THEN 'WORK'
             WHEN t.is_business_expense = 0 THEN 'PERSONAL'
             WHEN c.card_type = 'WORK'      THEN 'WORK'
+            WHEN <include refid="hasWorkCard"/> THEN 'PERSONAL'
+            ELSE 'WORK'
+        END
+    </sql>
+
+    <!--
+        일반 결제용.
+
+        숙소·공유오피스 결제는 업무, 음식점·여가는 개인으로 추정한다.
+        추정이라 틀릴 수 있어(회식비 등) 아래 estimated 플래그로 확인 대상에 넣는다
+    -->
+    <sql id="importBudgetTypeGeneral">
+        CASE
+            WHEN t.is_business_expense = 1 THEN 'WORK'
+            WHEN t.is_business_expense = 0 THEN 'PERSONAL'
+            WHEN c.card_type = 'WORK'      THEN 'WORK'
+            WHEN <include refid="hasWorkCard"/> THEN 'PERSONAL'
+            WHEN m.category IN ('ACCOMMODATION', 'OFFICE') THEN 'WORK'
             ELSE 'PERSONAL'
+        END
+    </sql>
+
+    <!--
+        업무 / 개인을 추정으로 정했는지.
+
+        사용자가 직접 고른 값도, 카드 종류도 없이 업종만 보고 정한 건에 1 이 붙는다.
+        예약 결제는 근거가 뚜렷해 추정으로 보지 않는다
+    -->
+    <sql id="importBudgetTypeEstimated">
+        CASE
+            WHEN t.is_business_expense IS NOT NULL THEN 0
+            WHEN c.card_type = 'WORK'              THEN 0
+            WHEN <include refid="hasWorkCard"/>    THEN 0
+            ELSE 1
         END
     </sql>
 
@@ -220,11 +272,16 @@
                 etc.id
             )                    AS expense_category_id,
             <!--
-                확인이 필요한 건은 계정과목을 확정하지 못해 기타로 떨어진 건뿐이다.
-                예약 상품 유형·사용자 규칙·업종 매핑으로 정해졌고 예산 배정까지 있으면
-                사용자가 다시 볼 이유가 없다.
+                확인이 필요한 건은 두 가지다.
+                  · 계정과목을 확정하지 못해 기타로 떨어진 건
+                  · 업무/개인을 업종만 보고 추정한 건 (법인카드가 없는 사용자)
+
+                둘 다 아니면 근거가 뚜렷하므로 사용자가 다시 볼 이유가 없다.
             -->
-            CASE WHEN bud.id IS NOT NULL THEN 0 ELSE 1 END AS is_auto_categorized
+            CASE
+                WHEN bud.id IS NOT NULL AND src.budget_type_estimated = 0 THEN 0
+                ELSE 1
+            END AS is_auto_categorized
           FROM (
               <!--
                   ① 예약 결제
@@ -236,7 +293,9 @@
                      t.amount,
                      t.merchant_name,
                      r.start_date     AS spent_date,
-                     <include refid="importBudgetType"/> AS budget_type,
+                     <include refid="importBudgetTypeReservation"/> AS budget_type,
+                     <!-- 예약 결제는 근거가 뚜렷해 추정으로 보지 않는다 -->
+                     0                AS budget_type_estimated,
                      rc.id            AS expense_category_id
                 FROM transactions t
                 JOIN reservations r
@@ -253,7 +312,7 @@
                 -->
                 LEFT JOIN expense_categories rc
                        ON rc.user_id IS NULL
-                      AND rc.budget_type = (<include refid="importBudgetType"/>)
+                      AND rc.budget_type = (<include refid="importBudgetTypeReservation"/>)
                       AND rc.code        = (CASE WHEN rp.product_detail_type = 'ROOM'
                                                  THEN 'ACCOMMODATION' ELSE 'RENT' END)
                WHERE t.user_id          = #{userId}
@@ -274,6 +333,7 @@
                      tx.merchant_name,
                      tx.spent_date,
                      tx.budget_type,
+                     tx.budget_type_estimated,
                      COALESCE(ucr.expense_category_id, mcm.expense_category_id) AS expense_category_id
                 FROM (
                     SELECT t.id                AS transaction_id,
@@ -282,10 +342,14 @@
                            t.amount,
                            t.merchant_name,
                            DATE(t.approved_at) AS spent_date,
-                           <include refid="importBudgetType"/> AS budget_type
+                           <include refid="importBudgetTypeGeneral"/> AS budget_type,
+                           <include refid="importBudgetTypeEstimated"/> AS budget_type_estimated
                       FROM transactions t
                       LEFT JOIN cards c
                              ON c.id = t.card_id
+                      <!-- 업종으로 업무/개인을 추정하려면 여기서 가맹점을 붙여야 한다 -->
+                      LEFT JOIN merchants m
+                             ON m.id = t.merchant_id
                      WHERE t.user_id          = #{userId}
                        AND t.reservation_id IS NULL
                        AND t.status           = 'PAID'
