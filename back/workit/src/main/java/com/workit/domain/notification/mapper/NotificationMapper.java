@@ -59,4 +59,15 @@ public interface NotificationMapper {
      * @return 영향을 받은 행 수 (0 또는 1)
      */
     int markAsRead(@Param("userId") Long userId, @Param("notificationId") Long notificationId);
+
+    /**
+     * 전체 알림 읽음 처리 - 현재 사용자의 읽지 않은 모든 알림을 읽음 상태로 변경한다.
+     * - 소유권 검증: user_id 조건을 반드시 포함하여 다른 사용자의 알림을 변경하지 않도록 한다.
+     * - 읽지 않은 알림이 없는 경우 영향 행 수 0을 반환하지만, 이는 정상적인 상태이다.
+     * - user_id 조건이 반드시 포함되므로 다른 사용자의 알림은 변경되지 않는다.
+     *
+     * @param userId 현재 로그인한 사용자 ID
+     * @return 영향을 받은 행 수 (변경된 알림 개수)
+     */
+    int markAllAsRead(@Param("userId") Long userId);
 }

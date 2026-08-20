@@ -46,4 +46,18 @@ public interface NotificationService {
      * @param notificationId 읽음 처리할 알림 ID
      */
     void markAsRead(Long userId, Long notificationId);
+
+    /**
+     * 전체 알림 읽음 처리 - 현재 사용자의 읽지 않은 모든 알림을 읽음 상태로 변경한다.
+     *
+     * 흐름:
+     * 1. DB UPDATE — NotificationMapper.markAllAsRead (user_id 조건)
+     * 2. 영향 행 수 반환 — affected_rows가 0이어도 예외를 발생시키지 않는다
+     *    (읽지 않은 알림이 없었거나 이미 모두 읽음 상태였을 수 있음)
+     * 3. 정상 성공 시 200 OK 반환
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 읽음 처리된 알림 개수
+     */
+    int markAllAsRead(Long userId);
 }

@@ -95,4 +95,25 @@ public class NotificationController {
 
         return GlobalResponseFactory.success(null, "알림이 읽음 처리되었습니다.");
     }
+
+    /**
+     * 전체 알림 읽음 처리 - 현재 로그인한 사용자의 읽지 않은 모든 알림을 읽음 상태로 변경한다
+     *
+     * - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+     * - Request에서 userId를 직접 받지 않는다 (인증 컨텍스트에서 가져온다)
+     * - PATCH 요청 — CSRF 검증 대상 (Cookie 기반 인증)
+     * - 읽지 않은 알림이 없는 경우에도 정상적인 200 OK 반환 (affected_rows=0)
+     * - 다른 사용자의 알림은 변경되지 않음 (SQL에 user_id 조건 포함)
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 성공 응답 (data: null)
+     */
+    @PatchMapping("/read-all")
+    public ResponseEntity<CommonResponse<Void>> markAllAsRead(
+            @CurrentUser Long userId) {
+
+        notificationService.markAllAsRead(userId);
+
+        return GlobalResponseFactory.success(null, "전체 알림이 읽음 처리되었습니다.");
+    }
 }

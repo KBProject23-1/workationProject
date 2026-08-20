@@ -73,4 +73,17 @@
           AND user_id = #{userId}
     </update>
 
+    <!--
+        전체 알림 읽음 처리 - 현재 사용자의 읽지 않은 모든 알림을 읽음 상태로 변경한다.
+        - 소유권 검증: user_id 조건을 반드시 포함하여 다른 사용자의 알림을 변경하지 않도록 한다.
+        - 읽지 않은 알림이 없는 경우 affected_rows=0을 반환하지만, 이는 정상적인 상태이다.
+        - 영향 행 수를 반환하여 Service 계층에서 사용할 수 있다.
+    -->
+    <update id="markAllAsRead">
+        UPDATE notification_histories
+        SET read = 1
+        WHERE user_id = #{userId}
+          AND read = 0
+    </update>
+
 </mapper>

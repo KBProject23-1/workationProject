@@ -578,4 +578,80 @@ class NotificationServiceImplTest {
         verify(notificationMapper).existsNotification(userB, notificationId);
         verify(notificationMapper, never()).markAsRead(any(), any());
     }
+
+    // ================================================================
+    // 전체 알림 읽음 처리 테스트
+    // ================================================================
+
+    @Test
+    @DisplayName("전체 알림 읽음 처리 성공 - 읽지 않은 알림 여러 개 존재")
+    void markAllAsRead_success_multipleUnread() {
+        // Given — read=0인 알림 5개가 읽음 처리됨
+        when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(5);
+
+        // When
+        int updatedRows = notificationService.markAllAsRead(TEST_USER_ID);
+
+        // Then
+        assertEquals(5, updatedRows);
+        verify(notificationMapper).markAllAsRead(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("전체 알림 읽음 처리 성공 - 읽지 않은 알림이 하나도 없는 경우")
+    void markAllAsRead_success_noUnread() {
+        // Given — 읽지 않은 알림이 없음 (affected_rows=0)
+        when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(0);
+
+        // When
+        int updatedRows = notificationService.markAllAsRead(TEST_USER_ID);
+
+        // Then — 0이 반환되지만 예외 발생 없음 (정상 성공)
+        assertEquals(0, updatedRows);
+        verify(notificationMapper).markAllAsRead(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("전체 알림 읽음 처리 - 현재 사용자의 알림만 처리되는지 확인")
+    void markAllAsRead_onlyCurrentUserAffected() {
+        // Given — 사용자 A의 알림 3개가 unread 상태
+        Long userA = 100L;
+        when(notificationMapper.markAllAsRead(userA)).thenReturn(3);
+
+        // When — 사용자 A가 전체 읽음 처리
+        int userAUpdated = notificationService.markAllAsRead(userA);
+
+        // Then — 사용자 A의 알림 3개만 변경됨
+        assertEquals(3, userAUpdated);
+
+        // Mapper 호출 확인 — userA의 ID로만 호출됨
+        verify(notificationMapper).markAllAsRead(userA);
+    }
+
+    @Test
+    @DisplayName("전체 알림 읽음 처리 - userId가 Mapper까지 정상적으로 전달되는지 확인")
+    void markAllAsRead_userIdPassedToMapper() {
+        // Given
+        when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(2);
+
+        // When
+        notificationService.markAllAsRead(TEST_USER_ID);
+
+        // Then — TEST_USER_ID가 정확히 전달됨
+        verify(notificationMapper).markAllAsRead(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("전체 알림 읽음 처리 성공 - 이미 모든 알림이 read=1인 경우")
+    void markAllAsRead_success_allAlreadyRead() {
+        // Given — 이미 모든 알림이 읽음 상태 (affected_rows=0)
+        when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(0);
+
+        // When
+        int updatedRows = notificationService.markAllAsRead(TEST_USER_ID);
+
+        // Then — 예외 발생 없이 정상 성공
+        assertEquals(0, updatedRows);
+        verify(notificationMapper).markAllAsRead(TEST_USER_ID);
+    }
 }
