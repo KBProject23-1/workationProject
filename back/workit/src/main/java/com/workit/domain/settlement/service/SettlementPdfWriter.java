@@ -42,6 +42,18 @@ public class SettlementPdfWriter {
 
     private static final int RECEIPTS_PER_PAGE = 4;
 
+    // 매출전표 안 값 칸의 실제 너비(pt).
+    // A4(595) - 좌우 여백(88) = 507 을 2열로 나누고, 바깥 여백과 안쪽 여백을 뺀 뒤
+    // 항목:값 = 1 : 1.7 로 갈랐을 때의 값 칸 너비다.
+    private static final float RECEIPT_VALUE_WIDTH = 136f;
+
+    // 전표 한 장의 최소 높이.
+    // 주소가 한 줄인 전표와 두 줄인 전표가 나란히 놓여도 카드 크기가 같아 보이게 한다.
+    private static final float RECEIPT_HEIGHT = 300f;
+
+    // rows() 에서 이 표시가 붙은 칸만 줄바꿈을 허용한다
+    private static final String WRAP = "WRAP";
+
     // 앱 화면과 같은 색을 써서 문서와 서비스가 같은 제품으로 보이게 한다
     private static final Color BLUE = new Color(37, 99, 235);
     private static final Color INK = new Color(26, 26, 26);
@@ -116,12 +128,38 @@ public class SettlementPdfWriter {
         info(t, "지역", w.getRegion() != null ? w.getRegion().getName() : "-");
         info(t, "기간", w.getStartDate().format(DATE) + " ~ " + w.getEndDate().format(DATE));
 
-        List<String> cards = doc.getCardLabels();
-        info(t, "사용 법인카드", cards.isEmpty() ? "-" : String.join("\n", cards));
+        // 라벨을 "사용 법인카드" 로 두면 안 된다.
+        // 법인카드가 없는 사용자는 개인카드로 업무 지출을 내고, 그 카드가 여기 찍힌다.
+        //
+        // 여러 장이면 줄바꿈 대신 가운뎃점으로 이어 붙이고, 칸을 넘치면 남은 장수로 줄인다.
+        info(t, "사용 카드", cardLabel(doc.getCardLabels()));
         info(t, "정산 완료일",
                 w.getSettledAt() != null ? w.getSettledAt().format(DATE) : "미정산");
 
         return t;
+    }
+
+    // 기본정보 표의 값 칸 너비. A4 폭에서 여백과 표 비율로 계산한 값이다
+    private static final float INFO_VALUE_WIDTH = 158f;
+
+    private String cardLabel(List<String> cards) {
+
+        if (cards == null || cards.isEmpty()) {
+            return "-";
+        }
+        if (cards.size() == 1) {
+            return fit(cards.get(0), fonts.regular(9f, INK), INFO_VALUE_WIDTH);
+        }
+
+        String joined = String.join("  ·  ", cards);
+        Font font = fonts.regular(9f, INK);
+
+        if (width(joined, font) <= INFO_VALUE_WIDTH) {
+            return joined;
+        }
+        // 다 못 넣으면 첫 장만 쓰고 나머지는 장수로 줄인다
+        String rest = "  외 " + (cards.size() - 1) + "장";
+        return fit(cards.get(0), font, INFO_VALUE_WIDTH - width(rest, font)) + rest;
     }
 
     // 큰 숫자 네 개를 나란히 보여준다. 결재자가 첫 화면에서 총액과 차액만 봐도 되게 한다
@@ -263,7 +301,7 @@ public class SettlementPdfWriter {
         for (int i = list.size(); i < RECEIPTS_PER_PAGE; i++) {
             PdfPCell blank = new PdfPCell();
             blank.setBorder(Rectangle.NO_BORDER);
-            blank.setFixedHeight(320f);
+            blank.setFixedHeight(RECEIPT_HEIGHT);
             grid.addCell(blank);
         }
         return grid;
@@ -278,10 +316,11 @@ public class SettlementPdfWriter {
         r.addCell(receiptHeader());
 
         r.addCell(groupLabel("가맹점 정보"));
+        // 주소는 잘라내면 증빙으로서 의미가 없다. 이 칸만 두 줄까지 허용한다
         r.addCell(rows(new String[][]{
                 {"가맹점명", e.getMerchantName()},
-                {"사업자등록번호", "-"},
-                {"주소", "-"},
+                {"사업자등록번호", nvl(e.getMerchantTaxpayerNumber())},
+                {"주소", nvl(e.getMerchantAddress()), WRAP},
                 {"전화번호", nvl(e.getMerchantPhoneNumber())}
         }));
 
@@ -311,6 +350,7 @@ public class SettlementPdfWriter {
         card.setBorderColor(LINE);
         card.setBorderWidth(0.7f);
         card.setPadding(0f);
+        card.setMinimumHeight(RECEIPT_HEIGHT);
 
         PdfPCell wrap = new PdfPCell(wrapTable(card));
         wrap.setBorder(Rectangle.NO_BORDER);
@@ -349,11 +389,22 @@ public class SettlementPdfWriter {
 
         PdfPTable t = new PdfPTable(2);
         t.setWidthPercentage(100);
-        t.setWidths(new float[]{1.1f, 1.6f});
+        // 항목 이름은 "사업자등록번호" 가 한 줄에 들어가는 만큼만 주고 나머지를 값에 넘긴다
+        t.setWidths(new float[]{1f, 1.7f});
+
+        Font labelFont = fonts.regular(7.5f, SUB);
+        Font valueFont = fonts.regular(7.5f, INK);
 
         for (String[] row : data) {
-            t.addCell(kv(row[0], fonts.regular(8f, SUB), Element.ALIGN_LEFT));
-            t.addCell(kv(row[1], fonts.regular(8f, INK), Element.ALIGN_RIGHT));
+
+            t.addCell(kv(row[0], labelFont, Element.ALIGN_LEFT));
+
+            // WRAP 이 붙은 칸만 줄을 내린다.
+            // 나머지는 한 줄만 차지해야 전표 높이가 서로 어긋나지 않는다
+            boolean wrap = row.length > 2 && WRAP.equals(row[2]);
+            String value = wrap ? nvl(row[1]) : fit(row[1], valueFont, RECEIPT_VALUE_WIDTH);
+
+            t.addCell(kv(value, valueFont, Element.ALIGN_RIGHT));
         }
 
         PdfPCell wrap = new PdfPCell(t);
@@ -428,7 +479,9 @@ public class SettlementPdfWriter {
 
         PdfPTable t = new PdfPTable(5);
         t.setWidthPercentage(100);
-        t.setWidths(new float[]{1.3f, 2.4f, 1.8f, 1.9f, 1.4f});
+        // 카드번호는 1111-****-****-4444 형태로 길이가 고정이라 줄일 수 없다.
+        // 이 칸이 한 줄에 들어가도록 폭을 먼저 확보하고 나머지를 나눈다
+        t.setWidths(new float[]{1.2f, 2.2f, 1.6f, 2.2f, 1.5f});
 
         head(t, "일자", Element.ALIGN_CENTER);
         head(t, "가맹점", Element.ALIGN_LEFT);
@@ -441,8 +494,9 @@ public class SettlementPdfWriter {
         for (WorkationExpenseVO e : list) {
 
             body(t, e.getSpentDate().format(DATE), Element.ALIGN_CENTER, SUB);
-            body(t, e.getMerchantName(), Element.ALIGN_LEFT, INK);
-            body(t, e.getDisplayCategoryName(), Element.ALIGN_CENTER, SUB);
+            // 가맹점 이름이 길면 그 행만 두 줄이 되어 표가 어긋난다
+            body(t, fit(e.getMerchantName(), fonts.regular(9f, INK), 114f), Element.ALIGN_LEFT, INK);
+            body(t, fit(e.getDisplayCategoryName(), fonts.regular(9f, SUB), 79f), Element.ALIGN_CENTER, SUB);
             body(t, maskedCard(e), Element.ALIGN_CENTER, SUB);
             body(t, money(e.getAmount()), Element.ALIGN_RIGHT, INK);
 
@@ -508,7 +562,8 @@ public class SettlementPdfWriter {
         l.setPadding(7f);
         t.addCell(l);
 
-        PdfPCell v = new PdfPCell(new Phrase(value != null ? value : "-", fonts.regular(9f, INK)));
+        Font valueFont = fonts.regular(9f, INK);
+        PdfPCell v = new PdfPCell(new Phrase(fit(value, valueFont, INFO_VALUE_WIDTH), valueFont));
         v.setBorder(Rectangle.BOTTOM);
         v.setBorderColorBottom(LINE);
         v.setBorderWidthBottom(0.5f);
@@ -581,15 +636,22 @@ public class SettlementPdfWriter {
     // 값 변환
     // =====================================================================================
 
+    // 카드 별명이 길면 "별명 + 마스킹번호" 가 값 칸을 넘겨 줄이 내려간다.
+    // 마스킹번호는 증빙에 반드시 남아야 하므로 폭이 모자라면 별명 쪽을 줄인다.
     private String paymentMethod(WorkationExpenseVO e) {
 
         if ("WALLET".equals(e.getPaymentSourceType())) {
             return "지갑결제";
         }
-        if (e.getCardName() != null) {
-            return e.getCardName() + " " + maskedCard(e);
+        if (e.getCardName() == null) {
+            return "카드결제";
         }
-        return "카드결제";
+
+        Font font = fonts.regular(7.5f, INK);
+        String number = maskedCard(e);
+        float rest = RECEIPT_VALUE_WIDTH - width(" " + number, font);
+
+        return fit(e.getCardName(), font, rest) + " " + number;
     }
 
     // 지갑결제는 승인 절차가 없고, 카드결제는 매입까지 완료된 것으로 본다
@@ -618,5 +680,35 @@ public class SettlementPdfWriter {
 
     private String nvl(String value) {
         return (value == null || value.trim().isEmpty()) ? "-" : value;
+    }
+
+    // =====================================================================================
+    // 줄바꿈 막기
+    //
+    // PdfPCell 은 폭을 넘치면 알아서 줄을 내린다.
+    // 표에서 한 칸만 두 줄이 되면 그 행만 높아져 문서 전체가 흐트러지므로,
+    // 넣기 전에 폰트 실제 폭으로 재서 넘치는 만큼 잘라낸다.
+    // =====================================================================================
+
+    private float width(String text, Font font) {
+        return font.getBaseFont().getWidthPoint(text, font.getSize());
+    }
+
+    private String fit(String text, Font font, float maxWidth) {
+
+        if (text == null || text.trim().isEmpty()) {
+            return "-";
+        }
+        if (maxWidth <= 0 || width(text, font) <= maxWidth) {
+            return text;
+        }
+
+        float ellipsis = width("…", font);
+        int end = text.length();
+
+        while (end > 1 && width(text.substring(0, end), font) + ellipsis > maxWidth) {
+            end--;
+        }
+        return text.substring(0, end).trim() + "…";
     }
 }
