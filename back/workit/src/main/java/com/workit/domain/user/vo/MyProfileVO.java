@@ -25,6 +25,9 @@ public class MyProfileVO {
     /** 이메일 AES-256 암호화본 (응답은 Service 에서 복호화) */
     private String emailEncrypt;
 
+    /** 이름 SHA-256 해시 (검색/대조용) */
+    private String nameHash;
+
     /** 이름 AES-256 암호화본 (응답은 Service 에서 복호화) */
     private String nameEncrypt;
 
@@ -37,6 +40,6 @@ public class MyProfileVO {
     /** 소속 회사명 (user_profile.company_name — 미입력 시 null) */
     private String companyName;
 
-    /** 프로필 고유 번호 (user_profile.id — 프로필 미등록 시 null) */
+    /** 프로필 고유 번호 (user_profile.user_id — 프로필 미등록 시 null) */
     private Long profileId;
 }

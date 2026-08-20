@@ -1,5 +1,6 @@
 INSERT INTO terms
 (
+    version,
     title,
     content,
     required,
@@ -7,7 +8,8 @@ INSERT INTO terms
 )
 VALUES
     (
-        'WorkIt 전자금융거래 이용약관',
+'1.0',
+     'WorkIt 전자금융거래 이용약관',
         '
         제1조(목적)
 

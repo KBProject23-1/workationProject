@@ -13,7 +13,7 @@ import lombok.Getter;
 @Builder
 public class ProfileOnboardingResponseDTO {
 
-    /** 프로필 테이블 유저 id (user_profile.id) */
+    /** 프로필 테이블 유저 id (user_profile.user_id — PK = FK) */
     private Long profileId;
 
     /** 유저 id (users.id) */

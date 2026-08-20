@@ -121,6 +121,7 @@ class UserServiceImplTest {
         vo.setUserId(501L);
         vo.setStatus("ACTIVE");
         vo.setEmailEncrypt(PersonalDataCipher.encrypt(EMAIL));
+        vo.setNameHash(sha256Hex(NAME));
         vo.setNameEncrypt(PersonalDataCipher.encrypt(NAME));
         vo.setPhoneNumberEncrypt(PersonalDataCipher.encrypt(PHONE_NUMBER));
         return vo;
