@@ -95,6 +95,28 @@ public class NotificationServiceImpl implements NotificationService {
         return unreadCount;
     }
 
+    @Override
+    @Transactional
+    public void markAsRead(Long userId, Long notificationId) {
+
+        // 1. 소유권 검증 — 알림 존재 여부 확인 (PK + user_id)
+        //    - MySQL은 UPDATE 시 값이 동일하면 affected_rows=0을 반환하므로,
+        //      UPDATE 단독으로 존재 여부를 판단하면 이미 읽은 알림에서 404 발생
+        //    - 따라서 별도의 existsNotification 쿼리로 존재 여부를 먼저 확인
+        boolean exists = notificationMapper.existsNotification(userId, notificationId);
+        if (!exists) {
+            throw new BusinessException(NotificationErrorCode.NOTIFICATION_NOT_FOUND);
+        }
+
+        // 2. 읽음 처리 — idempotent (이미 읽었어도 정상 처리)
+        //    - MySQL affected_rows는 0일 수 있지만, 이미 존재 여부를 확인했으므로 무시
+        notificationMapper.markAsRead(userId, notificationId);
+
+        // 3. Audit 로그 — userId 만 기록 (알림 내용 로그 출력 금지)
+        log.info("알림 읽음 처리 성공 - userId={}, notificationId={}",
+                userId, notificationId);
+    }
+
     /**
      * size 파라미터 검증 + 기본값 적용
      * - null/빈 값 → 기본값 20

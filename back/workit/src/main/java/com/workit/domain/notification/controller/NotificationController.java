@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -69,5 +71,28 @@ public class NotificationController {
         return GlobalResponseFactory.success(
                 NotificationUnreadCountResponseDTO.of(unreadCount),
                 "읽지 않은 알림 개수를 성공적으로 조회했습니다.");
+    }
+
+    /**
+     * 알림 단건 읽음 처리 - 특정 알림을 읽음 상태로 변경한다
+     *
+     * - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+     * - Request에서 userId를 직접 받지 않는다 (인증 컨텍스트에서 가져온다)
+     * - PATCH 요청 — CSRF 검증 대상 (Cookie 기반 인증)
+     * - 이미 읽은 알림을 다시 요청해도 성공 처리 (200 OK)
+     * - 존재하지 않는 알림 또는 다른 사용자의 알림이면 404 반환
+     *
+     * @param userId         JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param notificationId 읽음 처리할 알림의 고유 ID
+     * @return 성공 응답 (data: null)
+     */
+    @PatchMapping("/{notificationId}/read")
+    public ResponseEntity<CommonResponse<Void>> markAsRead(
+            @CurrentUser Long userId,
+            @PathVariable Long notificationId) {
+
+        notificationService.markAsRead(userId, notificationId);
+
+        return GlobalResponseFactory.success(null, "알림이 읽음 처리되었습니다.");
     }
 }

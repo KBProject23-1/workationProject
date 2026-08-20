@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 // NotificationServiceImpl (알림 목록 조회) 테스트
 // - NotificationMapper 를 Mockito @Mock 으로 주입한다 (Service 계층 검증에 집중)
@@ -465,5 +466,116 @@ class NotificationServiceImplTest {
         // Then
         assertEquals(1000, result);
         verify(notificationMapper).countUnreadNotifications(TEST_USER_ID);
+    }
+
+    // ================================================================
+    // 알림 단건 읽음 처리 테스트
+    // ================================================================
+
+    @Test
+    @DisplayName("알림 단건 읽음 처리 성공 - 읽지 않은 알림(read=0)을 읽음으로 변경")
+    void markAsRead_success_unreadNotification() {
+        // Given — 알림이 존재하고, 읽지 않은 알림이 정상적으로 읽음 처리됨
+        Long notificationId = 1024L;
+        when(notificationMapper.existsNotification(TEST_USER_ID, notificationId)).thenReturn(true);
+        when(notificationMapper.markAsRead(TEST_USER_ID, notificationId)).thenReturn(1);
+
+        // When & Then — 예외 없이 정상 완료
+        notificationService.markAsRead(TEST_USER_ID, notificationId);
+
+        // Mapper 호출 확인 — existsNotification + markAsRead 순서대로 호출
+        verify(notificationMapper).existsNotification(TEST_USER_ID, notificationId);
+        verify(notificationMapper).markAsRead(TEST_USER_ID, notificationId);
+    }
+
+    @Test
+    @DisplayName("알림 단건 읽음 처리 성공 - 이미 읽은 알림(read=1) 재요청 시 성공")
+    void markAsRead_success_alreadyReadNotification() {
+        // Given — 알림이 존재하나 이미 읽은 상태
+        //   - existsNotification: 알림 존재 (1)
+        //   - markAsRead: MySQL은 affected_rows=0 반환 (값 변경 없음)
+        //   - 서비스는 existsNotification 확인 후 200 OK 반환
+        Long notificationId = 1024L;
+        when(notificationMapper.existsNotification(TEST_USER_ID, notificationId)).thenReturn(true);
+        when(notificationMapper.markAsRead(TEST_USER_ID, notificationId)).thenReturn(0);
+
+        // When & Then — 예외 없이 정상 완료 (200 OK)
+        notificationService.markAsRead(TEST_USER_ID, notificationId);
+
+        // Mapper 호출 확인 — existsNotification + markAsRead 순서대로 호출
+        verify(notificationMapper).existsNotification(TEST_USER_ID, notificationId);
+        verify(notificationMapper).markAsRead(TEST_USER_ID, notificationId);
+    }
+
+    @Test
+    @DisplayName("알림 단건 읽음 처리 실패 - 존재하지 않는 notificationId")
+    void markAsRead_fail_notificationNotFound() {
+        // Given — 존재하지 않는 알림 ID
+        Long notificationId = 9999L;
+        when(notificationMapper.existsNotification(TEST_USER_ID, notificationId)).thenReturn(false);
+
+        // When & Then — NOTIFICATION_NOT_FOUND(404) 예외 발생
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.markAsRead(TEST_USER_ID, notificationId));
+        assertEquals(NotificationErrorCode.NOTIFICATION_NOT_FOUND, ex.getErrorCode());
+
+        // Mapper 호출 확인 — existsNotification만 호출됨 (markAsRead 호출 안 됨)
+        verify(notificationMapper).existsNotification(TEST_USER_ID, notificationId);
+        verify(notificationMapper, never()).markAsRead(any(), any());
+    }
+
+    @Test
+    @DisplayName("알림 단건 읽음 처리 실패 - 다른 사용자의 notificationId")
+    void markAsRead_fail_otherUserNotification() {
+        // Given — 다른 사용자의 알림 ID로 요청
+        Long notificationId = 1024L;
+        Long otherUserId = 200L;
+        when(notificationMapper.existsNotification(otherUserId, notificationId)).thenReturn(false);
+
+        // When & Then — NOTIFICATION_NOT_FOUND(404) 예외 발생
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.markAsRead(otherUserId, notificationId));
+        assertEquals(NotificationErrorCode.NOTIFICATION_NOT_FOUND, ex.getErrorCode());
+
+        // Mapper 호출 확인 — existsNotification만 호출됨 (markAsRead 호출 안 됨)
+        verify(notificationMapper).existsNotification(otherUserId, notificationId);
+        verify(notificationMapper, never()).markAsRead(any(), any());
+    }
+
+    @Test
+    @DisplayName("알림 단건 읽음 처리 - userId가 Mapper까지 정상 전달되는지 확인")
+    void markAsRead_userIdPassedToMapper() {
+        // Given
+        Long notificationId = 1024L;
+        when(notificationMapper.existsNotification(TEST_USER_ID, notificationId)).thenReturn(true);
+        when(notificationMapper.markAsRead(TEST_USER_ID, notificationId)).thenReturn(1);
+
+        // When
+        notificationService.markAsRead(TEST_USER_ID, notificationId);
+
+        // Then — TEST_USER_ID가 existsNotification과 markAsRead에 정확히 전달됨
+        verify(notificationMapper).existsNotification(TEST_USER_ID, notificationId);
+        verify(notificationMapper).markAsRead(TEST_USER_ID, notificationId);
+    }
+
+    @Test
+    @DisplayName("알림 단건 읽음 처리 - 다른 사용자의 알림 상태가 변경되지 않음")
+    void markAsRead_otherUserNotificationNotModified() {
+        // Given — 사용자 A의 알림 ID
+        Long notificationId = 1024L;
+        Long userA = 100L;
+        Long userB = 200L;
+
+        // 사용자 B가 사용자 A의 알림을 읽음 처리 시도 → existsNotification = 0
+        when(notificationMapper.existsNotification(userB, notificationId)).thenReturn(false);
+
+        // When & Then — NOTIFICATION_NOT_FOUND(404) 예외 발생
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.markAsRead(userB, notificationId));
+        assertEquals(NotificationErrorCode.NOTIFICATION_NOT_FOUND, ex.getErrorCode());
+
+        // Mapper 호출 확인 — existsNotification만 호출됨 (markAsRead 호출 안 됨)
+        verify(notificationMapper).existsNotification(userB, notificationId);
+        verify(notificationMapper, never()).markAsRead(any(), any());
     }
 }

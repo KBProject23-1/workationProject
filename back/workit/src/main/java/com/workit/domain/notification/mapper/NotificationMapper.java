@@ -35,4 +35,28 @@ public interface NotificationMapper {
      * @return 읽지 않은 알림 개수
      */
     int countUnreadNotifications(@Param("userId") Long userId);
+
+    /**
+     * 알림 존재 여부 확인 - notificationId와 userId가 모두 일치하는 알림이 존재하는지 확인한다.
+     * - 소유권 검증 포함 (user_id 조건)
+     * - 알림이 존재하면 true, 존재하지 않으면 false를 반환한다.
+     *
+     * @param userId         현재 로그인한 사용자 ID
+     * @param notificationId 확인할 알림 ID
+     * @return 존재 여부 (true 또는 false)
+     */
+    boolean existsNotification(@Param("userId") Long userId, @Param("notificationId") Long notificationId);
+
+    /**
+     * 알림 단건 읽음 처리 - notificationId와 userId가 모두 일치하는 알림의 read 값을 1로 변경한다.
+     * - 소유권 검증: user_id 조건을 반드시 포함하여 다른 사용자의 알림을 변경하지 않도록 한다.
+     * - 이미 읽은 알림(read=1)을 다시 요청해도 정상적으로 영향 행 수 0을 반환하지만,
+     *   existsNotification으로 사전 검증하므로 404 없이 정상 처리된다.
+     * - notificationId가 존재하지 않거나 다른 사용자의 알림이면 영향 행 수 0을 반환한다.
+     *
+     * @param userId         현재 로그인한 사용자 ID
+     * @param notificationId 읽음 처리할 알림 ID
+     * @return 영향을 받은 행 수 (0 또는 1)
+     */
+    int markAsRead(@Param("userId") Long userId, @Param("notificationId") Long notificationId);
 }

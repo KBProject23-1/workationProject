@@ -33,4 +33,17 @@ public interface NotificationService {
      * @return 읽지 않은 알림 개수
      */
     int getUnreadCount(Long userId);
+
+    /**
+     * 알림 단건 읽음 처리 - 특정 알림을 읽음 상태로 변경한다.
+     *
+     * 흐름:
+     * 1. DB UPDATE — NotificationMapper.markAsRead (user_id + notificationId 조건)
+     * 2. 영향 행 수 검증 — 0이면 NOTIFICATION_NOT_FOUND(404), 1이면 성공
+     * 3. 이미 읽은 알림 재요청 시에도 성공 (read=1 → read=1, 영향 행 수 1)
+     *
+     * @param userId         JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param notificationId 읽음 처리할 알림 ID
+     */
+    void markAsRead(Long userId, Long notificationId);
 }
