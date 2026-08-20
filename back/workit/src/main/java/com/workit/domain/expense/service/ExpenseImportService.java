@@ -7,6 +7,7 @@ import com.workit.domain.workation.vo.WorkationVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -21,6 +22,14 @@ import java.util.List;
 public class ExpenseImportService {
 
     private final WorkationExpenseMapper expenseMapper;
+
+    // 결제 커밋 직후(afterCommit)에 호출하는 용도.
+    // 그 시점에는 바깥 트랜잭션이 아직 정리되기 전이라 기본 전파로 열면 커밋되지 않고 사라진다.
+    // 반드시 새 트랜잭션으로 연다.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int importAppPaymentsInNewTransaction(Long userId, WorkationVO workation) {
+        return importAppPayments(userId, workation);
+    }
 
     // transactions 는 결제 파트의 원본이므로 읽기만 하고 수정하지 않는다
     @Transactional
