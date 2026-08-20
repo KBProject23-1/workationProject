@@ -22,7 +22,7 @@
                content,
                reference_type   AS reference_type,
                reference_id     AS reference_id,
-               read             AS is_read,
+               `read`           AS is_read,
                created_at       AS created_at
         FROM notification_histories
         WHERE user_id = #{userId}
@@ -45,7 +45,7 @@
         SELECT COUNT(*)
         FROM notification_histories
         WHERE user_id = #{userId}
-          AND read = 0
+          AND `read` = 0
     </select>
 
     <!--
@@ -72,7 +72,7 @@
     -->
     <update id="markAsRead">
         UPDATE notification_histories
-        SET read = 1
+        SET `read` = 1
         WHERE id = #{notificationId}
           AND user_id = #{userId}
     </update>
@@ -85,9 +85,9 @@
     -->
     <update id="markAllAsRead">
         UPDATE notification_histories
-        SET read = 1
+        SET `read` = 1
         WHERE user_id = #{userId}
-          AND read = 0
+          AND `read` = 0
     </update>
 
     <!--
