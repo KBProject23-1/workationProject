@@ -1,5 +1,6 @@
 package com.workit.domain.notification.controller;
 
+import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequestDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationUnreadCountResponseDTO;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +49,30 @@ public class NotificationController {
         return GlobalResponseFactory.success(
                 notificationService.getNotificationSettings(userId),
                 "알림 설정 상태를 성공적으로 조회했습니다.");
+    }
+
+    /**
+     * 알림 수신 설정 변경 - 현재 로그인한 사용자의 알림 수신 설정을 변경한다
+     *
+     * - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+     * - Request에서 userId를 직접 받지 않는다 (인증 컨텍스트에서 가져온다)
+     * - PATCH 요청 — CSRF 검증 대상 (Cookie 기반 인증)
+     * - 전달된 필드만 변경, 미전달 필드는 기존 값 유지
+     * - 모든 필드가 null이거나 Request Body가 비어 있으면 400 Bad Request
+     * - 변경 후 전체 알림 설정 상태를 반환
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 변경할 알림 설정 (모든 필드 선택)
+     * @return 변경 후 전체 알림 설정
+     */
+    @PatchMapping("/settings")
+    public ResponseEntity<CommonResponse<NotificationSettingsResponseDTO>> updateNotificationSettings(
+            @CurrentUser Long userId,
+            @RequestBody NotificationSettingsUpdateRequestDTO request) {
+
+        return GlobalResponseFactory.success(
+                notificationService.updateNotificationSettings(userId, request),
+                "알림 설정이 성공적으로 변경되었습니다.");
     }
 
     /**

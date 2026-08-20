@@ -107,4 +107,37 @@
         WHERE user_id = #{userId}
     </select>
 
+    <!--
+        알림 수신 설정 변경 - 동적 UPDATE로 전달된 필드만 변경한다.
+        - 전달되지 않은 필드는 기존 DB 값을 그대로 유지한다.
+        - user_id 조건을 반드시 포함하여 다른 사용자의 설정은 변경되지 않는다.
+        - SET 절이 비어있는 경우(모든 필드 null) SQL 오류가 발생하지 않도록 주의한다.
+          서비스 계층에서 모든 필드 null 검증을 수행하여 이 쿼리에 도달하지 않도록 한다.
+        - UPDATE 결과 affected_rows를 반환한다 (0이면 레코드 미존재).
+    -->
+    <update id="updateNotificationSettings">
+        UPDATE user_notification_settings
+        <set>
+            <if test="settings.budgetNotify != null">
+                budget_notify = #{settings.budgetNotify},
+            </if>
+            <if test="settings.transferNotify != null">
+                transfer_notify = #{settings.transferNotify},
+            </if>
+            <if test="settings.paymentNotify != null">
+                payment_notify = #{settings.paymentNotify},
+            </if>
+            <if test="settings.workationNotify != null">
+                workation_notify = #{settings.workationNotify},
+            </if>
+            <if test="settings.settlementNotify != null">
+                settlement_notify = #{settings.settlementNotify},
+            </if>
+            <if test="settings.scheduleNotify != null">
+                schedule_notify = #{settings.scheduleNotify},
+            </if>
+        </set>
+        WHERE user_id = #{userId}
+    </update>
+
 </mapper>

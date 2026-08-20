@@ -1,5 +1,6 @@
 package com.workit.domain.notification.service;
 
+import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequestDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 
@@ -74,4 +75,22 @@ public interface NotificationService {
      * @return 알림 수신 설정 DTO (없으면 null)
      */
     NotificationSettingsResponseDTO getNotificationSettings(Long userId);
+
+    /**
+     * 알림 수신 설정 변경 - 현재 로그인한 사용자의 알림 수신 설정을 변경한다.
+     *
+     * 흐름:
+     * 1. 요청 검증 — 변경할 필드가 하나 이상 있는지 확인 (없으면 COMMON_INVALID_REQUEST 400)
+     * 2. Request DTO → VO 변환 — null 필드는 VO에도 null로 설정 (DB에서 유지)
+     * 3. DB UPDATE — NotificationMapper.updateNotificationSettings (user_id 조건)
+     * 4. UPDATE 결과 확인 — affected_rows가 0이면 NOTIFICATION_SETTINGS_NOT_FOUND(404)
+     * 5. 변경된 현재 설정 SELECT — NotificationMapper.selectNotificationSettings 재사용
+     * 6. VO → DTO 변환 — NotificationSettingsResponseDTO.fromVO
+     * 7. 전체 알림 설정 상태 반환
+     *
+     * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param request 변경할 알림 설정 (모든 필드 선택, null이면 변경하지 않음)
+     * @return 변경 후 전체 알림 설정 DTO
+     */
+    NotificationSettingsResponseDTO updateNotificationSettings(Long userId, NotificationSettingsUpdateRequestDTO request);
 }

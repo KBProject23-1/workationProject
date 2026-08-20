@@ -1,5 +1,6 @@
 package com.workit.domain.notification.service;
 
+import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequestDTO;
 import com.workit.domain.notification.dto.response.NotificationDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
@@ -8,6 +9,7 @@ import com.workit.domain.notification.mapper.NotificationMapper;
 import com.workit.domain.notification.vo.NotificationSettingsVO;
 import com.workit.domain.notification.vo.NotificationVO;
 import com.workit.exception.BusinessException;
+import com.workit.exception.CommonErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -156,6 +158,48 @@ public class NotificationServiceImpl implements NotificationService {
 
         // 4. Audit 로그 — userId 만 기록
         log.info("알림 수신 설정 조회 성공 - userId={}", userId);
+
+        return responseDTO;
+    }
+
+    @Override
+    @Transactional
+    public NotificationSettingsResponseDTO updateNotificationSettings(Long userId, NotificationSettingsUpdateRequestDTO request) {
+
+        // 1. 요청 검증 — 변경할 필드가 하나 이상 있는지 확인
+        //    - 모든 필드가 null이면 COMMON_INVALID_REQUEST(400) 반환
+        if (!request.hasAnyField()) {
+            throw new BusinessException(CommonErrorCode.COMMON_INVALID_REQUEST,
+                    "변경할 알림 설정을 하나 이상 입력해 주세요.");
+        }
+
+        // 2. Request DTO → VO 변환 — null 필드는 VO에도 null로 설정 (DB에서 유지)
+        NotificationSettingsVO settingsVO = new NotificationSettingsVO();
+        settingsVO.setBudgetNotify(request.getBudgetNotify());
+        settingsVO.setTransferNotify(request.getTransferNotify());
+        settingsVO.setPaymentNotify(request.getPaymentNotify());
+        settingsVO.setWorkationNotify(request.getWorkationNotify());
+        settingsVO.setSettlementNotify(request.getSettlementNotify());
+        settingsVO.setScheduleNotify(request.getScheduleNotify());
+
+        // 3. DB UPDATE — 동적 SQL로 전달된 필드만 변경
+        //    - user_id 조건 포함으로 다른 사용자의 설정은 변경되지 않음
+        int updatedRows = notificationMapper.updateNotificationSettings(userId, settingsVO);
+
+        // 4. UPDATE 결과 확인 — affected_rows가 0이면 설정 레코드 미존재
+        if (updatedRows == 0) {
+            log.warn("알림 수신 설정 변경 실패 - 설정 데이터 미존재 userId={}", userId);
+            throw new BusinessException(NotificationErrorCode.NOTIFICATION_SETTINGS_NOT_FOUND);
+        }
+
+        // 5. 변경된 현재 설정 SELECT — 기존 selectNotificationSettings 재사용
+        NotificationSettingsVO updatedSettingsVO = notificationMapper.selectNotificationSettings(userId);
+
+        // 6. VO → DTO 변환
+        NotificationSettingsResponseDTO responseDTO = NotificationSettingsResponseDTO.fromVO(updatedSettingsVO);
+
+        // 7. Audit 로그 — userId 만 기록
+        log.info("알림 수신 설정 변경 성공 - userId={}", userId);
 
         return responseDTO;
     }

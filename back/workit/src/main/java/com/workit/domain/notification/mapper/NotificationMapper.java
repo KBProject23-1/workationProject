@@ -82,4 +82,17 @@ public interface NotificationMapper {
      * @return 알림 수신 설정 VO (없으면 null)
      */
     NotificationSettingsVO selectNotificationSettings(@Param("userId") Long userId);
+
+    /**
+     * 알림 수신 설정 변경 - 동적 UPDATE로 전달된 필드만 변경한다.
+     * - 전달되지 않은 필드는 기존 DB 값을 그대로 유지한다.
+     * - user_id 조건을 반드시 포함하여 다른 사용자의 설정은 변경되지 않는다.
+     * - 회원가입 시 알림 설정 레코드가 반드시 생성되므로 정상적인 사용자는 항상 한 건이 존재한다.
+     * - UPDATE 결과 affected_rows를 반환한다 (0이면 레코드 미존재).
+     *
+     * @param userId         현재 로그인한 사용자 ID
+     * @param settingsVO     변경할 알림 설정 (null인 필드는 변경하지 않음)
+     * @return 영향을 받은 행 수 (0 또는 1)
+     */
+    int updateNotificationSettings(@Param("userId") Long userId, @Param("settings") NotificationSettingsVO settingsVO);
 }

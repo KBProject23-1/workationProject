@@ -1,5 +1,6 @@
 package com.workit.domain.notification.service;
 
+import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequestDTO;
 import com.workit.domain.notification.dto.response.NotificationDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
@@ -33,6 +34,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.any;
 
 // NotificationServiceImpl (알림 목록 조회) 테스트
 // - NotificationMapper 를 Mockito @Mock 으로 주입한다 (Service 계층 검증에 집중)
@@ -818,5 +820,270 @@ class NotificationServiceImplTest {
         assertFalse(result.getWorkationNotify());
         assertFalse(result.getSettlementNotify());
         assertFalse(result.getScheduleNotify());
+    }
+
+    // ================================================================
+    // 알림 수신 설정 변경 테스트
+    // ================================================================
+
+    /** 테스트용 알림 설정 변경 요청 DTO 생성 */
+    private NotificationSettingsUpdateRequestDTO createUpdateRequest(
+            Boolean budgetNotify, Boolean transferNotify, Boolean paymentNotify,
+            Boolean workationNotify, Boolean settlementNotify, Boolean scheduleNotify) {
+        NotificationSettingsUpdateRequestDTO request = new NotificationSettingsUpdateRequestDTO();
+        request.setBudgetNotify(budgetNotify);
+        request.setTransferNotify(transferNotify);
+        request.setPaymentNotify(paymentNotify);
+        request.setWorkationNotify(workationNotify);
+        request.setSettlementNotify(settlementNotify);
+        request.setScheduleNotify(scheduleNotify);
+        return request;
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 성공 - 단일 필드 변경")
+    void updateNotificationSettings_success_singleField() {
+        // Given — budgetNotify만 false로 변경
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                false, null, null, null, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, false, false, true, true, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.updateNotificationSettings(
+                TEST_USER_ID, request);
+
+        // Then — budgetNotify만 변경됨
+        assertNotNull(result);
+        assertFalse(result.getBudgetNotify());
+        assertFalse(result.getTransferNotify());
+        assertTrue(result.getPaymentNotify());
+        assertTrue(result.getWorkationNotify());
+        assertFalse(result.getSettlementNotify());
+        assertTrue(result.getScheduleNotify());
+
+        // Mapper 호출 확인
+        verify(notificationMapper).updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class));
+        verify(notificationMapper).selectNotificationSettings(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 성공 - 여러 필드 변경")
+    void updateNotificationSettings_success_multipleFields() {
+        // Given — transferNotify=true, workationNotify=false 변경
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                null, true, null, false, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, true, true, false, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.updateNotificationSettings(
+                TEST_USER_ID, request);
+
+        // Then — 두 필드만 변경, 나머지 기존 값 유지
+        assertNotNull(result);
+        assertTrue(result.getBudgetNotify());    // 기존 값 유지
+        assertTrue(result.getTransferNotify());   // 변경됨
+        assertTrue(result.getPaymentNotify());    // 기존 값 유지
+        assertFalse(result.getWorkationNotify()); // 변경됨
+        assertFalse(result.getSettlementNotify()); // 기존 값 유지
+        assertTrue(result.getScheduleNotify());   // 기존 값 유지
+
+        // Mapper 호출 확인
+        verify(notificationMapper).updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class));
+        verify(notificationMapper).selectNotificationSettings(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 성공 - false 값으로 정상 변경")
+    void updateNotificationSettings_success_setToFalse() {
+        // Given — paymentNotify를 false로 변경
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                null, null, false, null, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, false, false, true, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.updateNotificationSettings(
+                TEST_USER_ID, request);
+
+        // Then — paymentNotify가 false로 변경됨
+        assertNotNull(result);
+        assertFalse(result.getPaymentNotify());
+
+        // Mapper 호출 확인
+        verify(notificationMapper).updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class));
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 성공 - 미전달 필드는 기존 값 유지")
+    void updateNotificationSettings_success_unchangedFieldsPreserved() {
+        // Given — transferNotify만 변경, 나머지는 기존 값 유지
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                null, true, null, null, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, true, true, true, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.updateNotificationSettings(
+                TEST_USER_ID, request);
+
+        // Then — budgetNotify, paymentNotify, workationNotify, settlementNotify, scheduleNotify는 기존 값 유지
+        assertNotNull(result);
+        assertTrue(result.getBudgetNotify());    // 기존 값 유지
+        assertTrue(result.getTransferNotify());   // 변경됨
+        assertTrue(result.getPaymentNotify());    // 기존 값 유지
+        assertTrue(result.getWorkationNotify());  // 기존 값 유지
+        assertFalse(result.getSettlementNotify()); // 기존 값 유지
+        assertTrue(result.getScheduleNotify());   // 기존 값 유지
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 실패 - 빈 Request Body (모든 필드 null)")
+    void updateNotificationSettings_fail_emptyRequest() {
+        // Given — 모든 필드가 null
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                null, null, null, null, null, null);
+
+        // When & Then — COMMON_INVALID_REQUEST(400) 예외 발생
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.updateNotificationSettings(TEST_USER_ID, request));
+        assertEquals(com.workit.exception.CommonErrorCode.COMMON_INVALID_REQUEST, ex.getErrorCode());
+
+        // Mapper 미호출 (검증 실패 시 DB UPDATE 없음)
+        verify(notificationMapper, never()).updateNotificationSettings(any(), any());
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 성공 - 이미 동일한 값으로 변경")
+    void updateNotificationSettings_success_idempotent() {
+        // Given — transferNotify가 이미 true인데 true로 변경 요청
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                null, true, null, null, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, true, true, true, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.updateNotificationSettings(
+                TEST_USER_ID, request);
+
+        // Then — 200 OK 정상 반환 (멱등성)
+        assertNotNull(result);
+        assertTrue(result.getTransferNotify());
+
+        // Mapper 호출 확인
+        verify(notificationMapper).updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class));
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 - userId가 Mapper까지 정상 전달되는지 확인")
+    void updateNotificationSettings_userIdPassedToMapper() {
+        // Given
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                true, null, null, null, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, false, true, true, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        notificationService.updateNotificationSettings(TEST_USER_ID, request);
+
+        // Then — TEST_USER_ID가 정확히 전달됨
+        verify(notificationMapper).updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class));
+        verify(notificationMapper).selectNotificationSettings(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 - 다른 사용자의 설정 변경 방지")
+    void updateNotificationSettings_otherUserSettingsNotModified() {
+        // Given — 다른 사용자 ID로 요청 (레코드가 없는 경우)
+        Long otherUserId = 200L;
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                true, null, null, null, null, null);
+        // 다른 사용자의 ID로 UPDATE → affected_rows=0 (레코드 없음)
+        when(notificationMapper.updateNotificationSettings(eq(otherUserId), any(NotificationSettingsVO.class)))
+                .thenReturn(0);
+
+        // When & Then — NOTIFICATION_SETTINGS_NOT_FOUND(404) 예외 발생
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.updateNotificationSettings(otherUserId, request));
+        assertEquals(NotificationErrorCode.NOTIFICATION_SETTINGS_NOT_FOUND, ex.getErrorCode());
+
+        // Mapper 호출 확인 — otherUserId로만 호출됨
+        verify(notificationMapper).updateNotificationSettings(eq(otherUserId), any(NotificationSettingsVO.class));
+        // selectNotificationSettings는 호출 안 됨 (UPDATE 실패로 조기 종료)
+        verify(notificationMapper, never()).selectNotificationSettings(any());
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 성공 - UPDATE 후 전체 설정 반환")
+    void updateNotificationSettings_success_returnsAllFields() {
+        // Given — 두 필드 변경 후 전체 6개 필드 확인
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                null, true, null, false, null, null);
+        NotificationSettingsVO updatedVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, true, true, false, false, true);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(1);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(updatedVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.updateNotificationSettings(
+                TEST_USER_ID, request);
+
+        // Then — 6개 필드 모두 응답에 포함
+        assertNotNull(result);
+        assertNotNull(result.getBudgetNotify());
+        assertNotNull(result.getTransferNotify());
+        assertNotNull(result.getPaymentNotify());
+        assertNotNull(result.getWorkationNotify());
+        assertNotNull(result.getSettlementNotify());
+        assertNotNull(result.getScheduleNotify());
+
+        // 변경된 필드 확인
+        assertTrue(result.getTransferNotify());   // 변경됨
+        assertFalse(result.getWorkationNotify()); // 변경됨
+
+        // 기존 필드 확인
+        assertTrue(result.getBudgetNotify());     // 기존 값
+        assertTrue(result.getPaymentNotify());    // 기존 값
+        assertFalse(result.getSettlementNotify()); // 기존 값
+        assertTrue(result.getScheduleNotify());   // 기존 값
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 변경 실패 - UPDATE 결과가 0인 경우 (설정 미존재)")
+    void updateNotificationSettings_fail_settingsNotFound() {
+        // Given — 설정 레코드가 존재하지 않는 경우
+        NotificationSettingsUpdateRequestDTO request = createUpdateRequest(
+                true, null, null, null, null, null);
+        when(notificationMapper.updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class)))
+                .thenReturn(0);
+
+        // When & Then — NOTIFICATION_SETTINGS_NOT_FOUND(404) 예외 발생
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.updateNotificationSettings(TEST_USER_ID, request));
+        assertEquals(NotificationErrorCode.NOTIFICATION_SETTINGS_NOT_FOUND, ex.getErrorCode());
+
+        // Mapper 호출 확인 — UPDATE만 호출됨 (SELECT는 호출 안 됨)
+        verify(notificationMapper).updateNotificationSettings(eq(TEST_USER_ID), any(NotificationSettingsVO.class));
+        verify(notificationMapper, never()).selectNotificationSettings(any());
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 public enum NotificationErrorCode implements ErrorCode {
 
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다."),
+    NOTIFICATION_SETTINGS_NOT_FOUND(HttpStatus.NOT_FOUND, "알림 수신 설정 데이터를 찾을 수 없습니다."),
     NOTIFICATION_SIZE_EXCEEDED(HttpStatus.BAD_REQUEST, "요청한 size가 허용된 최대값을 초과했습니다."),
     NOTIFICATION_INVALID_CURSOR(HttpStatus.BAD_REQUEST, "유효하지 않은 cursor 값입니다.");
 
