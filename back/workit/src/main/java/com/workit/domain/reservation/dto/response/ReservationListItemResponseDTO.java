@@ -27,6 +27,7 @@ public class ReservationListItemResponseDTO {
     private Integer quantity;
     private BigDecimal totalAmount;
     private ReservationStatus status;
+    private Boolean cancelable;
     private LocalDateTime canceledAt;
     private BigDecimal refundAmount;
 
@@ -34,7 +35,10 @@ public class ReservationListItemResponseDTO {
      * 목록 조회용 VO를 API 응답으로 변환
      * 취소 일시, 환불금액은 취소된 예약에만 노출하고 나머지 상태에서는 null로 반환
      */
-    public static ReservationListItemResponseDTO from(ReservationListItemVO vo) {
+    public static ReservationListItemResponseDTO from(
+            ReservationListItemVO vo,
+            boolean cancelable) {
+
         return ReservationListItemResponseDTO.builder()
                 .reservationId(vo.getReservationId())
                 .reservationCode(vo.getReservationCode())
@@ -48,6 +52,7 @@ public class ReservationListItemResponseDTO {
                 .quantity(vo.getQuantity())
                 .totalAmount(vo.getTotalAmount())
                 .status(vo.getStatus())
+                .cancelable(cancelable)
                 .canceledAt(vo.getStatus() == ReservationStatus.CANCELED ? vo.getCanceledAt() : null)
                 .refundAmount(vo.getStatus() == ReservationStatus.CANCELED ? vo.getRefundAmount() : null)
                 .build();

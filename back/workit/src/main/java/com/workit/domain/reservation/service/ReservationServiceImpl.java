@@ -293,6 +293,7 @@ public class ReservationServiceImpl implements ReservationService {
         // CANCELED만 조회할 때는 취소 일시 기준, 그 외에는 이용 시작 일시 기준으로 정렬
         boolean canceledOnly = distinctStatuses.size() == 1
                 && distinctStatuses.contains(ReservationStatus.CANCELED);
+        LocalDate today = LocalDate.now(SEOUL_ZONE_ID);
 
         List<ReservationListItemResponseDTO> content = reservationMapper
                 .selectReservationList(
@@ -305,7 +306,10 @@ public class ReservationServiceImpl implements ReservationService {
                         canceledOnly
                 )
                 .stream()
-                .map(ReservationListItemResponseDTO::from)
+                .map(vo -> ReservationListItemResponseDTO.from(
+                        vo,
+                        isCancelable(vo.getStatus(), vo.getStartDate(), today)
+                ))
                 .collect(Collectors.toList());
 
         return PageResponseDTO.of(content, page, size, totalElements);
@@ -367,9 +371,12 @@ public class ReservationServiceImpl implements ReservationService {
                 .plusDays(30)
                 .atTime(LocalTime.MAX);
 
-//        예약이 확정된(CONFIRMED) 상태이고 이용 시작일 이전이면 취소 가능
-        boolean cancelable = detail.getStatus() == ReservationStatus.CONFIRMED
-                && today.isBefore(detail.getStartDate());
+//        예약 상태와 이용 시작일 기준 취소 가능 여부 계산
+        boolean cancelable = isCancelable(
+                detail.getStatus(),
+                detail.getStartDate(),
+                today
+        );
 
         // 숙소는 체크아웃 당일, 공유 오피스는 이용 종료 다음 날부터 작성 가능
         boolean reviewStartReached = "ACCOMMODATION".equals(detail.getMerchantCategory())
@@ -685,6 +692,16 @@ public class ReservationServiceImpl implements ReservationService {
         }
 
         return ReservationReviewAction.NONE;
+    }
+
+    // 예약 상태와 이용 시작일 기준 취소 가능 여부 계산
+    private boolean isCancelable(
+            ReservationStatus status,
+            LocalDate startDate,
+            LocalDate today) {
+
+        return status == ReservationStatus.CONFIRMED
+                && today.isBefore(startDate);
     }
 
     // 상세 조회에 필요한 사용자와 예약 식별자를 검증
