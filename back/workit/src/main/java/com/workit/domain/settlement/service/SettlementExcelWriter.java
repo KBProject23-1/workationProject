@@ -80,10 +80,10 @@ public class SettlementExcelWriter {
         List<String> cards = doc.getCardLabels();
 
         if (cards.isEmpty()) {
-            r = info(sheet, s, r, "사용 법인카드", "-");
+            r = info(sheet, s, r, "사용 카드", "-");
         } else {
             for (int i = 0; i < cards.size(); i++) {
-                r = info(sheet, s, r, i == 0 ? "사용 법인카드" : "", cards.get(i));
+                r = info(sheet, s, r, i == 0 ? "사용 카드" : "", cards.get(i));
             }
         }
         r++;

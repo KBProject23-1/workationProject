@@ -4,6 +4,7 @@ import com.workit.domain.account.mapper.AccountMapper;
 import com.workit.domain.account.vo.BankAccountVO;
 import com.workit.domain.card.mapper.CardMapper;
 import com.workit.domain.card.vo.CardVO;
+import com.workit.domain.expense.service.ExpenseImportTrigger;
 import com.workit.domain.ledger.service.LedgerService;
 import com.workit.domain.ledger.vo.LedgerEntryVO;
 import com.workit.domain.payment.TransactionStatus;
@@ -57,6 +58,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentGatewayClient paymentGatewayClient;
     private final PinValidator pinValidator;
     private final PaymentTransactionRecorder paymentTransactionRecorder;
+    private final ExpenseImportTrigger expenseImportTrigger;
 
     // ===== 충전 =====
     @Override
@@ -169,11 +171,15 @@ public class PaymentServiceImpl implements PaymentService {
         validatePaymentRequest(request);
         validatePaymentPin(userId, request.getDeviceId(), request.getPinNumber());
 
-        if ("WALLET".equals(request.getPaymentSourceType())) {
-            return paymentTransactionRecorder.payWithWallet(userId, request);
-        } else {
-            return payWithCard(userId, request);
-        }
+        PaymentResponse response = "WALLET".equals(request.getPaymentSourceType())
+                ? paymentTransactionRecorder.payWithWallet(userId, request)
+                : payWithCard(userId, request);
+
+        // 결제가 커밋된 뒤에 워케이션 지출로 옮긴다.
+        // 이 메서드에는 트랜잭션이 없어 유입은 자체 트랜잭션으로 돌고, 실패해도 결제에 영향이 없다
+        expenseImportTrigger.onPaymentCompleted(userId);
+
+        return response;
     }
 
     // 카드결제(PG 2단계). DB 기입은 PaymentTransactionRecorder 의 짧은 개별 트랜잭션들로 분리하고,

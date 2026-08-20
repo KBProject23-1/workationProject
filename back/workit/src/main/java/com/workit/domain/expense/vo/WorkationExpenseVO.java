@@ -50,6 +50,8 @@ public class WorkationExpenseVO {
     private String paymentSourceType;    // CARD, WALLET
     private Boolean isBusinessExpense;   // 결제 시점 업무/개인 선택. null 이면 미선택
     private String merchantPhoneNumber;
+    private String merchantAddress;
+    private String merchantTaxpayerNumber;
 
     // 화면에 보여줄 카테고리 이름. 별칭이 있으면 별칭이 우선한다
     public String getDisplayCategoryName() {

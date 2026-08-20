@@ -90,7 +90,9 @@
             t.approved_number,
             t.approved_at,
             t.payment_source_type,
-            m.phone_number AS merchant_phone_number
+            m.phone_number                   AS merchant_phone_number,
+            m.address                        AS merchant_address,
+            m.taxpayer_identification_number AS merchant_taxpayer_number
         FROM workation_expenses we
         JOIN expense_categories ec
           ON ec.id = we.expense_category_id
@@ -101,11 +103,7 @@
                ON c.id = we.card_id
         LEFT JOIN transactions t
                ON t.id = we.transaction_id
-        <!--
-            매출전표에 넣을 가맹점 정보.
-            사업자등록번호·주소는 merchants 에 컬럼이 아직 없어 전화번호만 가져온다.
-            결제 파트가 컬럼을 추가하면 여기에 두 줄만 더하면 된다.
-        -->
+        <!-- 매출전표에 넣을 가맹점 정보 (사업자등록번호·주소·전화번호) -->
         LEFT JOIN merchants m
                ON m.id = t.merchant_id
         WHERE we.workation_id = #{workationId}
