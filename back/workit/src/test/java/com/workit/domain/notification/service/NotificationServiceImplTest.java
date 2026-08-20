@@ -4,6 +4,7 @@ import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequ
 import com.workit.domain.notification.dto.response.NotificationDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
+import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.exception.NotificationErrorCode;
 import com.workit.domain.notification.mapper.NotificationMapper;
 import com.workit.domain.notification.vo.NotificationSettingsVO;
@@ -79,7 +80,7 @@ class NotificationServiceImplTest {
         for (int i = 0; i < size; i++) {
             Long id = startId - i;
             list.add(createNotificationVO(
-                    id, "BUDGET_WARNING", i % 2 == 0,
+                    id, "BUDGET_NOTIFY", i % 2 == 0,
                     "알림 제목 " + id, "알림 내용 " + id,
                     "BUDGET", id,
                     i % 3 == 0,
@@ -96,12 +97,12 @@ class NotificationServiceImplTest {
     void getNotificationList_success_noCursor() {
         // Given — 3개의 알림 (size + 1 = 4개 미만이면 hasNext=false)
         List<NotificationVO> notifications = createNotificationList(3, 1005L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, null);
+                TEST_USER_ID, null, null, null);
 
         // Then
         assertNotNull(result);
@@ -111,7 +112,7 @@ class NotificationServiceImplTest {
         assertNull(result.getNextCursor());
 
         // Mapper 호출 확인
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, null);
     }
 
     @Test
@@ -119,12 +120,12 @@ class NotificationServiceImplTest {
     void getNotificationList_success_withCursor() {
         // Given — 5개의 알림 (size + 1 = 21개 미만이면 hasNext=false)
         List<NotificationVO> notifications = createNotificationList(5, 1000L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1005L, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1005L, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, 1005L, 20);
+                TEST_USER_ID, 1005L, 20, null);
 
         // Then
         assertNotNull(result);
@@ -133,7 +134,7 @@ class NotificationServiceImplTest {
         assertNull(result.getNextCursor());
 
         // Mapper 호출 확인 — cursor 포함
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, 1005L, 21);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, 1005L, 21, null);
     }
 
     @Test
@@ -141,12 +142,12 @@ class NotificationServiceImplTest {
     void getNotificationList_success_hasNext() {
         // Given — size + 1 = 21개의 알림 (hasNext=true)
         List<NotificationVO> notifications = createNotificationList(21, 1020L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, 20);
+                TEST_USER_ID, null, 20, null);
 
         // Then
         assertNotNull(result);
@@ -155,7 +156,7 @@ class NotificationServiceImplTest {
         assertEquals(1001L, result.getNextCursor()); // 마지막 알림 ID (21번째 제거 후 20번째)
 
         // Mapper 호출 확인
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, null);
     }
 
     @Test
@@ -163,12 +164,12 @@ class NotificationServiceImplTest {
     void getNotificationList_success_lastPage() {
         // Given — 정확히 20개의 알림 (hasNext=false)
         List<NotificationVO> notifications = createNotificationList(20, 1019L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1020L, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1020L, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, 1020L, 20);
+                TEST_USER_ID, 1020L, 20, null);
 
         // Then
         assertNotNull(result);
@@ -181,12 +182,12 @@ class NotificationServiceImplTest {
     @DisplayName("알림 목록 조회 성공 - 알림이 없는 사용자 조회")
     void getNotificationList_emptyResult() {
         // Given — 빈 목록
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(Collections.emptyList());
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, null);
+                TEST_USER_ID, null, null, null);
 
         // Then — 정상적인 200 OK 반환 (빈 목록)
         assertNotNull(result);
@@ -200,19 +201,19 @@ class NotificationServiceImplTest {
     void getNotificationList_defaultSize() {
         // Given — size null → 기본값 20 적용, size + 1 = 21개 조회
         List<NotificationVO> notifications = createNotificationList(21, 1020L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, null);
+                TEST_USER_ID, null, null, null);
 
         // Then — 21개 중 20개 반환 (hasNext=true)
         assertEquals(20, result.getNotifications().size());
         assertTrue(result.getHasNext());
 
         // Mapper 호출 확인 — size=21 (기본값 20 + 1)
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, null);
     }
 
     @Test
@@ -220,19 +221,19 @@ class NotificationServiceImplTest {
     void getNotificationList_maxSize() {
         // Given — size 100, size + 1 = 101개 조회
         List<NotificationVO> notifications = createNotificationList(101, 200L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 101))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 101, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, 100);
+                TEST_USER_ID, null, 100, null);
 
         // Then — 101개 중 100개 반환 (hasNext=true)
         assertEquals(100, result.getNotifications().size());
         assertTrue(result.getHasNext());
 
         // Mapper 호출 확인 — size=101 (100 + 1)
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 101);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 101, null);
     }
 
     @Test
@@ -240,11 +241,11 @@ class NotificationServiceImplTest {
     void getNotificationList_sizeExceeded() {
         // When & Then — 101 → NOTIFICATION_SIZE_EXCEEDED(400)
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> notificationService.getNotificationList(TEST_USER_ID, null, 101));
+                () -> notificationService.getNotificationList(TEST_USER_ID, null, 101, null));
         assertEquals(NotificationErrorCode.NOTIFICATION_SIZE_EXCEEDED, ex.getErrorCode());
 
         // Mapper 미호출 (검증 실패 시 DB 조회 없음)
-        verify(notificationMapper, never()).selectNotificationList(any(), any(), anyInt());
+        verify(notificationMapper, never()).selectNotificationList(any(), any(), anyInt(), any());
     }
 
     @Test
@@ -252,19 +253,19 @@ class NotificationServiceImplTest {
     void getNotificationList_negativeSize() {
         // Given — size -1 → 기본값 20 적용
         List<NotificationVO> notifications = createNotificationList(3, 1005L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, -1);
+                TEST_USER_ID, null, -1, null);
 
         // Then — 기본값 20으로 조회됨
         assertEquals(3, result.getNotifications().size());
         assertFalse(result.getHasNext());
 
         // Mapper 호출 확인 — size=21 (기본값 20 + 1)
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, null);
     }
 
     @Test
@@ -272,19 +273,19 @@ class NotificationServiceImplTest {
     void getNotificationList_zeroSize() {
         // Given — size 0 → 기본값 20 적용
         List<NotificationVO> notifications = createNotificationList(5, 1005L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, 0);
+                TEST_USER_ID, null, 0, null);
 
         // Then — 기본값 20으로 조회됨
         assertEquals(5, result.getNotifications().size());
         assertFalse(result.getHasNext());
 
         // Mapper 호출 확인 — size=21 (기본값 20 + 1)
-        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21);
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, null);
     }
 
     @Test
@@ -293,18 +294,18 @@ class NotificationServiceImplTest {
         // Given — 다른 사용자 ID로 조회
         Long otherUserId = 200L;
         List<NotificationVO> notifications = createNotificationList(3, 1005L);
-        when(notificationMapper.selectNotificationList(otherUserId, null, 21))
+        when(notificationMapper.selectNotificationList(otherUserId, null, 21, null))
                 .thenReturn(notifications);
 
         // When — 다른 사용자 ID로 조회
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                otherUserId, null, null);
+                otherUserId, null, null, null);
 
         // Then — 해당 사용자의 알림만 조회됨
         assertEquals(3, result.getNotifications().size());
 
         // Mapper 호출 확인 — 다른 사용자 ID 사용
-        verify(notificationMapper).selectNotificationList(otherUserId, null, 21);
+        verify(notificationMapper).selectNotificationList(otherUserId, null, 21, null);
     }
 
     @Test
@@ -312,19 +313,19 @@ class NotificationServiceImplTest {
     void getNotificationList_nullReference() {
         // Given — referenceType/referenceId가 null인 알림
         NotificationVO vo = createNotificationVO(
-                1001L, "SYSTEM_NOTICE", true,
+                1001L, "WORKATION_NOTIFY", true,
                 "시스템 공지", "시스템 공지 내용입니다.",
                 null, null,
                 false,
                 LocalDateTime.of(2026, 7, 24, 15, 0, 0)
         );
         List<NotificationVO> notifications = Collections.singletonList(vo);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, null);
+                TEST_USER_ID, null, null, null);
 
         // Then — null reference도 정상 반환
         assertEquals(1, result.getNotifications().size());
@@ -337,25 +338,25 @@ class NotificationServiceImplTest {
     void getNotificationList_dtoConversion() {
         // Given — 특정 알림
         NotificationVO vo = createNotificationVO(
-                1024L, "BUDGET_WARNING", true,
+                1024L, "BUDGET_NOTIFY", true,
                 "예산 초과 경고", "이번 달 설정하신 예산의 80%를 사용하셨습니다.",
                 "BUDGET", 123L,
                 false,
                 LocalDateTime.of(2026, 7, 24, 15, 0, 0)
         );
         List<NotificationVO> notifications = Collections.singletonList(vo);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, null, null);
+                TEST_USER_ID, null, null, null);
 
         // Then — DTO 필드 매핑 확인
         assertEquals(1, result.getNotifications().size());
         NotificationDTO dto = result.getNotifications().get(0);
         assertEquals(1024L, dto.getNotificationId());
-        assertEquals("BUDGET_WARNING", dto.getCategory());
+        assertEquals("BUDGET_NOTIFY", dto.getCategory());
         assertTrue(dto.getImportant());
         assertEquals("예산 초과 경고", dto.getTitle());
         assertEquals("이번 달 설정하신 예산의 80%를 사용하셨습니다.", dto.getContent());
@@ -370,18 +371,193 @@ class NotificationServiceImplTest {
     void getNotificationList_cursorWithHasNext() {
         // Given — 21개의 알림 (hasNext=true, nextCursor=마지막 알림 ID)
         List<NotificationVO> notifications = createNotificationList(21, 1020L);
-        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1000L, 21))
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1000L, 21, null))
                 .thenReturn(notifications);
 
         // When
         NotificationListResponseDTO result = notificationService.getNotificationList(
-                TEST_USER_ID, 1000L, 20);
+                TEST_USER_ID, 1000L, 20, null);
 
         // Then
         assertEquals(20, result.getNotifications().size());
         assertTrue(result.getHasNext());
         // nextCursor는 20번째 알림의 ID (21번째 제거 후)
         assertEquals(1001L, result.getNextCursor());
+    }
+
+    // ================================================================
+    // 카테고리별 알림 목록 조회 테스트
+    // ================================================================
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - category 미전달 → 전체 알림 조회")
+    void getNotificationList_categoryNull_fetchesAll() {
+        // Given — category가 null이면 전체 조회
+        List<NotificationVO> notifications = createNotificationList(5, 1005L);
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, null))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, null, null, null);
+
+        // Then
+        assertEquals(5, result.getNotifications().size());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, null);
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - BUDGET_NOTIFY category → 해당 카테고리만 조회")
+    void getNotificationList_categoryBudgetNotify() {
+        // Given — BUDGET_NOTIFY 카테고리 알림 3개
+        List<NotificationVO> notifications = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            notifications.add(createNotificationVO(
+                    1003L - i, "BUDGET_NOTIFY", i % 2 == 0,
+                    "예산 알림 " + (1003L - i), "예산 내용 " + (1003L - i),
+                    "BUDGET", 1003L - i, false,
+                    LocalDateTime.of(2026, 7, 24, 15, 0, 0).plusMinutes(i)
+            ));
+        }
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, "BUDGET_NOTIFY"))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, null, null, NotificationCategory.BUDGET_NOTIFY);
+
+        // Then
+        assertEquals(3, result.getNotifications().size());
+        assertFalse(result.getHasNext());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, "BUDGET_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - PAYMENT_NOTIFY category → 해당 카테고리만 조회")
+    void getNotificationList_categoryPaymentNotify() {
+        // Given — PAYMENT_NOTIFY 카테고리 알림 2개
+        List<NotificationVO> notifications = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            notifications.add(createNotificationVO(
+                    2002L - i, "PAYMENT_NOTIFY", false,
+                    "결제 알림 " + (2002L - i), "결제 내용 " + (2002L - i),
+                    "PAYMENT", 2002L - i, false,
+                    LocalDateTime.of(2026, 7, 24, 15, 0, 0).plusMinutes(i)
+            ));
+        }
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, "PAYMENT_NOTIFY"))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, null, null, NotificationCategory.PAYMENT_NOTIFY);
+
+        // Then
+        assertEquals(2, result.getNotifications().size());
+        assertFalse(result.getHasNext());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, "PAYMENT_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - category + cursor 조합 조회")
+    void getNotificationList_categoryWithCursor() {
+        // Given — BUDGET_NOTIFY 카테고리 + cursor 적용
+        List<NotificationVO> notifications = createNotificationList(3, 1000L);
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, 1000L, 21, "BUDGET_NOTIFY"))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, 1000L, 20, NotificationCategory.BUDGET_NOTIFY);
+
+        // Then
+        assertEquals(3, result.getNotifications().size());
+        assertFalse(result.getHasNext());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, 1000L, 21, "BUDGET_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - 해당 category 알림이 없는 경우 → 빈 목록 + 정상 응답")
+    void getNotificationList_categoryEmptyResult() {
+        // Given — 해당 카테고리 알림 없음
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, "SCHEDULE_NOTIFY"))
+                .thenReturn(Collections.emptyList());
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, null, null, NotificationCategory.SCHEDULE_NOTIFY);
+
+        // Then — 빈 목록 + 정상 200 OK
+        assertNotNull(result);
+        assertTrue(result.getNotifications().isEmpty());
+        assertFalse(result.getHasNext());
+        assertNull(result.getNextCursor());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, "SCHEDULE_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("보안 - category 조회 시에도 다른 사용자의 알림이 조회되지 않음")
+    void getNotificationList_categoryOtherUserNotAccessible() {
+        // Given — 다른 사용자 ID + category
+        Long otherUserId = 200L;
+        List<NotificationVO> notifications = createNotificationList(3, 1005L);
+        when(notificationMapper.selectNotificationList(otherUserId, null, 21, "BUDGET_NOTIFY"))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                otherUserId, null, null, NotificationCategory.BUDGET_NOTIFY);
+
+        // Then — 해당 사용자의 알림만 조회됨
+        assertEquals(3, result.getNotifications().size());
+        verify(notificationMapper).selectNotificationList(otherUserId, null, 21, "BUDGET_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - category 전달되어도 cursor pagination 정상 동작")
+    void getNotificationList_categoryWithCursorPagination() {
+        // Given — BUDGET_NOTIFY 카테고리 + hasNext=true (21개 조회)
+        List<NotificationVO> notifications = createNotificationList(21, 1020L);
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, "BUDGET_NOTIFY"))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, null, 20, NotificationCategory.BUDGET_NOTIFY);
+
+        // Then — hasNext=true, nextCursor가 올바르게 반환됨
+        assertEquals(20, result.getNotifications().size());
+        assertTrue(result.getHasNext());
+        assertEquals(1001L, result.getNextCursor());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, "BUDGET_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - size 기본값/최대값 정책 유지")
+    void getNotificationList_categorySizePolicy() {
+        // Given — category와 size null → 기본값 20 적용
+        List<NotificationVO> notifications = createNotificationList(3, 1005L);
+        when(notificationMapper.selectNotificationList(TEST_USER_ID, null, 21, "TRANSFER_NOTIFY"))
+                .thenReturn(notifications);
+
+        // When
+        NotificationListResponseDTO result = notificationService.getNotificationList(
+                TEST_USER_ID, null, null, NotificationCategory.TRANSFER_NOTIFY);
+
+        // Then — 기본값 20으로 조회 (size + 1 = 21)
+        assertEquals(3, result.getNotifications().size());
+        assertFalse(result.getHasNext());
+        verify(notificationMapper).selectNotificationList(TEST_USER_ID, null, 21, "TRANSFER_NOTIFY");
+    }
+
+    @Test
+    @DisplayName("카테고리별 알림 목록 조회 - size 초과 시依然 NOTIFICATION_SIZE_EXCEEDED")
+    void getNotificationList_categorySizeExceeded() {
+        // When & Then — category와 상관없이 size 101 초과 시 400
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> notificationService.getNotificationList(TEST_USER_ID, null, 101, NotificationCategory.BUDGET_NOTIFY));
+        assertEquals(NotificationErrorCode.NOTIFICATION_SIZE_EXCEEDED, ex.getErrorCode());
+        verify(notificationMapper, never()).selectNotificationList(any(), any(), anyInt(), any());
     }
 
     // ================================================================

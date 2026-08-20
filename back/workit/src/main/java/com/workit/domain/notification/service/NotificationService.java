@@ -3,6 +3,7 @@ package com.workit.domain.notification.service;
 import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequestDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
+import com.workit.domain.notification.enums.NotificationCategory;
 
 // Notification 도메인 Service (알림 목록 조회 담당)
 public interface NotificationService {
@@ -17,12 +18,13 @@ public interface NotificationService {
      * 4. 21번째 데이터가 없으면 hasNext=false, nextCursor=null
      * 5. 알림이 없는 경우도 정상적인 200 OK 반환 (빈 목록 + hasNext=false + nextCursor=null)
      *
-     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
-     * @param cursor 이전 조회 결과의 마지막 알림 ID (null이면 최신부터)
-     * @param size   조회할 알림 수 (null이면 기본값 20, 최대 100)
+     * @param userId   JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param cursor   이전 조회 결과의 마지막 알림 ID (null이면 최신부터)
+     * @param size     조회할 알림 수 (null이면 기본값 20, 최대 100)
+     * @param category 조회할 알림 카테고리 (null이면 전체)
      * @return 알림 목록 + 다음 페이지 정보
      */
-    NotificationListResponseDTO getNotificationList(Long userId, Long cursor, Integer size);
+    NotificationListResponseDTO getNotificationList(Long userId, Long cursor, Integer size, NotificationCategory category);
 
     /**
      * 읽지 않은 알림 개수 조회 - 현재 로그인한 사용자의 읽지 않은 알림 개수를 반환한다

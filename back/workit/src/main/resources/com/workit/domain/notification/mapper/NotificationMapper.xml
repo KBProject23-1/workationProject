@@ -9,6 +9,7 @@
         - notification_histories 테이블에서 user_id 로 사용자 알림 조회
         - ORDER BY id DESC (최신순 정렬 — created_at 이 아닌 id 기준으로 안정적인 순서 보장)
         - cursor(id) 가 있으면 id < cursor 조건 적용 — 이전 페이지의 마지막 ID보다 오래된 알림 조회
+        - category 가 있으면 category 조건 적용
         - size + 1 개 조회하여 hasNext 판단 (21번째 데이터 존재 여부)
         - Mapper 는 조회만 담당 ( hasNext/nextCursor 계산은 Service)
     -->
@@ -27,6 +28,9 @@
         WHERE user_id = #{userId}
         <if test="cursor != null">
             AND id &lt; #{cursor}
+        </if>
+        <if test="category != null">
+            AND category = #{category}
         </if>
         ORDER BY id DESC
         LIMIT #{size}

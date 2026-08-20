@@ -4,6 +4,7 @@ import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequ
 import com.workit.domain.notification.dto.response.NotificationDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
+import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.exception.NotificationErrorCode;
 import com.workit.domain.notification.mapper.NotificationMapper;
 import com.workit.domain.notification.vo.NotificationSettingsVO;
@@ -38,7 +39,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @Transactional(readOnly = true)
-    public NotificationListResponseDTO getNotificationList(Long userId, Long cursor, Integer size) {
+    public NotificationListResponseDTO getNotificationList(Long userId, Long cursor, Integer size, NotificationCategory category) {
 
         // 1. size 검증 + 기본값 적용
         //    - null/빈 값이면 기본값 20 (문서 스펙)
@@ -48,8 +49,9 @@ public class NotificationServiceImpl implements NotificationService {
         // 2. DB 조회 — size + 1 개 조회 (hasNext 판단용)
         //    - NotificationMapper.selectNotificationList: user_id 기반 조회, ORDER BY id DESC
         //    - cursor 가 있으면 id < cursor 조건 적용
+        //    - category 가 있으면 category 조건 적용
         List<NotificationVO> notifications = notificationMapper.selectNotificationList(
-                userId, cursor, querySize + 1);
+                userId, cursor, querySize + 1, category != null ? category.name() : null);
 
         // 3. hasNext 판단 — 21번째 데이터가 존재하면 hasNext=true
         boolean hasNext = notifications.size() > querySize;
@@ -77,8 +79,8 @@ public class NotificationServiceImpl implements NotificationService {
         }
 
         // 7. Audit 로그 — userId 만 기록 (알림 내용 로그 출력 금지)
-        log.info("알림 목록 조회 성공 - userId={}, count={}, hasNext={}",
-                userId, notificationDTOs.size(), hasNext);
+        log.info("알림 목록 조회 성공 - userId={}, count={}, hasNext={}, category={}",
+                userId, notificationDTOs.size(), hasNext, category);
 
         // 8. 응답 생성 — 알림이 없는 경우도 정상적인 200 OK 반환
         return NotificationListResponseDTO.of(notificationDTOs, nextCursor, hasNext);

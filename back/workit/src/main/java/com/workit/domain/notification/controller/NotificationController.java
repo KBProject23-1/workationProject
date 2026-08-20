@@ -4,6 +4,7 @@ import com.workit.domain.notification.dto.request.NotificationSettingsUpdateRequ
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationUnreadCountResponseDTO;
+import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.service.NotificationService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
@@ -81,20 +82,23 @@ public class NotificationController {
      * - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
      * - Request에서 userId를 직접 받지 않는다 (인증 컨텍스트에서 가져온다)
      * - GET 요청이므로 CSRF 검증 대상이 아니다 (knowledge.md: GET은 CSRF 검증 제외)
+     * - category 파라미터 미전달 시 전체 카테고리 조회, 전달 시 해당 카테고리만 조회
      *
-     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
-     * @param cursor 이전 조회 결과의 마지막 알림 ID (선택)
-     * @param size   조회할 알림 수 (선택, 기본값 20, 최대 100)
+     * @param userId   JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @param cursor   이전 조회 결과의 마지막 알림 ID (선택)
+     * @param size     조회할 알림 수 (선택, 기본값 20, 최대 100)
+     * @param category 조회할 알림 카테고리 (선택, null이면 전체)
      * @return 알림 목록 + 다음 페이지 정보
      */
     @GetMapping
     public ResponseEntity<CommonResponse<NotificationListResponseDTO>> getNotificationList(
             @CurrentUser Long userId,
             @RequestParam(required = false) Long cursor,
-            @RequestParam(required = false) Integer size) {
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) NotificationCategory category) {
 
         return GlobalResponseFactory.success(
-                notificationService.getNotificationList(userId, cursor, size),
+                notificationService.getNotificationList(userId, cursor, size, category),
                 "알림 목록을 성공적으로 조회했습니다.");
     }
 

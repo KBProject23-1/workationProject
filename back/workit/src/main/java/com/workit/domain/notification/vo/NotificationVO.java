@@ -15,7 +15,7 @@ public class NotificationVO {
     /** 알림 고유 번호 (notification_histories.id) */
     private Long notificationId;
 
-    /** 알림 카테고리 (BUDGET_WARNING, PAYMENT_COMPLETE 등) */
+    /** 알림 카테고리 (NotificationCategory enum 문자열: BUDGET_NOTIFY, TRANSFER_NOTIFY 등) */
     private String category;
 
     /** 중요 알림 여부 (TINYINT(1) → Boolean) */

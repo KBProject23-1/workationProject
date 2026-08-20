@@ -270,26 +270,25 @@ ON DUPLICATE KEY UPDATE
 
 -- user_notification_settings
 INSERT INTO user_notification_settings
-    (user_id, system_notify, budget_warning, transfer_notify, payment_notify, event_notify, reservation_notify, review_notify)
+    (user_id, budget_notify, transfer_notify, payment_notify, workation_notify, settlement_notify, schedule_notify)
 VALUES
-    (1, 1, 1, 1, 1, 0, 1, 1)
+    (1, 1, 1, 1, 1, 1, 1)
 ON DUPLICATE KEY UPDATE
-    system_notify = VALUES(system_notify),
-    budget_warning = VALUES(budget_warning),
+    budget_notify = VALUES(budget_notify),
     transfer_notify = VALUES(transfer_notify),
     payment_notify = VALUES(payment_notify),
-    event_notify = VALUES(event_notify),
-    reservation_notify = VALUES(reservation_notify),
-    review_notify = VALUES(review_notify);
+    workation_notify = VALUES(workation_notify),
+    settlement_notify = VALUES(settlement_notify),
+    schedule_notify = VALUES(schedule_notify);
 
 -- notification_histories
 INSERT INTO notification_histories
-    (user_id, type, important, title, content, `read`, created_at)
+    (user_id, category, important, title, content, `read`, created_at)
 VALUES
-    (1, 'SYSTEM', 1, '환영합니다', '계정 테스트용 샘플 알림 메시지', 0, '2026-08-12 05:31:00'),
-    (1, 'BUDGET', 0, '예산 알림', '주간 예산 사용량이 40%를 초과했습니다', 0, '2026-08-12 05:31:30'),
-    (1, 'RESERVATION', 1, '예약 알림', '숙소 예약이 확정되었습니다', 1, '2026-08-12 05:32:00'),
-    (1, 'REVIEW', 0, '리뷰 알림', '최근 이용 후기는 5점입니다', 0, '2026-08-12 05:32:30')
+    (1, 'WORKATION_NOTIFY', 1, '환영합니다', '계정 테스트용 샘플 알림 메시지', 0, '2026-08-12 05:31:00'),
+    (1, 'BUDGET_NOTIFY', 0, '예산 알림', '주간 예산 사용량이 40%를 초과했습니다', 0, '2026-08-12 05:31:30'),
+    (1, 'SCHEDULE_NOTIFY', 1, '일정 알림', '숙소 예약이 확정되었습니다', 1, '2026-08-12 05:32:00'),
+    (1, 'SETTLEMENT_NOTIFY', 0, '정산 알림', '최근 이용 후기는 5점입니다', 0, '2026-08-12 05:32:30')
 ON DUPLICATE KEY UPDATE
     important = VALUES(important),
     title = VALUES(title),

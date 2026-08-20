@@ -1,5 +1,6 @@
 package com.workit.domain.notification.mapper;
 
+import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.vo.NotificationSettingsVO;
 import com.workit.domain.notification.vo.NotificationVO;
 import org.apache.ibatis.annotations.Param;
@@ -16,16 +17,19 @@ public interface NotificationMapper {
      * - notification_histories 테이블에서 user_id 로 사용자 알림 조회
      * - ORDER BY id DESC (최신순 정렬)
      * - cursor 가 있으면 id < cursor 조건 적용
+     * - category 가 있으면 category 조건 적용
      * - size + 1 개 조회하여 hasNext 판단 (21번째 데이터 존재 여부)
      *
-     * @param userId 사용자 ID
-     * @param cursor 이전 조회 결과의 마지막 알림 ID (null이면 최신부터)
-     * @param size   조회할 알림 수 (기본값 20)
+     * @param userId   사용자 ID
+     * @param cursor   이전 조회 결과의 마지막 알림 ID (null이면 최신부터)
+     * @param size     조회할 알림 수 (기본값 20)
+     * @param category 조회할 알림 카테고리 (null이면 전체)
      * @return 알림 목록
      */
     List<NotificationVO> selectNotificationList(@Param("userId") Long userId,
                                                  @Param("cursor") Long cursor,
-                                                 @Param("size") int size);
+                                                 @Param("size") int size,
+                                                 @Param("category") String category);
 
     /**
      * 읽지 않은 알림 개수 조회 - 단순 COUNT 쿼리
