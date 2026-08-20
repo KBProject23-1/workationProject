@@ -11,6 +11,7 @@ import com.workit.domain.auth.service.PasswordResetTokenStore;
 import com.workit.domain.auth.service.RefreshTokenStore;
 import com.workit.domain.auth.util.JwtTokenProvider;
 import com.workit.domain.auth.vo.LoginUserVO;
+import com.workit.domain.notification.mapper.NotificationMapper;
 import com.workit.domain.wallet.service.WalletService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,6 +81,9 @@ class AuthRefreshFlowTest {
     @Mock
     private PasswordResetTokenStore passwordResetTokenStore;
 
+    @Mock
+    private NotificationMapper notificationMapper;
+
     private JwtTokenProvider jwtTokenProvider;
     private AuthService authService;
     private JwtAuthenticationFilter filter;
@@ -93,7 +97,8 @@ class AuthRefreshFlowTest {
         jwtTokenProvider = new JwtTokenProvider(TEST_JWT_SECRET, 15, 20160);
         authService = new AuthServiceImpl(
                 authMapper, identityVerificationProvider, mockPassStore, walletService,
-                jwtTokenProvider, refreshTokenStore, loginFailCounter, passwordResetTokenStore);
+                jwtTokenProvider, refreshTokenStore, loginFailCounter, passwordResetTokenStore,
+                notificationMapper);
         filter = new JwtAuthenticationFilter(jwtTokenProvider);
 
         // ACTIVE 회원 조회 — refreshAccessToken 의 회원 상태 확인 단계용

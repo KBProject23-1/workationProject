@@ -28,6 +28,7 @@ import com.workit.domain.auth.vo.UserAuthVO;
 import com.workit.domain.auth.vo.UserDeviceVO;
 import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
+import com.workit.domain.notification.mapper.NotificationMapper;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
 import com.workit.global.util.EmailValidator;
@@ -70,6 +71,7 @@ public class AuthServiceImpl implements AuthService {
     private final RefreshTokenStore refreshTokenStore;
     private final LoginFailCounter loginFailCounter;
     private final PasswordResetTokenStore passwordResetTokenStore;
+    private final NotificationMapper notificationMapper;
 
     /** 회원가입 시 초기 회원 상태 (knowledge.md: users.status 기본값) */
     private static final String USER_STATUS_ACTIVE = "ACTIVE";
@@ -337,6 +339,11 @@ public class AuthServiceImpl implements AuthService {
         // 전자지갑 생성 (knowledge.md Signup Flow: 8. Create wallet)
         // 같은 트랜잭션 내에서 생성 — 지갑 생성 실패 시 DB insert 전체가 롤백된다
         walletService.createWallet(user.getId());
+
+        // 알림 수신 설정 초기 데이터 생성 — DB DEFAULT(전부 ON) 사용
+        // 같은 트랜잭션 내에서 생성 — 알림 설정 생성 실패 시 회원가입 전체가 롤백된다
+        // user_id(PK) 기준 INSERT이므로 동일 사용자 중복 INSERT는 불가능하다
+        notificationMapper.insertNotificationSettings(user.getId());
 
         return user.getId();
     }
