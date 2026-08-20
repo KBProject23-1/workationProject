@@ -1,5 +1,6 @@
 package com.workit.domain.notification.mapper;
 
+import com.workit.domain.notification.vo.NotificationSettingsVO;
 import com.workit.domain.notification.vo.NotificationVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -70,4 +71,15 @@ public interface NotificationMapper {
      * @return 영향을 받은 행 수 (변경된 알림 개수)
      */
     int markAllAsRead(@Param("userId") Long userId);
+
+    /**
+     * 알림 수신 설정 조회 - user_notification_settings 테이블에서 사용자의 알림 설정을 조회한다.
+     * - user_id 조건을 반드시 포함하여 현재 로그인한 사용자의 설정만 조회한다.
+     * - 회원가입 시 알림 설정 레코드가 반드시 생성되므로 정상적인 사용자는 항상 한 건이 존재한다.
+     * - 조회 결과가 없는 경우 null을 반환한다.
+     *
+     * @param userId 현재 로그인한 사용자 ID
+     * @return 알림 수신 설정 VO (없으면 null)
+     */
+    NotificationSettingsVO selectNotificationSettings(@Param("userId") Long userId);
 }

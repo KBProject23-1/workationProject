@@ -2,8 +2,10 @@ package com.workit.domain.notification.service;
 
 import com.workit.domain.notification.dto.response.NotificationDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
+import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 import com.workit.domain.notification.exception.NotificationErrorCode;
 import com.workit.domain.notification.mapper.NotificationMapper;
+import com.workit.domain.notification.vo.NotificationSettingsVO;
 import com.workit.domain.notification.vo.NotificationVO;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -132,6 +134,30 @@ public class NotificationServiceImpl implements NotificationService {
 
         // 3. 정상 성공 반환 — affected_rows가 0이어도 예외를 발생시키지 않는다
         return updatedRows;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public NotificationSettingsResponseDTO getNotificationSettings(Long userId) {
+
+        // 1. DB 조회 — user_notification_settings 테이블에서 사용자 알림 설정 조회
+        NotificationSettingsVO settingsVO = notificationMapper.selectNotificationSettings(userId);
+
+        // 2. 조회 결과가 없는 경우 null 반환
+        //    - 회원가입 시 알림 설정 레코드가 반드시 생성되므로 정상적인 사용자는 항상 존재
+        //    - 하지만 방어적으로 null 체크 수행
+        if (settingsVO == null) {
+            log.warn("알림 수신 설정 조회 실패 - 설정 데이터 미존재 userId={}", userId);
+            return null;
+        }
+
+        // 3. VO → DTO 변환
+        NotificationSettingsResponseDTO responseDTO = NotificationSettingsResponseDTO.fromVO(settingsVO);
+
+        // 4. Audit 로그 — userId 만 기록
+        log.info("알림 수신 설정 조회 성공 - userId={}", userId);
+
+        return responseDTO;
     }
 
     /**

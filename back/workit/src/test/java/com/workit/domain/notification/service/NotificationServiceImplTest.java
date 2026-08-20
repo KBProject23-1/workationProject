@@ -2,8 +2,10 @@ package com.workit.domain.notification.service;
 
 import com.workit.domain.notification.dto.response.NotificationDTO;
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
+import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 import com.workit.domain.notification.exception.NotificationErrorCode;
 import com.workit.domain.notification.mapper.NotificationMapper;
+import com.workit.domain.notification.vo.NotificationSettingsVO;
 import com.workit.domain.notification.vo.NotificationVO;
 import com.workit.exception.BusinessException;
 import org.junit.jupiter.api.BeforeEach;
@@ -653,5 +655,168 @@ class NotificationServiceImplTest {
         // Then — 예외 발생 없이 정상 성공
         assertEquals(0, updatedRows);
         verify(notificationMapper).markAllAsRead(TEST_USER_ID);
+    }
+
+    // ================================================================
+    // 알림 수신 설정 조회 테스트
+    // ================================================================
+
+    /** 테스트용 알림 설정 VO 생성 */
+    private NotificationSettingsVO createNotificationSettingsVO(Long userId,
+                                                                boolean budgetNotify,
+                                                                boolean transferNotify,
+                                                                boolean paymentNotify,
+                                                                boolean workationNotify,
+                                                                boolean settlementNotify,
+                                                                boolean scheduleNotify) {
+        NotificationSettingsVO vo = new NotificationSettingsVO();
+        vo.setUserId(userId);
+        vo.setBudgetNotify(budgetNotify);
+        vo.setTransferNotify(transferNotify);
+        vo.setPaymentNotify(paymentNotify);
+        vo.setWorkationNotify(workationNotify);
+        vo.setSettlementNotify(settlementNotify);
+        vo.setScheduleNotify(scheduleNotify);
+        vo.setUpdatedAt(LocalDateTime.of(2026, 8, 20, 10, 0, 0));
+        return vo;
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 성공 - 정상적인 설정값 반환")
+    void getNotificationSettings_success() {
+        // Given
+        NotificationSettingsVO settingsVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, false, true, true, false, true);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settingsVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.getNotificationSettings(TEST_USER_ID);
+
+        // Then
+        assertNotNull(result);
+        assertTrue(result.getBudgetNotify());
+        assertFalse(result.getTransferNotify());
+        assertTrue(result.getPaymentNotify());
+        assertTrue(result.getWorkationNotify());
+        assertFalse(result.getSettlementNotify());
+        assertTrue(result.getScheduleNotify());
+
+        // Mapper 호출 확인
+        verify(notificationMapper).selectNotificationSettings(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 - userId가 Mapper까지 정상적으로 전달되는지 확인")
+    void getNotificationSettings_userIdPassedToMapper() {
+        // Given
+        NotificationSettingsVO settingsVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, true, true, true, true, true);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settingsVO);
+
+        // When
+        notificationService.getNotificationSettings(TEST_USER_ID);
+
+        // Then — TEST_USER_ID가 정확히 전달됨
+        verify(notificationMapper).selectNotificationSettings(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 - 다른 사용자의 설정이 조회되지 않는지 확인")
+    void getNotificationSettings_otherUserNotAccessible() {
+        // Given — 사용자 A의 설정
+        Long userA = 100L;
+        NotificationSettingsVO settingsVOA = createNotificationSettingsVO(
+                userA, true, false, true, false, true, true);
+        when(notificationMapper.selectNotificationSettings(userA)).thenReturn(settingsVOA);
+
+        // When — 사용자 A의 설정 조회
+        NotificationSettingsResponseDTO result = notificationService.getNotificationSettings(userA);
+
+        // Then — 사용자 A의 설정만 반환됨
+        assertNotNull(result);
+        assertTrue(result.getBudgetNotify());
+        assertFalse(result.getTransferNotify());
+
+        // Mapper 호출 확인 — 사용자 A의 ID로만 호출됨
+        verify(notificationMapper).selectNotificationSettings(userA);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 - 모든 Boolean 필드가 정상적으로 매핑되는지 확인")
+    void getNotificationSettings_allBooleanFieldsMapped() {
+        // Given — 모든 필드를 다른 값으로 설정
+        NotificationSettingsVO settingsVO = createNotificationSettingsVO(
+                TEST_USER_ID, false, true, false, true, false, true);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settingsVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.getNotificationSettings(TEST_USER_ID);
+
+        // Then — 모든 필드가 올바르게 매핑됨 (TINYINT(1) → Boolean)
+        assertNotNull(result);
+        assertFalse(result.getBudgetNotify());    // false
+        assertTrue(result.getTransferNotify());   // true
+        assertFalse(result.getPaymentNotify());   // false
+        assertTrue(result.getWorkationNotify());  // true
+        assertFalse(result.getSettlementNotify()); // false
+        assertTrue(result.getScheduleNotify());   // true
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 - 조회 결과가 없는 경우 null 반환")
+    void getNotificationSettings_noResult() {
+        // Given — 조회 결과 없음
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(null);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.getNotificationSettings(TEST_USER_ID);
+
+        // Then — null 반환 (예외 발생 없음)
+        assertNull(result);
+
+        // Mapper 호출 확인
+        verify(notificationMapper).selectNotificationSettings(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 - 모든 설정이 기본값(ON)인 경우")
+    void getNotificationSettings_allDefaultOn() {
+        // Given — 모든 설정이 기본값(true)
+        NotificationSettingsVO settingsVO = createNotificationSettingsVO(
+                TEST_USER_ID, true, true, true, true, true, true);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settingsVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.getNotificationSettings(TEST_USER_ID);
+
+        // Then — 모든 필드가 true
+        assertNotNull(result);
+        assertTrue(result.getBudgetNotify());
+        assertTrue(result.getTransferNotify());
+        assertTrue(result.getPaymentNotify());
+        assertTrue(result.getWorkationNotify());
+        assertTrue(result.getSettlementNotify());
+        assertTrue(result.getScheduleNotify());
+    }
+
+    @Test
+    @DisplayName("알림 수신 설정 조회 - 모든 설정이 OFF인 경우")
+    void getNotificationSettings_allOff() {
+        // Given — 모든 설정이 OFF
+        NotificationSettingsVO settingsVO = createNotificationSettingsVO(
+                TEST_USER_ID, false, false, false, false, false, false);
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settingsVO);
+
+        // When
+        NotificationSettingsResponseDTO result = notificationService.getNotificationSettings(TEST_USER_ID);
+
+        // Then — 모든 필드가 false
+        assertNotNull(result);
+        assertFalse(result.getBudgetNotify());
+        assertFalse(result.getTransferNotify());
+        assertFalse(result.getPaymentNotify());
+        assertFalse(result.getWorkationNotify());
+        assertFalse(result.getSettlementNotify());
+        assertFalse(result.getScheduleNotify());
     }
 }

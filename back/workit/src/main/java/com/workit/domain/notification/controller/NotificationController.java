@@ -1,6 +1,7 @@
 package com.workit.domain.notification.controller;
 
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
+import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 import com.workit.domain.notification.dto.response.NotificationUnreadCountResponseDTO;
 import com.workit.domain.notification.service.NotificationService;
 import com.workit.global.dto.CommonResponse;
@@ -27,6 +28,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class NotificationController {
 
     private final NotificationService notificationService;
+
+    /**
+     * 알림 수신 설정 조회 - 현재 로그인한 사용자의 알림 수신 설정 상태를 조회한다
+     *
+     * - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+     * - Request에서 userId를 직접 받지 않는다 (인증 컨텍스트에서 가져온다)
+     * - GET 요청이므로 CSRF 검증 대상이 아니다
+     * - 설정 데이터가 없는 경우 null 반환 (회원가입 시 항상 생성되므로 정상 사용자는 항상 존재)
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 알림 수신 설정
+     */
+    @GetMapping("/settings")
+    public ResponseEntity<CommonResponse<NotificationSettingsResponseDTO>> getNotificationSettings(
+            @CurrentUser Long userId) {
+
+        return GlobalResponseFactory.success(
+                notificationService.getNotificationSettings(userId),
+                "알림 설정 상태를 성공적으로 조회했습니다.");
+    }
 
     /**
      * 알림 목록 조회 - 커서 기반 페이지네이션으로 사용자의 알림 목록을 최신순으로 조회한다

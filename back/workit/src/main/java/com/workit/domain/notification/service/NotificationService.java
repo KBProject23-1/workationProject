@@ -1,6 +1,7 @@
 package com.workit.domain.notification.service;
 
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
+import com.workit.domain.notification.dto.response.NotificationSettingsResponseDTO;
 
 // Notification 도메인 Service (알림 목록 조회 담당)
 public interface NotificationService {
@@ -60,4 +61,17 @@ public interface NotificationService {
      * @return 읽음 처리된 알림 개수
      */
     int markAllAsRead(Long userId);
+
+    /**
+     * 알림 수신 설정 조회 - 현재 로그인한 사용자의 알림 수신 설정 상태를 조회한다.
+     *
+     * 흐름:
+     * 1. DB 조회 — NotificationMapper.selectNotificationSettings (user_id 기반 조회)
+     * 2. VO → DTO 변환 — NotificationSettingsResponseDTO.fromVO
+     * 3. 조회 결과가 없는 경우 null 반환 (회원가입 시 항상 생성되므로 정상 사용자는 항상 존재)
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 알림 수신 설정 DTO (없으면 null)
+     */
+    NotificationSettingsResponseDTO getNotificationSettings(Long userId);
 }
