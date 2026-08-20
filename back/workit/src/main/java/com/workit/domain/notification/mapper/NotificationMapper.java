@@ -99,4 +99,15 @@ public interface NotificationMapper {
      * @return 영향을 받은 행 수 (0 또는 1)
      */
     int updateNotificationSettings(@Param("userId") Long userId, @Param("settings") NotificationSettingsVO settingsVO);
+
+    /**
+     * 알림 수신 설정 초기 데이터 생성 - 회원가입 시 호출
+     * - user_notification_settings 테이블에 user_id만 지정하고 나머지 설정값은 DB DEFAULT(1) 사용
+     * - 회원가입 트랜잭션 내에서 호출되므로 실패 시 전체 롤백된다
+     * - user_id(PK) 기준 INSERT이므로 동일 사용자 중복 INSERT는 불가능하다
+     *
+     * @param userId 신규 가입 회원 ID
+     * @return 영향을 받은 행 수 (1)
+     */
+    int insertNotificationSettings(@Param("userId") Long userId);
 }

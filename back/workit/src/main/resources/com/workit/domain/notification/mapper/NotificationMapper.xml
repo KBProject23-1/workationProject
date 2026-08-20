@@ -119,6 +119,17 @@
           서비스 계층에서 모든 필드 null 검증을 수행하여 이 쿼리에 도달하지 않도록 한다.
         - UPDATE 결과 affected_rows를 반환한다 (0이면 레코드 미존재).
     -->
+    <!--
+        알림 수신 설정 초기 데이터 생성 - 회원가입 시 호출.
+        - user_id만 지정하고 나머지 알림 설정값은 DB DEFAULT(1) 사용
+        - 회원가입 트랜잭션 내에서 호출되므로 실패 시 전체 롤백된다
+        - user_id(PK) 기준 INSERT이므로 동일 사용자 중복 INSERT는 불가능하다
+    -->
+    <insert id="insertNotificationSettings">
+        INSERT INTO user_notification_settings (user_id)
+        VALUES (#{userId})
+    </insert>
+
     <update id="updateNotificationSettings">
         UPDATE user_notification_settings
         <set>

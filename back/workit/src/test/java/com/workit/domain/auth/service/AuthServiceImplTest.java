@@ -28,6 +28,7 @@ import com.workit.domain.auth.vo.UserAuthVO;
 import com.workit.domain.auth.vo.UserDeviceVO;
 import com.workit.domain.auth.vo.UserProfileVO;
 import com.workit.domain.auth.vo.UserVO;
+import com.workit.domain.notification.mapper.NotificationMapper;
 import com.workit.domain.wallet.service.WalletService;
 import com.workit.exception.BusinessException;
 import com.workit.global.util.PasswordEncryptor;
@@ -136,6 +137,9 @@ class AuthServiceImplTest {
     @Mock
     private PasswordResetTokenStore passwordResetTokenStore;
 
+    @Mock
+    private NotificationMapper notificationMapper;
+
     // 실제 JWT Provider — 토큰 발급/검증은 Mock 대신 실제 구현으로 검증한다
     private JwtTokenProvider jwtTokenProvider;
 
@@ -193,7 +197,8 @@ class AuthServiceImplTest {
                 jwtTokenProvider,
                 refreshTokenStore,
                 loginFailCounter,
-                passwordResetTokenStore
+                passwordResetTokenStore,
+                notificationMapper
         );
 
         // MockPassStore 상태형 Mock — 저장/조회/사용완료를 인메모리 맵으로 흉내낸다
@@ -708,6 +713,9 @@ class AuthServiceImplTest {
         // 전자지갑 생성 검증
         verify(walletService).createWallet(user.getId());
 
+        // 알림 수신 설정 초기 데이터 생성 검증 — DB DEFAULT(전부 ON) 사용
+        verify(notificationMapper).insertNotificationSettings(user.getId());
+
         // Mock PASS 세션 사용 완료 처리 검증 (1회성 — 같은 identityVerificationId 재사용 방지)
         verify(mockPassStore).markUsed("imp_ver_1234567890");
         assertTrue(savedMockPassSessions.get("imp_ver_1234567890").isUsed());
@@ -1016,6 +1024,43 @@ class AuthServiceImplTest {
         verify(authMapper, never()).insertUserAuth(any(UserAuthVO.class));
         verify(authMapper, never()).insertUserProfile(any(UserProfileVO.class));
         verify(authMapper, never()).insertUserTerms(anyLong(), anyList());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 알림 수신 설정 초기 데이터가 생성된다 (DB DEFAULT: 전부 ON)")
+    void signup_createsNotificationSettings() {
+        // Given — 유효한 Mock PASS 세션 + 중복 없음 + 약관 마스터 정상
+        stubVerifiedSession("imp_ver_1234567890");
+        stubSignupSuccessPath(EMAIL_HASH_TEST);
+
+        // When
+        SignupResponseDTO result = authService.signup(signupRequest("imp_ver_1234567890", "test@example.com"));
+
+        // Then — 알림 수신 설정이 회원 ID로 생성된다
+        ArgumentCaptor<UserVO> userCaptor = ArgumentCaptor.forClass(UserVO.class);
+        verify(authMapper).insertUser(userCaptor.capture());
+        Long userId = userCaptor.getValue().getId();
+
+        verify(notificationMapper).insertNotificationSettings(userId);
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 알림 설정 실패 시 전체 롤백된다")
+    void signup_notificationSettingsFailure_rollsBack() {
+        // Given — 유효한 Mock PASS 세션 + 중복 없음 + 약관 마스터 정상
+        stubVerifiedSession("imp_ver_1234567890");
+        stubSignupSuccessPath(EMAIL_HASH_TEST);
+
+        // 알림 설정 INSERT 실패 시뮬레이션 — BusinessException 으로 변환
+        when(notificationMapper.insertNotificationSettings(anyLong()))
+                .thenThrow(new BusinessException(AuthErrorCode.DUPLICATE_USER));
+
+        // When & Then — 알림 설정 실패 시 회원가입 실패 (BusinessException 으로 전파)
+        assertThrows(BusinessException.class,
+                () -> authService.signup(signupRequest("imp_ver_1234567890", "test@example.com")));
+
+        // 지갑이 생성되었더라도 알림 설정 실패로 인해 전체 트랜잭션이 롤백된다
+        // (실제 DB 환경에서는 @Transactional 롤백으로 전부 취소됨)
     }
 
     // ---------- 통합 로그인 ----------
