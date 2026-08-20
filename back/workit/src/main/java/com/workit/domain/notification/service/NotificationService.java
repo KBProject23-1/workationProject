@@ -21,4 +21,16 @@ public interface NotificationService {
      * @return 알림 목록 + 다음 페이지 정보
      */
     NotificationListResponseDTO getNotificationList(Long userId, Long cursor, Integer size);
+
+    /**
+     * 읽지 않은 알림 개수 조회 - 현재 로그인한 사용자의 읽지 않은 알림 개수를 반환한다
+     *
+     * 흐름:
+     * 1. DB 조회 — NotificationMapper.countUnreadNotifications (COUNT 쿼리)
+     * 2. 결과 반환 — 읽지 않은 알림이 없는 경우도 정상적인 0 반환
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 읽지 않은 알림 개수
+     */
+    int getUnreadCount(Long userId);
 }

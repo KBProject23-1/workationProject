@@ -25,4 +25,14 @@ public interface NotificationMapper {
     List<NotificationVO> selectNotificationList(@Param("userId") Long userId,
                                                  @Param("cursor") Long cursor,
                                                  @Param("size") int size);
+
+    /**
+     * 읽지 않은 알림 개수 조회 - 단순 COUNT 쿼리
+     * - notification_histories 테이블에서 user_id + read = 0 조건으로 COUNT
+     * - 서비스 계층에서 사용자별 unread count를 반환
+     *
+     * @param userId 사용자 ID
+     * @return 읽지 않은 알림 개수
+     */
+    int countUnreadNotifications(@Param("userId") Long userId);
 }

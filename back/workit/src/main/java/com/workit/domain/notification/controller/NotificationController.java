@@ -1,6 +1,7 @@
 package com.workit.domain.notification.controller;
 
 import com.workit.domain.notification.dto.response.NotificationListResponseDTO;
+import com.workit.domain.notification.dto.response.NotificationUnreadCountResponseDTO;
 import com.workit.domain.notification.service.NotificationService;
 import com.workit.global.dto.CommonResponse;
 import com.workit.global.response.GlobalResponseFactory;
@@ -46,5 +47,27 @@ public class NotificationController {
         return GlobalResponseFactory.success(
                 notificationService.getNotificationList(userId, cursor, size),
                 "알림 목록을 성공적으로 조회했습니다.");
+    }
+
+    /**
+     * 읽지 않은 알림 개수 조회 - 현재 로그인한 사용자의 읽지 않은 알림 개수를 반환한다
+     *
+     * - 로그인 사용자 전용 API: JWT 인증 + @CurrentUser 로 userId 주입
+     * - Request에서 userId를 직접 받지 않는다 (인증 컨텍스트에서 가져온다)
+     * - GET 요청이므로 CSRF 검증 대상이 아니다
+     * - 읽지 않은 알림이 없는 경우도 정상적인 200 OK 반환 (unreadCount=0)
+     *
+     * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
+     * @return 읽지 않은 알림 개수
+     */
+    @GetMapping("/unread-count")
+    public ResponseEntity<CommonResponse<NotificationUnreadCountResponseDTO>> getUnreadCount(
+            @CurrentUser Long userId) {
+
+        int unreadCount = notificationService.getUnreadCount(userId);
+
+        return GlobalResponseFactory.success(
+                NotificationUnreadCountResponseDTO.of(unreadCount),
+                "읽지 않은 알림 개수를 성공적으로 조회했습니다.");
     }
 }

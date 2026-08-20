@@ -80,6 +80,21 @@ public class NotificationServiceImpl implements NotificationService {
         return NotificationListResponseDTO.of(notificationDTOs, nextCursor, hasNext);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public int getUnreadCount(Long userId) {
+
+        // 1. DB 조회 — COUNT 쿼리로 읽지 않은 알림 개수 조회
+        int unreadCount = notificationMapper.countUnreadNotifications(userId);
+
+        // 2. Audit 로그 — userId 만 기록
+        log.info("읽지 않은 알림 개수 조회 성공 - userId={}, unreadCount={}",
+                userId, unreadCount);
+
+        // 3. 응답 반환 — 읽지 않은 알림이 없는 경우도 정상적인 0 반환
+        return unreadCount;
+    }
+
     /**
      * size 파라미터 검증 + 기본값 적용
      * - null/빈 값 → 기본값 20

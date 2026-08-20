@@ -32,4 +32,16 @@
         LIMIT #{size}
     </select>
 
+    <!--
+        읽지 않은 알림 개수 조회 - 단순 COUNT 쿼리.
+        - notification_histories 테이블에서 user_id + read = 0 조건으로 COUNT
+        - Service 계층에서 사용자별 unread count를 반환
+    -->
+    <select id="countUnreadNotifications" resultType="int">
+        SELECT COUNT(*)
+        FROM notification_histories
+        WHERE user_id = #{userId}
+          AND read = 0
+    </select>
+
 </mapper>

@@ -378,4 +378,92 @@ class NotificationServiceImplTest {
         // nextCursor는 20번째 알림의 ID (21번째 제거 후)
         assertEquals(1001L, result.getNextCursor());
     }
+
+    // ================================================================
+    // 읽지 않은 알림 개수 조회 테스트
+    // ================================================================
+
+    @Test
+    @DisplayName("읽지 않은 알림 개수 조회 성공 - 여러 개 있는 경우")
+    void getUnreadCount_success_multipleUnread() {
+        // Given — 읽지 않은 알림 5개
+        when(notificationMapper.countUnreadNotifications(TEST_USER_ID)).thenReturn(5);
+
+        // When
+        int result = notificationService.getUnreadCount(TEST_USER_ID);
+
+        // Then
+        assertEquals(5, result);
+        verify(notificationMapper).countUnreadNotifications(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("읽지 않은 알림 개수 조회 성공 - 읽지 않은 알림이 없는 경우")
+    void getUnreadCount_success_zeroUnread() {
+        // Given — 읽지 않은 알림 0개
+        when(notificationMapper.countUnreadNotifications(TEST_USER_ID)).thenReturn(0);
+
+        // When
+        int result = notificationService.getUnreadCount(TEST_USER_ID);
+
+        // Then
+        assertEquals(0, result);
+        verify(notificationMapper).countUnreadNotifications(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("읽지 않은 알림 개수 조회 - read=0인 알림만 카운트되는지 확인")
+    void getUnreadCount_onlyUnreadCounted() {
+        // Given — read=0인 알림 3개, read=1인 알림 7개 (Mapper에서 COUNT로 처리)
+        when(notificationMapper.countUnreadNotifications(TEST_USER_ID)).thenReturn(3);
+
+        // When
+        int result = notificationService.getUnreadCount(TEST_USER_ID);
+
+        // Then — read=0인 알림만 카운트
+        assertEquals(3, result);
+        verify(notificationMapper).countUnreadNotifications(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("읽지 않은 알림 개수 조회 - 다른 사용자의 알림은 카운트되지 않는지 확인")
+    void getUnreadCount_otherUserNotCounted() {
+        // Given — 다른 사용자 ID
+        Long otherUserId = 200L;
+        when(notificationMapper.countUnreadNotifications(otherUserId)).thenReturn(0);
+
+        // When
+        int result = notificationService.getUnreadCount(otherUserId);
+
+        // Then — 다른 사용자는 0 반환
+        assertEquals(0, result);
+        verify(notificationMapper).countUnreadNotifications(otherUserId);
+    }
+
+    @Test
+    @DisplayName("읽지 않은 알림 개수 조회 - userId가 정상적으로 Mapper까지 전달되는지 확인")
+    void getUnreadCount_userIdPassedToMapper() {
+        // Given
+        when(notificationMapper.countUnreadNotifications(TEST_USER_ID)).thenReturn(2);
+
+        // When
+        notificationService.getUnreadCount(TEST_USER_ID);
+
+        // Then — TEST_USER_ID가 정확히 전달됨
+        verify(notificationMapper).countUnreadNotifications(TEST_USER_ID);
+    }
+
+    @Test
+    @DisplayName("읽지 않은 알림 개수 조회 - 알림이 많은 경우")
+    void getUnreadCount_largeCount() {
+        // Given — 읽지 않은 알림 1000개
+        when(notificationMapper.countUnreadNotifications(TEST_USER_ID)).thenReturn(1000);
+
+        // When
+        int result = notificationService.getUnreadCount(TEST_USER_ID);
+
+        // Then
+        assertEquals(1000, result);
+        verify(notificationMapper).countUnreadNotifications(TEST_USER_ID);
+    }
 }
