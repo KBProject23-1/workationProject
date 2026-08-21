@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.wallet.mapper.TransferAlertMapper">
+
+    <!--
+        입출금 알림 중복 확인 - userId + referenceType + referenceId + notificationType 으로 기존 알림 존재 여부를 확인한다.
+        - 동일한 거래에 대해 WALLET_CHARGE_SUCCESS와 ACCOUNT_REFUND_SUCCESS는 notificationType이 다르므로 별도로 중복 여부를 판단한다
+        - EXISTS 를 사용하여 일치하는 레코드가 있으면 true 를 반환한다
+        - user_id 조건을 포함하여 다른 사용자의 알림과 구분한다
+    -->
+    <select id="existsNotificationByReference" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM notification_histories
+            WHERE user_id = #{userId}
+              AND reference_type = #{referenceType}
+              AND reference_id = #{referenceId}
+              AND notification_type = #{notificationType}
+        )
+    </select>
+
+</mapper>

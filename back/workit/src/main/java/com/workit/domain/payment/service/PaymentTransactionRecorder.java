@@ -12,6 +12,7 @@ import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.wallet.mapper.WalletMapper;
+import com.workit.domain.wallet.service.TransferAlertService;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class PaymentTransactionRecorder {
     private final AccountMapper accountMapper;
     private final TransactionMapper transactionMapper;
     private final LedgerService ledgerService;
+    private final TransferAlertService transferAlertService;
 
     private static final String DEFAULT_CATEGORY = "기타";
 
@@ -99,6 +101,9 @@ public class PaymentTransactionRecorder {
             ledgerService.post(depositTx.getId(),
                     LedgerEntryVO.debit(LedgerEntryVO.ACCOUNT_BANK, primaryAccount.getId(), actualChargeAmount, accBalanceAfter),
                     LedgerEntryVO.credit(LedgerEntryVO.ACCOUNT_WALLET, wallet.getId(), actualChargeAmount, walBalanceAfter));
+
+            // 자동충전 완료 알림 생성 (원장 기입 성공 = 충전 확정)
+            transferAlertService.notifyChargeSuccess(userId, depositTx.getId(), actualChargeAmount);
         }
 
         // 3) 지갑 차감

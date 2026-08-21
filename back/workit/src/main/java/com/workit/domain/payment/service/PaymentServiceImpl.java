@@ -25,6 +25,7 @@ import com.workit.domain.wallet.dto.response.ChargeResponse;
 import com.workit.domain.wallet.dto.response.RefundResponse;
 import com.workit.domain.wallet.exception.WalletErrorCode;
 import com.workit.domain.wallet.mapper.WalletMapper;
+import com.workit.domain.wallet.service.TransferAlertService;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentTransactionRecorder paymentTransactionRecorder;
     private final ExpenseImportTrigger expenseImportTrigger;
     private final PaymentAlertService paymentAlertService;
+    private final TransferAlertService transferAlertService;
 
     // ===== 충전 =====
     @Override
@@ -107,7 +109,12 @@ public class PaymentServiceImpl implements PaymentService {
         // 4) PAID 로 전이 (상태머신 규칙 검증 포함)
         markPaid(chargeTx, userId);
 
-        return ChargeResponse.of(chargeTx, walletBalanceAfter);
+        ChargeResponse chargeResponse = ChargeResponse.of(chargeTx, walletBalanceAfter);
+
+        // 지갑 충전 완료 알림 생성 (PAID 상태 확정 후)
+        transferAlertService.notifyChargeSuccess(userId, chargeResponse);
+
+        return chargeResponse;
     }
 
     // ===== 환불 =====
@@ -159,7 +166,12 @@ public class PaymentServiceImpl implements PaymentService {
         // 4) PAID 로 전이 (상태머신 규칙 검증 포함)
         markPaid(refundTx, userId);
 
-        return RefundResponse.of(refundTx, walletBalanceAfter, targetAccount);
+        RefundResponse refundResponse = RefundResponse.of(refundTx, walletBalanceAfter, targetAccount);
+
+        // 계좌 환불 완료 알림 생성 (PAID 상태 확정 후)
+        transferAlertService.notifyRefundSuccess(userId, refundResponse);
+
+        return refundResponse;
     }
 
     // ===== 결제 =====

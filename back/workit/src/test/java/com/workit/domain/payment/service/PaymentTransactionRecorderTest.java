@@ -9,6 +9,7 @@ import com.workit.domain.transaction.exception.TransactionErrorCode;
 import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.wallet.mapper.WalletMapper;
+import com.workit.domain.wallet.service.TransferAlertService;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
@@ -29,7 +30,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,6 +50,7 @@ class PaymentTransactionRecorderTest {
     @Mock private AccountMapper accountMapper;
     @Mock private TransactionMapper transactionMapper;
     @Mock private LedgerService ledgerService;
+    @Mock private TransferAlertService transferAlertService;
 
     @InjectMocks private PaymentTransactionRecorder recorder;
 
@@ -97,6 +101,11 @@ class PaymentTransactionRecorderTest {
         assertTrue(res.getIsAutoCharged());
         assertEquals(0, res.getAutoChargedAmount().compareTo(BigDecimal.valueOf(10_000)),
                 "부족분 2,000 이지만 최소충전 10,000 으로 채워야 한다");
+
+        // 자동충전 알림이 WALLET_CHARGE_SUCCESS 로 생성됨
+        // transactionId는 DB useGeneratedKeys로 세팅되므로, mock 에서는 null이므로 nullable 로 검증
+        verify(transferAlertService).notifyChargeSuccess(
+                eq(USER_ID), nullable(Long.class), eq(BigDecimal.valueOf(10_000)));
     }
 
     @Test
@@ -112,6 +121,11 @@ class PaymentTransactionRecorderTest {
 
         assertTrue(res.getIsAutoCharged());
         assertEquals(0, res.getAutoChargedAmount().compareTo(BigDecimal.valueOf(15_000)));
+
+        // 자동충전 알림이 WALLET_CHARGE_SUCCESS 로 생성됨
+        // transactionId는 DB useGeneratedKeys로 세팅되므로, mock 에서는 null이므로 nullable 로 검증
+        verify(transferAlertService).notifyChargeSuccess(
+                eq(USER_ID), nullable(Long.class), eq(BigDecimal.valueOf(15_000)));
     }
 
     @Test
@@ -125,6 +139,9 @@ class PaymentTransactionRecorderTest {
 
         assertFalse(res.getIsAutoCharged());
         assertNull(res.getAutoChargedAmount());
+
+        // 잔액 충분 → 자동충전 없음 → 알림 없음
+        verify(transferAlertService, never()).notifyChargeSuccess(any(), nullable(Long.class), any(BigDecimal.class));
     }
 
     // ============================================================
@@ -174,5 +191,8 @@ class PaymentTransactionRecorderTest {
                 () -> recorder.payWithWallet(USER_ID, walletPayment(5_000)));
 
         assertEquals(TransactionErrorCode.TRANSACTION_DUPLICATE_REQUEST, ex.getErrorCode());
+
+        // 멱등키 중복 → 자동충전 실행 안 됨 → 알림 없음
+        verify(transferAlertService, never()).notifyChargeSuccess(any(), nullable(Long.class), any(BigDecimal.class));
     }
 }
