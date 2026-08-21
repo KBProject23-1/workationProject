@@ -19,6 +19,7 @@ public class BookmarkVO {
     private String thumbnailUrl;
     private Long price;
     private BigDecimal rating;
+    private Long reviewCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime isDeleted;
