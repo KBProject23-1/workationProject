@@ -353,10 +353,10 @@ class NotificationCreateServiceImplTest {
         NotificationTemplateVO template = createTemplate(
                 "SETTLEMENT_NOTIFY", "SETTLEMENT_OVERDUE",
                 "정산이 지연되고 있어요",
-                "정산하지 않은 항목이 {unsettledCount}건 있어요.");
+                "확인하지 않은 지출이 {unconfirmedCount}건 있어요.");
 
         Map<String, Object> placeholders = new HashMap<>();
-        placeholders.put("unsettledCount", 5);
+        placeholders.put("unconfirmedCount", 5);
 
         NotificationCreateRequestDTO request = createRequest(
                 NotificationCategory.SETTLEMENT_NOTIFY, "SETTLEMENT_OVERDUE", true, placeholders);
@@ -375,7 +375,7 @@ class NotificationCreateServiceImplTest {
         // Then
         NotificationVO saved = captor.getValue();
         assertEquals("정산이 지연되고 있어요", saved.getTitle());
-        assertEquals("정산하지 않은 항목이 5건 있어요.", saved.getContent());
+        assertEquals("확인하지 않은 지출이 5건 있어요.", saved.getContent());
     }
 
     @Test

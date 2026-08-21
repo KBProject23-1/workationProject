@@ -403,7 +403,7 @@ VALUES
     'SETTLEMENT_NOTIFY',
     'SETTLEMENT_OVERDUE',
     '정산이 지연되고 있어요',
-    '정산하지 않은 항목이 {unsettledCount}건 있어요. 확인 후 정산을 완료해 주세요.',
+    '확인하지 않은 지출이 {unconfirmedCount}건 있어요. 확인 후 정산을 완료해 주세요.',
     1
 ),
 (
