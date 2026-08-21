@@ -75,4 +75,10 @@ public interface WorkationMapper {
 
     // 워케이션 종료 (ACTIVE → SETTLED)
     int settleWorkation(@Param("id") Long id);
+
+    // 내일 시작하는 ACTIVE 워케이션 조회
+    List<WorkationVO> selectWorkationsByStartDate(@Param("startDate") LocalDate startDate);
+
+    // 내일 종료하는 ACTIVE 워케이션 조회
+    List<WorkationVO> selectWorkationsByEndDate(@Param("endDate") LocalDate endDate);
 }

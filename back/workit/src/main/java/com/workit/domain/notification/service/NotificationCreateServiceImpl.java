@@ -75,6 +75,7 @@ public class NotificationCreateServiceImpl implements NotificationCreateService 
         historyVO.setImportant(request.getImportant());
         historyVO.setTitle(title);
         historyVO.setContent(content);
+        historyVO.setNotificationType(request.getNotificationType());
         historyVO.setReferenceType(request.getReferenceType());
         historyVO.setReferenceId(request.getReferenceId());
 

@@ -141,6 +141,7 @@ CREATE TABLE `notification_histories`
     `important`         TINYINT(1)        NOT NULL DEFAULT 0 COMMENT '중요 알림 여부 (0:일반, 1:중요)',
     `title`             VARCHAR(100)      NOT NULL COMMENT '알림 제목',
     `content`           TEXT              NOT NULL COMMENT '알림 본문 내용',
+    `notification_type` VARCHAR(50)           NULL COMMENT '알림 세부 유형 (notification_templates.notification_type과 일치)',
     `reference_type`    VARCHAR(30)           NULL COMMENT '알림이 참조하는 대상 타입',
     `reference_id`      BIGINT                NULL COMMENT '알림이 참조하는 대상 데이터 ID',
     `read`              TINYINT(1)        NOT NULL DEFAULT 0 COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',

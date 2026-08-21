@@ -188,13 +188,14 @@
             useGeneratedKeys="true" keyProperty="history.notificationId">
         INSERT INTO notification_histories
             (user_id, category, important, title, content,
-             reference_type, reference_id, `read`)
+             notification_type, reference_type, reference_id, `read`)
         VALUES
             (#{userId},
              #{history.category},
              #{history.important},
              #{history.title},
              #{history.content},
+             #{history.notificationType},
              #{history.referenceType},
              #{history.referenceId},
              0)
