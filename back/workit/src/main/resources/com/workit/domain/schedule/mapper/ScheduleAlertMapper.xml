@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.schedule.mapper.ScheduleAlertMapper">
+
+    <!--
+        일정 알림 대상 조회 (catch-up 지원)
+        - scheduledAt이 now-5분 ~ now+1시간 범위에 있는 일정을 조회한다
+        - now-5분보다 이전 일정은 너무 오래된 과거 일정으로 간주하여 제외한다
+        - now+1시간보다 미래 일정은 아직 알림 시점이 아닌 것으로 간주하여 제외한다
+        - workations.status = 'ACTIVE'인 워케이션에 속한 일정만 조회한다
+        - workation의 user_id를 통해 알림 대상 사용자를 확인한다
+        - merchants.name을 일정 제목으로 사용한다
+        - 취소/삭제된 일정은 제외 (DELETE이므로 Hard Delete)
+        - 중복 방지는 notification_histories의 EXISTS 조건으로 별도 처리한다
+    -->
+    <select id="selectSchedulesStartingInOneHour"
+            resultType="com.workit.domain.schedule.vo.ScheduleAlertTargetVO">
+        SELECT s.id          AS scheduleId,
+               w.user_id     AS userId,
+               m.name        AS scheduleTitle,
+               s.scheduled_at AS scheduledAt
+          FROM schedules s
+          JOIN workations w ON w.id = s.workation_id
+                           AND w.status = 'ACTIVE'
+          JOIN merchants m  ON m.id = s.merchant_id
+         WHERE s.scheduled_at &gt; DATE_SUB(#{now}, INTERVAL 5 MINUTE)
+           AND s.scheduled_at &lt;= DATE_ADD(#{now}, INTERVAL 1 HOUR)
+    </select>
+
+    <!--
+        일정 알림 중복 확인 - userId + referenceType + referenceId + notificationType 으로 기존 알림 존재 여부를 확인한다.
+        - 동일한 일정에 대해 중복 알림을 방지한다
+        - EXISTS 를 사용하여 일치하는 레코드가 있으면 true 를 반환한다
+        - user_id 조건을 포함하여 다른 사용자의 알림과 구분한다
+    -->
+    <select id="existsNotificationByReference" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM notification_histories
+            WHERE user_id = #{userId}
+              AND reference_type = #{referenceType}
+              AND reference_id = #{referenceId}
+              AND notification_type = #{notificationType}
+        )
+    </select>
+
+</mapper>
