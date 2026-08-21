@@ -59,6 +59,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PinValidator pinValidator;
     private final PaymentTransactionRecorder paymentTransactionRecorder;
     private final ExpenseImportTrigger expenseImportTrigger;
+    private final PaymentAlertService paymentAlertService;
 
     // ===== 충전 =====
     @Override
@@ -174,6 +175,9 @@ public class PaymentServiceImpl implements PaymentService {
         PaymentResponse response = "WALLET".equals(request.getPaymentSourceType())
                 ? paymentTransactionRecorder.payWithWallet(userId, request)
                 : payWithCard(userId, request);
+
+        // 결제 성공 알림 생성 (PAID 상태 확정 후)
+        paymentAlertService.notifyPaymentSuccess(userId, response);
 
         // 결제가 커밋된 뒤에 워케이션 지출로 옮긴다.
         // 이 메서드에는 트랜잭션이 없어 유입은 자체 트랜잭션으로 돌고, 실패해도 결제에 영향이 없다
