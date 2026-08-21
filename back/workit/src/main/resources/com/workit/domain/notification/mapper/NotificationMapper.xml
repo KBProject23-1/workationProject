@@ -155,4 +155,49 @@
         WHERE user_id = #{userId}
     </update>
 
+    <!--
+        알림 템플릿 조회 - category + notification_type 조건으로 활성화된 템플릿을 조회한다.
+        - is_active = 1 조건이 포함된다.
+        - 동일한 category + notification_type 조합은 하나의 활성 템플릿만 존재한다고 가정한다.
+        - 조회 결과가 없는 경우 null을 반환한다.
+    -->
+    <select id="selectActiveTemplate"
+            resultType="com.workit.domain.notification.vo.NotificationTemplateVO">
+        SELECT id                AS id,
+               category          AS category,
+               notification_type AS notification_type,
+               title_template    AS title_template,
+               content_template  AS content_template,
+               is_active         AS is_active,
+               created_at        AS created_at,
+               updated_at        AS updated_at
+        FROM notification_templates
+        WHERE category = #{category}
+          AND notification_type = #{notificationType}
+          AND is_active = 1
+        LIMIT 1
+    </select>
+
+    <!--
+        알림 이력 저장 - notification_histories 테이블에 알림을 저장한다.
+        - read = 0 (읽지 않은 상태)로 초기 저장
+        - created_at은 DB 기본값 CURRENT_TIMESTAMP 사용
+        - useGeneratedKeys로 생성된 PK를 historyVO에 반환
+    -->
+    <insert id="insertNotificationHistory"
+            useGeneratedKeys="true" keyProperty="history.notificationId">
+        INSERT INTO notification_histories
+            (user_id, category, important, title, content,
+             reference_type, reference_id, `read`)
+        VALUES
+            (#{userId},
+             #{history.category},
+             #{history.important},
+             #{history.title},
+             #{history.content},
+             #{history.referenceType},
+             #{history.referenceId},
+             0)
+    </insert>
+
 </mapper>

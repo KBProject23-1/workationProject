@@ -2,6 +2,7 @@ package com.workit.domain.notification.mapper;
 
 import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.vo.NotificationSettingsVO;
+import com.workit.domain.notification.vo.NotificationTemplateVO;
 import com.workit.domain.notification.vo.NotificationVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -110,4 +111,29 @@ public interface NotificationMapper {
      * @return 영향을 받은 행 수 (1)
      */
     int insertNotificationSettings(@Param("userId") Long userId);
+
+    /**
+     * 알림 템플릿 조회 - category + notification_type 조건으로 활성화된 템플릿을 조회한다.
+     * - is_active = 1 조건이 포함된다.
+     * - 동일한 category + notification_type 조합은 하나의 활성 템플릿만 존재한다고 가정한다.
+     * - 조회 결과가 없는 경우 null을 반환한다.
+     *
+     * @param category         알림 카테고리 (NotificationCategory enum 문자열)
+     * @param notificationType 알림 세부 유형 (String)
+     * @return 활성화된 템플릿 VO (없으면 null)
+     */
+    NotificationTemplateVO selectActiveTemplate(@Param("category") String category,
+                                                @Param("notificationType") String notificationType);
+
+    /**
+     * 알림 이력 저장 - notification_histories 테이블에 알림을 저장한다.
+     * - read = 0 (읽지 않은 상태)로 초기 저장
+     * - created_at은 DB 기본값 CURRENT_TIMESTAMP 사용
+     * - useGeneratedKeys로 생성된 PK를 historyVO에 반환
+     *
+     * @param historyVO 저장할 알림 이력 VO
+     * @return 영향을 받은 행 수 (1)
+     */
+    int insertNotificationHistory(@Param("userId") Long userId,
+                                  @Param("history") NotificationVO historyVO);
 }
