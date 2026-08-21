@@ -15,6 +15,7 @@ public class RecommendationMerchantVO {
     private String thumbnailUrl;
     private BigDecimal price;
     private BigDecimal rating;
+    private Long reviewCount;
     private BigDecimal latitude;
     private BigDecimal longitude;
     private boolean reserved;

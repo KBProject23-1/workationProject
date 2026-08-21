@@ -45,6 +45,7 @@ public class AccommodationRecommendationResponseDTO {
         private String address;
         private BigDecimal price;
         private BigDecimal rating;
+        private Long reviewCount;
         private Long distanceMeters;
         private Score score;
         private String recommendationReason;
@@ -59,7 +60,8 @@ public class AccommodationRecommendationResponseDTO {
                     : "1박 예산을 반영했으며 기준 공유오피스에서 " + distanceMeters + "m 떨어진 숙소예요.";
             return new Item(result.getRecommendationResultId(), result.getRanking(), result.getMerchantId(),
                     result.getMerchantName(), result.getThumbnailUrl(), result.getAddress(), result.getPrice(),
-                    result.getRating(), distanceMeters, Score.from(result), reason, result.isBookmarked());
+                    result.getRating(), result.getReviewCount(), distanceMeters, Score.from(result), reason,
+                    result.isBookmarked());
         }
     }
 
