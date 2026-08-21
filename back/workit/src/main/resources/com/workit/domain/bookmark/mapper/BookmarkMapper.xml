@@ -14,6 +14,7 @@
         <result property="thumbnailUrl" column="thumbnail_url"/>
         <result property="price" column="price"/>
         <result property="rating" column="rating"/>
+        <result property="reviewCount" column="review_count"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="isDeleted" column="is_deleted"/>
@@ -70,7 +71,19 @@
                m.thumbnail_url,
                m.address,
                m.price,
-               m.rating
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM reviews r
+                       WHERE r.merchant_id = m.id
+                         AND r.status = 'ACTIVE'
+                   ) THEN COALESCE(m.rating, 0.0)
+                   ELSE 0.0
+               END AS rating,
+               (SELECT COUNT(*)
+                  FROM reviews r
+                 WHERE r.merchant_id = m.id
+                   AND r.status = 'ACTIVE') AS review_count
           FROM bookmarks b
           JOIN merchants m ON m.id = b.merchants_id
          WHERE b.id = #{bookmarkId}
@@ -86,7 +99,19 @@
                m.address,
                m.thumbnail_url,
                m.price,
-               m.rating
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM reviews r
+                       WHERE r.merchant_id = m.id
+                         AND r.status = 'ACTIVE'
+                   ) THEN COALESCE(m.rating, 0.0)
+                   ELSE 0.0
+               END AS rating,
+               (SELECT COUNT(*)
+                  FROM reviews r
+                 WHERE r.merchant_id = m.id
+                   AND r.status = 'ACTIVE') AS review_count
           FROM bookmarks b
           JOIN merchants m ON b.merchants_id = m.id
          WHERE b.users_id = #{userId}

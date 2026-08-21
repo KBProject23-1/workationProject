@@ -17,6 +17,7 @@ public class BookmarkListItemResponseDTO {
     private final String address;
     private final Long price;
     private final BigDecimal rating;
+    private final Long reviewCount;
     private final LocalDateTime createdAt;
 
     public BookmarkListItemResponseDTO(Long bookmarkId,
@@ -27,6 +28,7 @@ public class BookmarkListItemResponseDTO {
                                       String address,
                                       Long price,
                                       BigDecimal rating,
+                                      Long reviewCount,
                                       LocalDateTime createdAt) {
         this.bookmarkId = bookmarkId;
         this.merchantId = merchantId;
@@ -36,6 +38,7 @@ public class BookmarkListItemResponseDTO {
         this.address = address;
         this.price = price;
         this.rating = rating;
+        this.reviewCount = reviewCount;
         this.createdAt = createdAt;
     }
 
@@ -49,6 +52,7 @@ public class BookmarkListItemResponseDTO {
                 vo.getAddress(),
                 vo.getPrice(),
                 vo.getRating(),
+                vo.getReviewCount(),
                 vo.getCreatedAt()
         );
     }

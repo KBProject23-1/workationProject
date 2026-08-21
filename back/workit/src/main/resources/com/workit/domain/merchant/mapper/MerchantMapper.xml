@@ -11,7 +11,10 @@
                m.address,
                m.thumbnail_url,
                m.price,
-               m.rating,
+               CASE
+                   WHEN COUNT(r.review_id) = 0 THEN 0.0
+                   ELSE COALESCE(m.rating, 0.0)
+               END AS rating,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
                EXISTS (
                SELECT 1
@@ -284,7 +287,15 @@
             a.description,
             a.check_in_time,
             a.check_out_time,
-            m.rating,
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM reviews r
+                    WHERE r.merchant_id = m.id
+                      AND r.status = 'ACTIVE'
+                ) THEN COALESCE(m.rating, 0.0)
+                ELSE 0.0
+            END AS rating,
             m.thumbnail_url,
             m.price,
             EXISTS (
@@ -432,7 +443,10 @@
                m.phone_number,
                m.thumbnail_url,
                m.price,
-               m.rating,
+               CASE
+                   WHEN COUNT(r.review_id) = 0 THEN 0.0
+                   ELSE COALESCE(m.rating, 0.0)
+               END AS rating,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
                o.description,
                EXISTS (
@@ -459,7 +473,10 @@
                m.latitude,
                m.longitude,
                m.phone_number,
-               m.rating,
+               CASE
+                   WHEN COUNT(r.review_id) = 0 THEN 0.0
+                   ELSE COALESCE(m.rating, 0.0)
+               END AS rating,
                m.thumbnail_url,
                m.price,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
@@ -489,7 +506,10 @@
                m.latitude,
                m.longitude,
                m.phone_number,
-               m.rating,
+               CASE
+                   WHEN COUNT(r.review_id) = 0 THEN 0.0
+                   ELSE COALESCE(m.rating, 0.0)
+               END AS rating,
                m.thumbnail_url,
                m.price,
                COALESCE(COUNT(r.review_id), 0) AS review_count,
