@@ -76,6 +76,7 @@ public class RestaurantRecommendationResponseDTO {
         private String address;
         private BigDecimal price;
         private BigDecimal rating;
+        private Long reviewCount;
         private Long distanceMeters;
         private Score score;
         private String recommendationReason;
@@ -89,7 +90,8 @@ public class RestaurantRecommendationResponseDTO {
                     : meal + " 예산을 반영했으며 기준 지점에서 " + meters + "m 떨어진 음식점이에요.";
             return new Item(result.getRecommendationResultId(), result.getRanking(), result.getMerchantId(),
                     result.getMerchantName(), result.getThumbnailUrl(), result.getAddress(), result.getPrice(),
-                    result.getRating(), meters, Score.from(result), reason, result.isBookmarked());
+                    result.getRating(), result.getReviewCount(), meters, Score.from(result), reason,
+                    result.isBookmarked());
         }
     }
 

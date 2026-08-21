@@ -237,6 +237,10 @@
                m.thumbnail_url,
                m.price,
                m.rating,
+               (SELECT COUNT(*)
+                  FROM reviews review
+                 WHERE review.merchant_id = m.id
+                   AND review.status = 'ACTIVE') AS review_count,
                EXISTS (SELECT 1 FROM bookmarks b
                        WHERE b.users_id = (SELECT user_id FROM recommendation_requests WHERE id = #{requestId})
                          AND b.merchants_id = m.id
