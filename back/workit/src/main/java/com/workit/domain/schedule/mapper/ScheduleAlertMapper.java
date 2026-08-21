@@ -6,10 +6,10 @@ import org.apache.ibatis.annotations.Param;
 import java.time.LocalDateTime;
 import java.util.List;
 
-// 일정 알림 중복 방지용 + 대상 조회 Mapper
-// - notification_histories 에서 userId + referenceType + referenceId + notificationType 으로 기존 알림 존재 여부를 확인한다
+// 일정 알림 대상 조회 Mapper
 // - schedules 테이블에서 시작 1시간 전 대상을 조회한다
-// - ScheduleAlertService에서 사용한다
+// - 중복 알림 방지는 NotificationMapper.existsNotificationsByReferencesBatch로 처리한다
+// - ScheduleAlertScheduler에서 사용한다
 public interface ScheduleAlertMapper {
 
     /**
@@ -25,21 +25,4 @@ public interface ScheduleAlertMapper {
      * @return 알림 대상 목록
      */
     List<ScheduleAlertTargetVO> selectSchedulesStartingInOneHour(@Param("now") LocalDateTime now);
-
-    /**
-     * 특정 일정에 대한 알림이 이미 존재하는지 확인한다.
-     * - userId + referenceType + referenceId + notificationType 조건으로 EXISTS 쿼리
-     * - 동일한 일정에 대해 중복 알림을 방지한다
-     * - user_id 조건을 포함하여 다른 사용자의 알림과 구분한다
-     *
-     * @param userId           사용자 ID
-     * @param referenceType    참조 타입 (예: "SCHEDULE")
-     * @param referenceId      참조 ID (일정 ID)
-     * @param notificationType 알림 타입 (예: "SCHEDULE_D_MINUS_1_HOUR")
-     * @return 알림 존재 여부 (true: 이미 알림 있음, false: 알림 없음)
-     */
-    boolean existsNotificationByReference(@Param("userId") Long userId,
-                                           @Param("referenceType") String referenceType,
-                                           @Param("referenceId") Long referenceId,
-                                           @Param("notificationType") String notificationType);
 }

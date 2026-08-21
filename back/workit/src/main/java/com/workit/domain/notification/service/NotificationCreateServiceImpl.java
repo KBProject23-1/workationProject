@@ -45,7 +45,23 @@ public class NotificationCreateServiceImpl implements NotificationCreateService 
                     "중요 알림 여부는 필수입니다.");
         }
 
-        // 1. 사용자 알림 수신 설정 확인
+        // 1. 중복 알림 방지 — 같은 트랜잭션 내에서 존재 여부를 확인하고 INSERT한다.
+        //    - 과거에는 각 Alert 서비스에서 별도의 DB 쿼리로 중복 체크 후 호출했으나,
+        //      별도 트랜잭션에서 실행되어 race condition으로 중복 알림이 생성될 수 있었다.
+        //    - 이제는 이 메서드(@Transactional) 내에서 원자적으로 체크+INSERT하여 중복을 방지한다.
+        if (request.getReferenceType() != null && request.getReferenceId() != null) {
+            boolean alreadyExists = notificationMapper.existsNotificationByReference(
+                    userId, request.getReferenceType(), request.getReferenceId(),
+                    request.getNotificationType());
+            if (alreadyExists) {
+                log.info("알림 중복 - userId={}, referenceType={}, referenceId={}, notificationType={}",
+                        userId, request.getReferenceType(), request.getReferenceId(),
+                        request.getNotificationType());
+                return;
+            }
+        }
+
+        // 2. 사용자 알림 수신 설정 확인
         //    - 해당 카테고리의 알림 설정이 OFF면 알림을 생성하지 않고 종료
         if (!isNotificationEnabled(userId, request.getCategory())) {
             log.info("알림 수신 설정 OFF - userId={}, category={}, notificationType={}",
@@ -53,7 +69,7 @@ public class NotificationCreateServiceImpl implements NotificationCreateService 
             return;
         }
 
-        // 2. notification_templates 조회
+        // 3. notification_templates 조회
         //    - category + notification_type + is_active = 1 조건으로 활성 템플릿 조회
         NotificationTemplateVO template = notificationMapper.selectActiveTemplate(
                 request.getCategory().name(), request.getNotificationType());
@@ -64,12 +80,12 @@ public class NotificationCreateServiceImpl implements NotificationCreateService 
             throw new BusinessException(NotificationErrorCode.NOTIFICATION_TEMPLATE_NOT_FOUND);
         }
 
-        // 3. placeholder 치환
+        // 4. placeholder 치환
         //    - DB 템플릿의 {placeholder}를 실제 전달받은 값으로 치환
         String title = replacePlaceholders(template.getTitleTemplate(), request.getPlaceholders());
         String content = replacePlaceholders(template.getContentTemplate(), request.getPlaceholders());
 
-        // 4. notification_histories 저장
+        // 5. notification_histories 저장
         NotificationVO historyVO = new NotificationVO();
         historyVO.setCategory(request.getCategory().name());
         historyVO.setImportant(request.getImportant());
@@ -87,9 +103,10 @@ public class NotificationCreateServiceImpl implements NotificationCreateService 
 
     /**
      * 사용자 알림 수신 설정 확인
-     * - NotificationCategory Enum을 기반으로 해당 설정 필드의 값을 확인한다
+     * - NotificationCategory Enum의 settingsGetter를 사용하여 해당 설정 필드의 값을 확인한다
      * - 설정이 OFF(false)이면 false를 반환한다
      * - 설정이 없으면 기본값으로 true를 반환한다 (방어적 처리)
+     * - 새 카테고리가 추가되어도 이 메서드를 수정할 필요가 없다 (Enum에만 추가하면 됨)
      *
      * @param userId   사용자 ID
      * @param category 알림 카테고리 (NotificationCategory Enum)
@@ -104,22 +121,7 @@ public class NotificationCreateServiceImpl implements NotificationCreateService 
             return true;
         }
 
-        switch (category) {
-            case BUDGET_NOTIFY:
-                return Boolean.TRUE.equals(settings.getBudgetNotify());
-            case TRANSFER_NOTIFY:
-                return Boolean.TRUE.equals(settings.getTransferNotify());
-            case PAYMENT_NOTIFY:
-                return Boolean.TRUE.equals(settings.getPaymentNotify());
-            case WORKATION_NOTIFY:
-                return Boolean.TRUE.equals(settings.getWorkationNotify());
-            case SETTLEMENT_NOTIFY:
-                return Boolean.TRUE.equals(settings.getSettlementNotify());
-            case SCHEDULE_NOTIFY:
-                return Boolean.TRUE.equals(settings.getScheduleNotify());
-            default:
-                return true;
-        }
+        return category.isEnabled(settings);
     }
 
     /**

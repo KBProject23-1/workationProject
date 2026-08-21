@@ -17,6 +17,7 @@
             resultType="com.workit.domain.notification.vo.NotificationVO">
         SELECT id                AS notification_id,
                category,
+               notification_type AS notification_type,
                important,
                title,
                content,
@@ -200,5 +201,42 @@
              #{history.referenceId},
              0)
     </insert>
+
+    <!--
+        알림 중복 존재 여부 확인 - userId + referenceType + referenceId + notificationType 조건으로
+        기존 알림이 존재하는지 확인한다.
+        - 각 도메인 Alert 서비스에서 공통으로 사용하는 쿼리
+        - 알림 생성 트랜잭션 내에서 호출하여 중복 알림 생성을 방지한다
+    -->
+    <select id="existsNotificationByReference" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM notification_histories
+            WHERE user_id = #{userId}
+              AND reference_type = #{referenceType}
+              AND reference_id = #{referenceId}
+              AND notification_type = #{notificationType}
+        )
+    </select>
+
+    <!--
+        알림 중복 존재 여부 확인 (배치) - 여러 건의 reference에 대해 한 번에 중복 여부를 확인한다.
+        - ScheduleAlertScheduler 등에서 N+1 쿼리 방지용
+        - IN 절을 사용하여 userId + (referenceType, referenceId, notificationType) 조합으로 EXISTS 확인
+        - 결과는 이미 알림이 존재하는 (referenceType, referenceId, notificationType) 조합을 반환한다
+    -->
+    <select id="existsNotificationsByReferencesBatch"
+            resultType="com.workit.domain.notification.vo.NotificationDuplicateKeyVO">
+        SELECT reference_type AS referenceType,
+               reference_id   AS referenceId,
+               notification_type AS notificationType
+        FROM notification_histories
+        WHERE user_id = #{userId}
+          AND (reference_type, reference_id, notification_type) IN
+        <foreach collection="references" item="ref" open="(" separator="," close=")">
+            (#{ref.referenceType}, #{ref.referenceId}, #{ref.notificationType})
+        </foreach>
+        GROUP BY reference_type, reference_id, notification_type
+    </select>
 
 </mapper>

@@ -29,21 +29,4 @@
            AND s.scheduled_at &lt;= DATE_ADD(#{now}, INTERVAL 1 HOUR)
     </select>
 
-    <!--
-        일정 알림 중복 확인 - userId + referenceType + referenceId + notificationType 으로 기존 알림 존재 여부를 확인한다.
-        - 동일한 일정에 대해 중복 알림을 방지한다
-        - EXISTS 를 사용하여 일치하는 레코드가 있으면 true 를 반환한다
-        - user_id 조건을 포함하여 다른 사용자의 알림과 구분한다
-    -->
-    <select id="existsNotificationByReference" resultType="boolean">
-        SELECT EXISTS (
-            SELECT 1
-            FROM notification_histories
-            WHERE user_id = #{userId}
-              AND reference_type = #{referenceType}
-              AND reference_id = #{referenceId}
-              AND notification_type = #{notificationType}
-        )
-    </select>
-
 </mapper>

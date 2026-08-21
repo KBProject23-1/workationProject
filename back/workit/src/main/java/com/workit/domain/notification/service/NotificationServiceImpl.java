@@ -125,7 +125,7 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     @Transactional
-    public int markAllAsRead(Long userId) {
+    public void markAllAsRead(Long userId) {
 
         // 1. 전체 읽음 처리 — 현재 사용자의 읽지 않은 모든 알림을 읽음 상태로 변경
         //    - SQL에 user_id 조건이 포함되어 있으므로 다른 사용자의 알림은 변경되지 않는다
@@ -135,9 +135,6 @@ public class NotificationServiceImpl implements NotificationService {
         // 2. Audit 로그 — userId 만 기록 (변경된 행 수는 로그에 기록)
         log.info("전체 알림 읽음 처리 성공 - userId={}, updatedRows={}",
                 userId, updatedRows);
-
-        // 3. 정상 성공 반환 — affected_rows가 0이어도 예외를 발생시키지 않는다
-        return updatedRows;
     }
 
     @Override

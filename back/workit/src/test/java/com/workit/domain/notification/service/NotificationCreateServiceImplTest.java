@@ -99,6 +99,96 @@ class NotificationCreateServiceImplTest {
     }
 
     // ================================================================
+    // 0. 중복 알림 방지 테스트
+    // ================================================================
+
+    @Test
+    @DisplayName("동일 reference + notificationType이 이미 존재하면 알림 미생성")
+    void createNotification_duplicate_doesNotCreate() {
+        // Given
+        NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
+                .category(NotificationCategory.TRANSFER_NOTIFY)
+                .notificationType("WALLET_CHARGE_SUCCESS")
+                .important(true)
+                .referenceType("TRANSACTION")
+                .referenceId(1L)
+                .build();
+
+        when(notificationMapper.existsNotificationByReference(
+                TEST_USER_ID, "TRANSACTION", 1L, "WALLET_CHARGE_SUCCESS"))
+                .thenReturn(true); // 이미 알림 존재
+
+        // When
+        notificationCreateService.createNotification(TEST_USER_ID, request);
+
+        // Then - 중복으로 인해 알림 생성되지 않음
+        verify(notificationMapper, never()).selectNotificationSettings(any());
+        verify(notificationMapper, never()).insertNotificationHistory(any(), any());
+    }
+
+    @Test
+    @DisplayName("중복이 아니면 알림 정상 생성")
+    void createNotification_notDuplicate_createsNotification() {
+        // Given
+        NotificationSettingsVO settings = createAllOnSettings();
+        NotificationTemplateVO template = createTemplate(
+                "TRANSFER_NOTIFY", "WALLET_CHARGE_SUCCESS",
+                "지갑 충전 완료",
+                "{amount}원이 지갑에 충전되었습니다.");
+
+        NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
+                .category(NotificationCategory.TRANSFER_NOTIFY)
+                .notificationType("WALLET_CHARGE_SUCCESS")
+                .important(true)
+                .referenceType("TRANSACTION")
+                .referenceId(1L)
+                .build();
+
+        when(notificationMapper.existsNotificationByReference(
+                TEST_USER_ID, "TRANSACTION", 1L, "WALLET_CHARGE_SUCCESS"))
+                .thenReturn(false); // 중복 아님
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settings);
+        when(notificationMapper.selectActiveTemplate("TRANSFER_NOTIFY", "WALLET_CHARGE_SUCCESS"))
+                .thenReturn(template);
+        when(notificationMapper.insertNotificationHistory(eq(TEST_USER_ID), any(NotificationVO.class)))
+                .thenReturn(1);
+
+        // When
+        notificationCreateService.createNotification(TEST_USER_ID, request);
+
+        // Then - 알림 정상 생성됨
+        verify(notificationMapper).insertNotificationHistory(eq(TEST_USER_ID), any(NotificationVO.class));
+    }
+
+    @Test
+    @DisplayName("referenceType이 null이면 중복 체크 스킵하고 알림 생성")
+    void createNotification_nullReference_skipsDuplicateCheck() {
+        // Given
+        NotificationSettingsVO settings = createAllOnSettings();
+        NotificationTemplateVO template = createTemplate(
+                "BUDGET_NOTIFY", "WORK_FOOD_80_PERCENT",
+                "예산 알림",
+                "{usageRate}% 사용");
+
+        NotificationCreateRequestDTO request = createRequest(
+                NotificationCategory.BUDGET_NOTIFY, "WORK_FOOD_80_PERCENT", true, null);
+        // referenceType, referenceId는 null (기본값)
+
+        when(notificationMapper.selectNotificationSettings(TEST_USER_ID)).thenReturn(settings);
+        when(notificationMapper.selectActiveTemplate("BUDGET_NOTIFY", "WORK_FOOD_80_PERCENT"))
+                .thenReturn(template);
+        when(notificationMapper.insertNotificationHistory(eq(TEST_USER_ID), any(NotificationVO.class)))
+                .thenReturn(1);
+
+        // When
+        notificationCreateService.createNotification(TEST_USER_ID, request);
+
+        // Then - 중복 체크 쿼리가 호출되지 않고 바로 알림 생성
+        verify(notificationMapper, never()).existsNotificationByReference(any(), any(), any(), any());
+        verify(notificationMapper).insertNotificationHistory(eq(TEST_USER_ID), any(NotificationVO.class));
+    }
+
+    // ================================================================
     // 1. 템플릿 조회 테스트
     // ================================================================
 

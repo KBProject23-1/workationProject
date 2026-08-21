@@ -3,7 +3,6 @@ package com.workit.domain.workation.service;
 import com.workit.domain.notification.dto.request.NotificationCreateRequestDTO;
 import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.service.NotificationCreateService;
-import com.workit.domain.workation.mapper.WorkationAlertMapper;
 import com.workit.domain.workation.vo.WorkationVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +17,7 @@ import java.util.Map;
 // 워케이션 알림 판단 서비스 구현체
 // - 내일 시작/종료하는 워케이션에 대해 D-1 알림을 생성한다
 // - NotificationCreateService를 통해 알림을 생성하며, 워케이션 도메인에서 직접 INSERT하지 않는다
-// - 중복 알림 방지: notification_histories의 userId + referenceType + referenceId + notificationType을 활용한다
+// - 중복 알림 방지는 NotificationCreateServiceImpl.createNotification() 내부에서 원자적으로 처리한다
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -30,7 +29,6 @@ public class WorkationAlertServiceImpl implements WorkationAlertService {
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-    private final WorkationAlertMapper workationAlertMapper;
     private final NotificationCreateService notificationCreateService;
 
     @Override
@@ -40,7 +38,7 @@ public class WorkationAlertServiceImpl implements WorkationAlertService {
         }
 
         for (WorkationVO workation : workations) {
-            createAlertIfNeeded(workation, NOTIFICATION_TYPE_START, workation.getStartDate());
+            createAndSendAlert(workation, NOTIFICATION_TYPE_START, workation.getStartDate());
         }
     }
 
@@ -51,48 +49,34 @@ public class WorkationAlertServiceImpl implements WorkationAlertService {
         }
 
         for (WorkationVO workation : workations) {
-            createAlertIfNeeded(workation, NOTIFICATION_TYPE_END, workation.getEndDate());
+            createAndSendAlert(workation, NOTIFICATION_TYPE_END, workation.getEndDate());
         }
     }
 
     /**
-     * 알림 생성 여부를 판단하고, 필요시 NotificationCreateService를 통해 알림을 생성한다.
+     * 워케이션 알림을 생성하고 NotificationCreateService를 통해 전달한다.
+     * - 중복 알림 방지는 NotificationCreateServiceImpl 내부에서 처리한다.
      *
      * @param workation        워케이션 VO
      * @param notificationType 알림 타입 (시작/종료)
      * @param date             표시할 날짜 (시작일 또는 종료일)
      */
-    private void createAlertIfNeeded(WorkationVO workation, String notificationType, LocalDate date) {
-        Long userId = workation.getUserId();
-        Long workationId = workation.getId();
-
-        // 중복 알림 방지: 동일 워케이션 + 동일 notificationType에 대해 이미 알림이 있으면 생성하지 않는다
-        boolean alreadyExists = workationAlertMapper.existsNotificationByReference(
-                userId, REFERENCE_TYPE, workationId, notificationType);
-
-        if (alreadyExists) {
-            log.debug("워케이션 알림 중복 - workationId={}, notificationType={}", workationId, notificationType);
-            return;
-        }
-
-        // placeholder 구성
+    private void createAndSendAlert(WorkationVO workation, String notificationType, LocalDate date) {
         Map<String, Object> placeholders = new HashMap<>();
         placeholders.put("date", date.format(DATE_FORMATTER));
 
-        // 알림 생성 요청 구성
         NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
                 .category(NotificationCategory.WORKATION_NOTIFY)
                 .notificationType(notificationType)
                 .important(false)
                 .placeholders(placeholders)
                 .referenceType(REFERENCE_TYPE)
-                .referenceId(workationId)
+                .referenceId(workation.getId())
                 .build();
 
-        // 공통 알림 생성 서비스 호출
-        notificationCreateService.createNotification(userId, request);
+        notificationCreateService.createNotification(workation.getUserId(), request);
 
         log.info("워케이션 알림 생성 - userId={}, workationId={}, notificationType={}, date={}",
-                userId, workationId, notificationType, date.format(DATE_FORMATTER));
+                workation.getUserId(), workation.getId(), notificationType, date.format(DATE_FORMATTER));
     }
 }

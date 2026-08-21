@@ -1,6 +1,7 @@
 package com.workit.domain.notification.mapper;
 
 import com.workit.domain.notification.enums.NotificationCategory;
+import com.workit.domain.notification.vo.NotificationDuplicateKeyVO;
 import com.workit.domain.notification.vo.NotificationSettingsVO;
 import com.workit.domain.notification.vo.NotificationTemplateVO;
 import com.workit.domain.notification.vo.NotificationVO;
@@ -136,4 +137,34 @@ public interface NotificationMapper {
      */
     int insertNotificationHistory(@Param("userId") Long userId,
                                   @Param("history") NotificationVO historyVO);
+
+    /**
+     * 알림 중복 존재 여부 확인 - userId + referenceType + referenceId + notificationType 조건으로
+     * notification_histories에 기존 알림이 존재하는지 확인한다.
+     * - 각 도메인 Alert 서비스에서 공통으로 사용하는 쿼리
+     * - 알림 생성 트랜잭션 내에서 호출하여 중복 알림 생성을 방지한다
+     *
+     * @param userId           사용자 ID
+     * @param referenceType    참조 타입 (예: "TRANSACTION", "WORKATION", "BUDGET")
+     * @param referenceId      참조 ID
+     * @param notificationType 알림 타입 (예: "WALLET_CHARGE_SUCCESS")
+     * @return 알림 존재 여부 (true: 이미 알림 있음, false: 알림 없음)
+     */
+    boolean existsNotificationByReference(@Param("userId") Long userId,
+                                           @Param("referenceType") String referenceType,
+                                           @Param("referenceId") Long referenceId,
+                                           @Param("notificationType") String notificationType);
+
+    /**
+     * 알림 중복 존재 여부 확인 (배치) - 여러 건의 reference에 대해 한 번에 중복 여부를 확인한다.
+     * - ScheduleAlertScheduler 등에서 N+1 쿼리 방지용
+     * - IN 절을 사용하여 userId + (referenceType, referenceId, notificationType) 조합으로 EXISTS 확인
+     *
+     * @param userId    사용자 ID
+     * @param references 중복 체크할 (referenceType, referenceId, notificationType) 목록
+     * @return 이미 알림이 존재하는 (referenceType, referenceId, notificationType) 조합 목록
+     */
+    List<NotificationDuplicateKeyVO> existsNotificationsByReferencesBatch(
+            @Param("userId") Long userId,
+            @Param("references") List<NotificationDuplicateKeyVO> references);
 }

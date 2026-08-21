@@ -5,7 +5,6 @@ import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.service.NotificationCreateService;
 import com.workit.domain.wallet.dto.response.ChargeResponse;
 import com.workit.domain.wallet.dto.response.RefundResponse;
-import com.workit.domain.wallet.mapper.TransferAlertMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,7 +17,7 @@ import java.util.Map;
 // - 지갑 충전 완료 시 WALLET_CHARGE_SUCCESS 알림을 생성한다
 // - 계좌 환불 완료 시 ACCOUNT_REFUND_SUCCESS 알림을 생성한다
 // - NotificationCreateService를 통해 알림을 생성하며, 입출금 도메인에서 직접 notification_histories에 INSERT하지 않는다
-// - 중복 알림 방지: notification_histories의 userId + referenceType + referenceId + notificationType을 활용한다
+// - 중복 알림 방지는 NotificationCreateServiceImpl.createNotification() 내부에서 원자적으로 처리한다
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -28,7 +27,6 @@ public class TransferAlertServiceImpl implements TransferAlertService {
     private static final String NOTIFICATION_TYPE_CHARGE_SUCCESS = "WALLET_CHARGE_SUCCESS";
     private static final String NOTIFICATION_TYPE_REFUND_SUCCESS = "ACCOUNT_REFUND_SUCCESS";
 
-    private final TransferAlertMapper transferAlertMapper;
     private final NotificationCreateService notificationCreateService;
 
     @Override
@@ -38,36 +36,7 @@ public class TransferAlertServiceImpl implements TransferAlertService {
             return;
         }
 
-        Long transactionId = response.getTransactionId();
-
-        // 중복 알림 방지: 동일 거래 + 동일 notificationType에 대해 이미 알림이 있으면 생성하지 않는다
-        boolean alreadyExists = transferAlertMapper.existsNotificationByReference(
-                userId, REFERENCE_TYPE, transactionId, NOTIFICATION_TYPE_CHARGE_SUCCESS);
-
-        if (alreadyExists) {
-            log.debug("충전 성공 알림 중복 - transactionId={}", transactionId);
-            return;
-        }
-
-        // placeholder 구성 — DB 템플릿의 {amount}를 실제 충전 금액으로 치환
-        Map<String, Object> placeholders = new HashMap<>();
-        placeholders.put("amount", response.getChargedAmount());
-
-        // 알림 생성 요청 구성
-        NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
-                .category(NotificationCategory.TRANSFER_NOTIFY)
-                .notificationType(NOTIFICATION_TYPE_CHARGE_SUCCESS)
-                .important(true)
-                .placeholders(placeholders)
-                .referenceType(REFERENCE_TYPE)
-                .referenceId(transactionId)
-                .build();
-
-        // 공통 알림 생성 서비스 호출
-        notificationCreateService.createNotification(userId, request);
-
-        log.info("충전 성공 알림 생성 - userId={}, transactionId={}, amount={}",
-                userId, transactionId, response.getChargedAmount());
+        doNotifyChargeSuccess(userId, response.getTransactionId(), response.getChargedAmount());
     }
 
     @Override
@@ -77,34 +46,7 @@ public class TransferAlertServiceImpl implements TransferAlertService {
             return;
         }
 
-        // 중복 알림 방지: 동일 거래 + 동일 notificationType에 대해 이미 알림이 있으면 생성하지 않는다
-        boolean alreadyExists = transferAlertMapper.existsNotificationByReference(
-                userId, REFERENCE_TYPE, transactionId, NOTIFICATION_TYPE_CHARGE_SUCCESS);
-
-        if (alreadyExists) {
-            log.debug("자동 충전 성공 알림 중복 - transactionId={}", transactionId);
-            return;
-        }
-
-        // placeholder 구성 — DB 템플릿의 {amount}를 실제 충전 금액으로 치환
-        Map<String, Object> placeholders = new HashMap<>();
-        placeholders.put("amount", chargedAmount);
-
-        // 알림 생성 요청 구성
-        NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
-                .category(NotificationCategory.TRANSFER_NOTIFY)
-                .notificationType(NOTIFICATION_TYPE_CHARGE_SUCCESS)
-                .important(true)
-                .placeholders(placeholders)
-                .referenceType(REFERENCE_TYPE)
-                .referenceId(transactionId)
-                .build();
-
-        // 공통 알림 생성 서비스 호출
-        notificationCreateService.createNotification(userId, request);
-
-        log.info("자동 충전 성공 알림 생성 - userId={}, transactionId={}, amount={}",
-                userId, transactionId, chargedAmount);
+        doNotifyChargeSuccess(userId, transactionId, chargedAmount);
     }
 
     @Override
@@ -116,20 +58,10 @@ public class TransferAlertServiceImpl implements TransferAlertService {
 
         Long transactionId = response.getTransactionId();
 
-        // 중복 알림 방지: 동일 거래 + 동일 notificationType에 대해 이미 알림이 있으면 생성하지 않는다
-        boolean alreadyExists = transferAlertMapper.existsNotificationByReference(
-                userId, REFERENCE_TYPE, transactionId, NOTIFICATION_TYPE_REFUND_SUCCESS);
-
-        if (alreadyExists) {
-            log.debug("환불 완료 알림 중복 - transactionId={}", transactionId);
-            return;
-        }
-
         // placeholder 구성 — DB 템플릿의 {amount}를 실제 환불 금액으로 치환
         Map<String, Object> placeholders = new HashMap<>();
         placeholders.put("amount", response.getRefundedAmount());
 
-        // 알림 생성 요청 구성
         NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
                 .category(NotificationCategory.TRANSFER_NOTIFY)
                 .notificationType(NOTIFICATION_TYPE_REFUND_SUCCESS)
@@ -139,10 +71,32 @@ public class TransferAlertServiceImpl implements TransferAlertService {
                 .referenceId(transactionId)
                 .build();
 
-        // 공통 알림 생성 서비스 호출
         notificationCreateService.createNotification(userId, request);
 
         log.info("환불 완료 알림 생성 - userId={}, transactionId={}, amount={}",
                 userId, transactionId, response.getRefundedAmount());
+    }
+
+    /**
+     * 충전 성공 알림 생성 공통 로직 (수동 충전 + 자동 충전 공용)
+     * - 중복 알림 방지는 NotificationCreateServiceImpl 내부에서 처리한다
+     */
+    private void doNotifyChargeSuccess(Long userId, Long transactionId, BigDecimal amount) {
+        Map<String, Object> placeholders = new HashMap<>();
+        placeholders.put("amount", amount);
+
+        NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
+                .category(NotificationCategory.TRANSFER_NOTIFY)
+                .notificationType(NOTIFICATION_TYPE_CHARGE_SUCCESS)
+                .important(true)
+                .placeholders(placeholders)
+                .referenceType(REFERENCE_TYPE)
+                .referenceId(transactionId)
+                .build();
+
+        notificationCreateService.createNotification(userId, request);
+
+        log.info("충전 성공 알림 생성 - userId={}, transactionId={}, amount={}",
+                userId, transactionId, amount);
     }
 }
