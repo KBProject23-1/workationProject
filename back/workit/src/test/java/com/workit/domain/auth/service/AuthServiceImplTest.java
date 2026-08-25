@@ -360,7 +360,7 @@ class AuthServiceImplTest {
         UserVO user = new UserVO();
         user.setId(501L);
         user.setStatus("ACTIVE");
-        user.setEmailEncrypt(PersonalDataCipher.encrypt("user1234@example.com"));
+        user.setEmailEncrypted(PersonalDataCipher.encrypt("user1234@example.com"));
         user.setCreatedAt(LocalDateTime.of(2026, 7, 24, 10, 30, 0));
         when(authMapper.selectUserByCiHash(CI_HASH_1234567890)).thenReturn(user);
 
@@ -426,7 +426,7 @@ class AuthServiceImplTest {
         UserVO withdrawn = new UserVO();
         withdrawn.setId(501L);
         withdrawn.setStatus("WITHDRAWN");
-        withdrawn.setEmailEncrypt(PersonalDataCipher.encrypt("user1234@example.com"));
+        withdrawn.setEmailEncrypted(PersonalDataCipher.encrypt("user1234@example.com"));
         withdrawn.setCreatedAt(LocalDateTime.of(2026, 7, 24, 10, 30, 0));
         when(authMapper.selectUserByCiHash(CI_HASH_1234567890)).thenReturn(withdrawn);
 
@@ -682,12 +682,12 @@ class AuthServiceImplTest {
         assertEquals("ACTIVE", user.getStatus());
         // email_hash / email_encrypt
         assertEquals(EMAIL_HASH_TEST, user.getEmailHash());
-        assertEquals("test@example.com", PersonalDataCipher.decrypt(user.getEmailEncrypt()));
+        assertEquals("test@example.com", PersonalDataCipher.decrypt(user.getEmailEncrypted()));
         // name_encrypt
-        assertEquals("홍길동", PersonalDataCipher.decrypt(user.getNameEncrypt()));
+        assertEquals("홍길동", PersonalDataCipher.decrypt(user.getNameEncrypted()));
         // phone_number_hash / phone_number_encrypt
         assertEquals(PHONE_HASH, user.getPhoneNumberHash());
-        assertEquals(MOCK_PHONE_NUMBER, PersonalDataCipher.decrypt(user.getPhoneNumberEncrypt()));
+        assertEquals(MOCK_PHONE_NUMBER, PersonalDataCipher.decrypt(user.getPhoneNumberEncrypted()));
 
         // user_auth insert 검증
         ArgumentCaptor<UserAuthVO> userAuthCaptor = ArgumentCaptor.forClass(UserAuthVO.class);
@@ -977,7 +977,7 @@ class AuthServiceImplTest {
         verify(authMapper).insertUser(userCaptor.capture());
         assertEquals(EMAIL_HASH_TEST, userCaptor.getValue().getEmailHash());
         assertEquals("test@example.com",
-                PersonalDataCipher.decrypt(userCaptor.getValue().getEmailEncrypt()));
+                PersonalDataCipher.decrypt(userCaptor.getValue().getEmailEncrypted()));
     }
 
     @Test
@@ -998,7 +998,7 @@ class AuthServiceImplTest {
         verify(authMapper).insertUser(userCaptor.capture());
         UserVO user = userCaptor.getValue();
         // 원문은 AES 암호화 저장 — 복호화 시 입력값과 동일
-        assertEquals(maxLengthEmail, PersonalDataCipher.decrypt(user.getEmailEncrypt()));
+        assertEquals(maxLengthEmail, PersonalDataCipher.decrypt(user.getEmailEncrypted()));
         // email_hash 는 SHA-256 hex (64자)
         assertEquals(64, user.getEmailHash().length());
         // 전자지갑 생성까지 정상
@@ -1076,7 +1076,7 @@ class AuthServiceImplTest {
         LoginUserVO user = new LoginUserVO();
         user.setId(userId);
         user.setStatus(status);
-        user.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
+        user.setNameEncrypted(PersonalDataCipher.encrypt("홍길동"));
         user.setPasswordHash(PasswordEncryptor.encode(password));
         user.setPinHash(PasswordEncryptor.encode(pin));
         lenient().when(authMapper.findUserByEmailHash(sha256(email))).thenReturn(user);
@@ -1770,7 +1770,7 @@ class AuthServiceImplTest {
         user.setId(userId);
         user.setStatus(status);
         user.setNameHash(sha256("홍길동"));
-        user.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
+        user.setNameEncrypted(PersonalDataCipher.encrypt("홍길동"));
         user.setPasswordHash(PasswordEncryptor.encode("password123!"));
         user.setIdentityCiHash(identityCiHash);
         lenient().when(authMapper.findUserByEmailHash(sha256(email))).thenReturn(user);
@@ -1910,7 +1910,7 @@ class AuthServiceImplTest {
         LoginUserVO user = new LoginUserVO();
         user.setId(501L);
         user.setStatus("ACTIVE");
-        user.setNameEncrypt(PersonalDataCipher.encrypt("김철수")); // 가입 시 등록 이름 = "김철수"
+        user.setNameEncrypted(PersonalDataCipher.encrypt("김철수")); // 가입 시 등록 이름 = "김철수"
         user.setPasswordHash(PasswordEncryptor.encode("password123!"));
         user.setIdentityCiHash(sha256("MOCK-CI-imp_ver_9876543210"));
         // 이메일 loginId 로 요청하므로 email_hash 조회 경로만 Stub 한다
@@ -2328,7 +2328,7 @@ class AuthServiceImplTest {
         LoginUserVO updated = new LoginUserVO();
         updated.setId(501L);
         updated.setStatus("ACTIVE");
-        updated.setNameEncrypt(PersonalDataCipher.encrypt("홍길동"));
+        updated.setNameEncrypted(PersonalDataCipher.encrypt("홍길동"));
         updated.setPasswordHash(hashCaptor.getValue());
         lenient().when(authMapper.findUserByEmailHash(sha256("user@example.com"))).thenReturn(updated);
 

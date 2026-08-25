@@ -23,16 +23,16 @@ public class MyProfileVO {
     private String status;
 
     /** 이메일 AES-256 암호화본 (응답은 Service 에서 복호화) */
-    private String emailEncrypt;
+    private String emailEncrypted;
 
     /** 이름 SHA-256 해시 (검색/대조용) */
     private String nameHash;
 
     /** 이름 AES-256 암호화본 (응답은 Service 에서 복호화) */
-    private String nameEncrypt;
+    private String nameEncrypted;
 
     /** 휴대폰 번호 AES-256 암호화본 (응답은 Service 에서 복호화) */
-    private String phoneNumberEncrypt;
+    private String phoneNumberEncrypted;
 
     /** 닉네임 (user_profile.nickname — 프로필 미등록 시 null) */
     private String nickname;

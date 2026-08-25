@@ -34,7 +34,7 @@ public class LoginUserVO {
     private String nameHash;
 
     /** 이름 AES-256 암호화본 (응답 name 은 Service 에서 복호화) */
-    private String nameEncrypt;
+    private String nameEncrypted;
 
     /** 비밀번호 BCrypt 해시 (PASSWORD 로그인 검증용) */
     private String passwordHash;

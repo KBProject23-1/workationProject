@@ -120,10 +120,10 @@ class UserServiceImplTest {
         MyProfileVO vo = new MyProfileVO();
         vo.setUserId(501L);
         vo.setStatus("ACTIVE");
-        vo.setEmailEncrypt(PersonalDataCipher.encrypt(EMAIL));
+        vo.setEmailEncrypted(PersonalDataCipher.encrypt(EMAIL));
         vo.setNameHash(sha256Hex(NAME));
-        vo.setNameEncrypt(PersonalDataCipher.encrypt(NAME));
-        vo.setPhoneNumberEncrypt(PersonalDataCipher.encrypt(PHONE_NUMBER));
+        vo.setNameEncrypted(PersonalDataCipher.encrypt(NAME));
+        vo.setPhoneNumberEncrypted(PersonalDataCipher.encrypt(PHONE_NUMBER));
         return vo;
     }
 

@@ -93,9 +93,9 @@ public class UserServiceImpl implements UserService {
         // 2. 개인정보 복호화 — Service Layer 에서만 수행 (Controller/Mapper 금지 — knowledge.md)
         //    - email: 회원가입 시 입력한 로그인 ID
         //    - name/phoneNumber: PASS 본인인증으로 저장된 실명/휴대폰 번호
-        String email = PersonalDataCipher.decrypt(profile.getEmailEncrypt());
-        String name = PersonalDataCipher.decrypt(profile.getNameEncrypt());
-        String phoneNumber = PersonalDataCipher.decrypt(profile.getPhoneNumberEncrypt());
+        String email = PersonalDataCipher.decrypt(profile.getEmailEncrypted());
+        String name = PersonalDataCipher.decrypt(profile.getNameEncrypted());
+        String phoneNumber = PersonalDataCipher.decrypt(profile.getPhoneNumberEncrypted());
 
         // 3. 응답 생성 — nickname/companyName 은 프로필 미등록 시 null (docs: 최초 등록 전 null 가능)
         //    - 개인정보 원문(복호화 값) 로그 출력 금지 (knowledge.md)
@@ -315,7 +315,7 @@ public class UserServiceImpl implements UserService {
 
         // 6. 현재 휴대폰 번호와 동일한지 확인 — 동일 번호로 변경 불가 (docs: 정책에 따라 실패 처리)
         //    - AUTH_SAME_PASSWORD(400)/SAME_AS_CURRENT_PIN(400) 과 동일 패턴
-        String currentPhoneNumber = PersonalDataCipher.decrypt(user.getPhoneNumberEncrypt());
+        String currentPhoneNumber = PersonalDataCipher.decrypt(user.getPhoneNumberEncrypted());
         if (verifiedPhoneNumber.equals(currentPhoneNumber)) {
             throw new BusinessException(UserErrorCode.PHONE_SAME_AS_CURRENT);
         }
@@ -391,7 +391,7 @@ public class UserServiceImpl implements UserService {
         // 3. 현재 사용자의 이메일과 동일한지 확인 (docs: 현재 이메일과 동일한 이메일 → 400)
         //    - 회원가입 시 소문자+trim 정규화되어 저장되므로 정규화 값과 직접 비교 가능
         //    - 동일 이메일 → EMAIL_SAME_AS_CURRENT(400) (휴대폰 변경의 PHONE_SAME_AS_CURRENT 와 동일 패턴)
-        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypt());
+        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypted());
         if (normalizedEmail.equals(currentEmail)) {
             throw new BusinessException(UserErrorCode.EMAIL_SAME_AS_CURRENT);
         }
@@ -517,7 +517,7 @@ public class UserServiceImpl implements UserService {
         // 3. 인증 완료된 이메일이 현재 이메일과 동일한지 확인 — 동일 이메일로 변경 불가 (docs)
         //    - 회원가입 시 소문자+trim 정규화되어 저장되므로 정규화된 인증 이메일과 직접 비교 가능
         //    - 동일 이메일 → EMAIL_SAME_AS_CURRENT(400) (변경할 이메일이 없음 — docs)
-        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypt());
+        String currentEmail = PersonalDataCipher.decrypt(user.getEmailEncrypted());
         if (verifiedEmail.equals(currentEmail)) {
             throw new BusinessException(UserErrorCode.EMAIL_SAME_AS_CURRENT);
         }

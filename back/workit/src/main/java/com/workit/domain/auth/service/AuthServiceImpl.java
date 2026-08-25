@@ -311,11 +311,11 @@ public class AuthServiceImpl implements AuthService {
         // - phone_hash 는 SHA-256 계산 — users.phone_number_hash (UNIQUE)
         UserVO user = new UserVO();
         user.setEmailHash(emailHash);
-        user.setEmailEncrypt(PersonalDataCipher.encrypt(normalizedEmail));
+        user.setEmailEncrypted(PersonalDataCipher.encrypt(normalizedEmail));
         user.setNameHash(sha256Hex(verificationResult.getName()));
-        user.setNameEncrypt(PersonalDataCipher.encrypt(verificationResult.getName()));
+        user.setNameEncrypted(PersonalDataCipher.encrypt(verificationResult.getName()));
         user.setPhoneNumberHash(sha256Hex(verificationResult.getPhoneNumber()));
-        user.setPhoneNumberEncrypt(PersonalDataCipher.encrypt(verificationResult.getPhoneNumber()));
+        user.setPhoneNumberEncrypted(PersonalDataCipher.encrypt(verificationResult.getPhoneNumber()));
         user.setStatus(USER_STATUS_ACTIVE);
         authMapper.insertUser(user);
 
@@ -421,7 +421,7 @@ public class AuthServiceImpl implements AuthService {
         //      (기기 최초 로그인 → true → 프론트에서 PIN 등록 화면 유도. PIN 로그인은 등록 기기에서만 성공하므로 항상 false)
         boolean pinSetupRequired = (loginType == LoginType.PASSWORD && !isBlank(request.getDeviceId()))
                 && authMapper.countByUserIdAndDeviceId(loginUser.getId(), request.getDeviceId()) == 0;
-        LoginResponseDTO response = createLoginResponse(loginUser.getId(), loginUser.getNameEncrypt(), pinSetupRequired);
+        LoginResponseDTO response = createLoginResponse(loginUser.getId(), loginUser.getNameEncrypted(), pinSetupRequired);
 
         // 5. Refresh Token Redis 저장 (knowledge.md Refresh Token Security)
         //    - 원문이 아닌 SHA-256 hash 저장 — key: refresh:token:{userId}, TTL: refresh 만료와 동일
@@ -584,7 +584,7 @@ public class AuthServiceImpl implements AuthService {
 
         // 4. 이메일 복호화 → 마스킹 (Service Layer 에서만 복호화 — Controller/Mapper 금지)
         //    - 원문 이메일은 응답에 포함하지 않고 마스킹본만 반환 (docs: 개인정보 보호)
-        String maskedEmail = EmailMasker.mask(PersonalDataCipher.decrypt(user.getEmailEncrypt()));
+        String maskedEmail = EmailMasker.mask(PersonalDataCipher.decrypt(user.getEmailEncrypted()));
 
         // 5. 가입일 yyyy-MM-dd 포맷 (docs 응답 예시: "2026-07-24")
         //    - created_at 은 NOT NULL(DEFAULT CURRENT_TIMESTAMP) 이므로 직접 포맷

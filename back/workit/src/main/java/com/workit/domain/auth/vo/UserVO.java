@@ -27,19 +27,19 @@ public class UserVO {
     private String emailHash;
 
     /** 이메일 AES-256 암호화본 */
-    private String emailEncrypt;
+    private String emailEncrypted;
 
     /** 이름 SHA-256 해시 (검색용) */
     private String nameHash;
 
     /** 이름 AES-256 암호화본 */
-    private String nameEncrypt;
+    private String nameEncrypted;
 
     /** 휴대폰 번호 SHA-256 해시 (UNIQUE) */
     private String phoneNumberHash;
 
     /** 휴대폰 번호 AES-256 암호화본 */
-    private String phoneNumberEncrypt;
+    private String phoneNumberEncrypted;
 
     /** 회원 상태 (ACTIVE, PENDING, BLOCKED, WITHDRAWN) */
     private String status;
