@@ -9,7 +9,7 @@ import lombok.ToString;
 //
 // 처리 규칙:
 // - name/phoneNumber 는 Request Body 에서 받지 않는다 — 회원가입 시 PASS 본인인증으로
-//   DB 에 이미 저장된 값(users.name_encrypt/phone_number_encrypt)을 그대로 사용한다
+//   DB 에 이미 저장된 값(users.name_encrypted/phone_number_encrypted)을 그대로 사용한다
 // - nickname: 필수 (user_profile.nickname VARCHAR(50) UNIQUE)
 // - companyName: 선택 (user_profile.company_name VARCHAR(100))
 //

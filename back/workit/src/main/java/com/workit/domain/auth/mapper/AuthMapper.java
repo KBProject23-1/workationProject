@@ -43,7 +43,7 @@ public interface AuthMapper {
     /**
      * 아이디 찾기 - CI(SHA-256 해시) 기준 가입 회원 조회
      * - user_auth.identity_ci_hash (UNIQUE) + users JOIN
-     * - email_encrypt 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
+     * - email_encrypted 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
      *   (원문 컬럼은 존재하지 않으며, CI 원문으로 조회하지 않는다 — knowledge.md)
      * - status 도 함께 조회 — 탈퇴/차단 등 비활성 회원 여부는 Service 에서 판단 (Mapper 비즈니스 로직 금지)
      *
@@ -55,7 +55,7 @@ public interface AuthMapper {
      * 이메일(SHA-256 해시) 기준 중복 가입 조회
      * - users.email_hash (UNIQUE) 대상
      * - 반환값이 0 초과면 이미 가입된 회원 → 사용 불가 이메일
-     * - email_encrypt(원문 복호화)는 조회하지 않고 hash 만 사용 (보안 정책)
+     * - email_encrypted(원문 복호화)는 조회하지 않고 hash 만 사용 (보안 정책)
      */
     int countByEmailHash(String emailHash);
 
@@ -91,7 +91,7 @@ public interface AuthMapper {
     /**
      * PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회
      * - users.email_hash(UNIQUE) + user_auth JOIN (password_hash/identity_ci_hash 포함)
-     * - email_encrypt(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
+     * - email_encrypted(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
      * - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회한다
      *
      * @return 매칭되는 회원이 없으면 null
@@ -101,7 +101,7 @@ public interface AuthMapper {
     /**
      * PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회
      * - users.phone_number_hash(UNIQUE) + user_auth JOIN (password_hash/identity_ci_hash 포함)
-     * - phone_number_encrypt(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
+     * - phone_number_encrypted(원문)은 조회하지 않는다 (knowledge.md: 검색용 hash 저장, 원문 조회 금지)
      * - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회한다
      *
      * @return 매칭되는 회원이 없으면 null
@@ -120,7 +120,7 @@ public interface AuthMapper {
     /**
      * Refresh Token 재발급 - userId(PK) 기준 회원 상태 조회
      * - 재발급 시 회원 존재 여부와 ACTIVE 상태를 검증하기 위한 조회
-     * - name_encrypt 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+     * - name_encrypted 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
      *
      * @return 해당 회원이 없으면 null
      */

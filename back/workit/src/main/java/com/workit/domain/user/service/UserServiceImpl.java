@@ -321,7 +321,7 @@ public class UserServiceImpl implements UserService {
         }
 
         // 7. 다른 사용자 등록 여부 확인 — users.phone_number_hash (UNIQUE)
-        //    - 개인정보 원문(phone_number_encrypt)이 아닌 SHA-256 hash 로만 조회한다
+        //    - 개인정보 원문(phone_number_encrypted)이 아닌 SHA-256 hash 로만 조회한다
         //      (knowledge.md: 검색용 개인정보는 hash — AuthMapper.findUserByPhoneHash 와 동일 원칙)
         //    - 사용 중인 번호 → PHONE_ALREADY_IN_USE(409)
         String newPhoneHash = sha256Hex(verifiedPhoneNumber);
@@ -397,7 +397,7 @@ public class UserServiceImpl implements UserService {
         }
 
         // 4. 다른 사용자가 이미 사용 중인 이메일인지 확인 — users.email_hash (UNIQUE)
-        //    - 개인정보 원문(email_encrypt)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
+        //    - 개인정보 원문(email_encrypted)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
         //    - 사용 중인 이메일 → EMAIL_ALREADY_IN_USE(409) (PHONE_ALREADY_IN_USE 와 동일 패턴)
         String emailHash = sha256Hex(normalizedEmail);
         if (userMapper.countByEmailHashExcludingUserId(emailHash, userId) > 0) {
@@ -523,7 +523,7 @@ public class UserServiceImpl implements UserService {
         }
 
         // 4. 다른 사용자가 이미 사용 중인 이메일인지 확인 — users.email_hash (UNIQUE)
-        //    - 개인정보 원문(email_encrypt)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
+        //    - 개인정보 원문(email_encrypted)이 아닌 SHA-256 hash 로만 조회한다 (knowledge.md: 검색용 hash)
         //    - 사용 중인 이메일 → EMAIL_ALREADY_IN_USE(409) (PHONE_ALREADY_IN_USE 와 동일 패턴)
         String emailHash = sha256Hex(verifiedEmail);
         if (userMapper.countByEmailHashExcludingUserId(emailHash, userId) > 0) {
@@ -723,7 +723,7 @@ public class UserServiceImpl implements UserService {
 
     /**
      * SHA-256 hex 변환 — 검색용 개인정보 hash 생성 (휴대폰 번호 중복 조회용)
-     * - 개인정보 원문(phone_number_encrypt) 조회 금지 — hash 로만 검색한다 (knowledge.md)
+     * - 개인정보 원문(phone_number_encrypted) 조회 금지 — hash 로만 검색한다 (knowledge.md)
      * - AuthServiceImpl.sha256Hex 와 동일한 hex 인코딩 (MockPassServiceImpl 과 동일 패턴)
      */
     private static String sha256Hex(String value) {

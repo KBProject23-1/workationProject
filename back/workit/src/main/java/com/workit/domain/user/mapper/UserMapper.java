@@ -13,7 +13,7 @@ public interface UserMapper {
     /**
      * 내 프로필 조회 - 로그인 사용자 기본 정보 + 프로필 정보 함께 조회
      * - users + user_profile LEFT JOIN (프로필 미등록 회원은 nickname/companyName 이 null)
-     * - email_encrypt/name_encrypt/phone_number_encrypt 는 AES 암호화본이므로 SELECT 가능 —
+     * - email_encrypted/name_encrypted/phone_number_encrypted 는 AES 암호화본이므로 SELECT 가능 —
      *   복호화는 Service Layer 에서만 수행 (knowledge.md)
      * - status 도 함께 조회 — 탈퇴/차단 등 비활성 회원 여부는 Service 에서 판단 (Mapper 비즈니스 로직 금지)
      *
@@ -72,7 +72,7 @@ public interface UserMapper {
      * 휴대폰 번호 변경 - 휴대폰 번호(SHA-256 hash) 중복 조회 (자기 자신 제외)
      * - users.phone_number_hash (UNIQUE) 대상
      * - PASS 인증된 휴대폰 번호가 다른 사용자에게 이미 등록되어 있는지 확인
-     *   (개인정보 원문(phone_number_encrypt)은 조회하지 않는다 — knowledge.md: 검색용 hash)
+     *   (개인정보 원문(phone_number_encrypted)은 조회하지 않는다 — knowledge.md: 검색용 hash)
      * - 반환값이 0 초과면 다른 사용자가 사용 중인 번호 (PHONE_ALREADY_IN_USE 판단은 Service)
      *
      * @param phoneHash 변경할 휴대폰 번호의 SHA-256 hash (Service Layer 에서 생성)
@@ -82,7 +82,7 @@ public interface UserMapper {
 
     /**
      * 휴대폰 번호 변경 - users 휴대폰 번호 갱신 (AES 암호화본 + 검색용 SHA-256 hash)
-     * - phone_number_encrypt: AES-256 암호화본 (Service Layer 에서 암호화 후 전달 — Mapper 에서 암호화 금지)
+     * - phone_number_encrypted: AES-256 암호화본 (Service Layer 에서 암호화 후 전달 — Mapper 에서 암호화 금지)
      * - phone_number_hash: SHA-256 해시 (knowledge.md: 검색용 개인정보는 hash)
      * - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴(Race Condition) 시 0 row 반환
      *   (USER_ALREADY_WITHDRAWN 최종 방어선 — updateUserStatusToWithdrawn 과 동일 패턴)
@@ -100,7 +100,7 @@ public interface UserMapper {
      * 이메일 인증번호 발송 - 이메일(SHA-256 hash) 중복 조회 (자기 자신 제외)
      * - users.email_hash (UNIQUE) 대상
      * - 인증번호를 받을 이메일이 다른 사용자에게 이미 등록되어 있는지 확인
-     *   (개인정보 원문(email_encrypt)은 조회하지 않는다 — knowledge.md: 검색용 hash,
+     *   (개인정보 원문(email_encrypted)은 조회하지 않는다 — knowledge.md: 검색용 hash,
      *    AuthMapper.countByEmailHash 와 동일 원칙)
      * - 반환값이 0 초과면 다른 사용자가 사용 중인 이메일 (EMAIL_ALREADY_IN_USE 판단은 Service)
      *
@@ -111,7 +111,7 @@ public interface UserMapper {
 
     /**
      * 이메일 변경 - users 이메일 갱신 (AES 암호화본 + 검색용 SHA-256 hash)
-     * - email_encrypt: AES-256 암호화본 (Service Layer 에서 암호화 후 전달 — Mapper 에서 암호화 금지)
+     * - email_encrypted: AES-256 암호화본 (Service Layer 에서 암호화 후 전달 — Mapper 에서 암호화 금지)
      * - email_hash: SHA-256 해시 (knowledge.md: 검색용 개인정보는 hash)
      * - WHERE status != 'WITHDRAWN' — 조회-갱신 사이 동시 탈퇴(Race Condition) 시 0 row 반환
      *   (USER_ALREADY_WITHDRAWN 최종 방어선 — updateUserPhoneNumber 과 동일 패턴)

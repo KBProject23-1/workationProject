@@ -7,13 +7,13 @@ import lombok.ToString;
 import java.time.LocalDateTime;
 
 // users 테이블 매핑 VO (회원가입 완료 시 insert 용도)
-// ERD 기준 컬럼: id, email_hash, email_encrypt, name_hash, name_encrypt, phone_number_hash,
-//                phone_number_encrypt, status, created_at, email_changed_at,
+// ERD 기준 컬럼: id, email_hash, email_encrypted, name_hash, name_encrypted, phone_number_hash,
+//                phone_number_encrypted, status, created_at, email_changed_at,
 //                phone_number_changed_at, deleted_at
 //
 // 개인정보 처리 규칙 (knowledge.md):
 // - email_hash / name_hash / phone_number_hash : SHA-256 해시 (검색용)
-// - email_encrypt / name_encrypt / phone_number_encrypt : AES-256 암호화본
+// - email_encrypted / name_encrypted / phone_number_encrypted : AES-256 암호화본
 // - 원문 컬럼 없음 — 원문 검색/저장 금지
 @Getter
 @Setter

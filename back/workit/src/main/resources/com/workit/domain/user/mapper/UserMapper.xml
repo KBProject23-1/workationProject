@@ -7,7 +7,7 @@
     <!--
         내 프로필 조회 - 로그인 사용자 기본 정보 + 프로필 정보 함께 조회.
         - users + user_profile LEFT JOIN — 프로필 미등록 회원은 nickname/company_name/profile_id 가 null
-        - email_encrypt/name_encrypt/phone_number_encrypt 는 AES 암호화본이므로 SELECT 가능 —
+        - email_encrypted/name_encrypted/phone_number_encrypted 는 AES 암호화본이므로 SELECT 가능 —
           복호화는 Service Layer 에서만 수행 (knowledge.md: 원문 컬럼 없음, 복호화는 Service)
         - status 도 함께 조회 — 탈퇴/차단 등 비활성 여부 판단은 Service (Mapper 비즈니스 로직 금지)
         - 결과 없음 → Mapper 는 null 반환, USER_NOT_FOUND(404) 판단은 Service
@@ -16,10 +16,10 @@
             resultType="com.workit.domain.user.vo.MyProfileVO">
         SELECT u.id                  AS user_id,
                u.status,
-               u.email_encrypt,
+               u.email_encrypted,
                u.name_hash,
-               u.name_encrypt,
-               u.phone_number_encrypt,
+               u.name_encrypted,
+               u.phone_number_encrypted,
                up.user_id             AS profile_id,
                up.nickname,
                up.company_name
@@ -119,7 +119,7 @@
 
     <!--
         휴대폰 번호 변경 - users 휴대폰 번호 갱신.
-        - phone_number_encrypt 는 Service Layer 에서 AES-256 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - phone_number_encrypted 는 Service Layer 에서 AES-256 암호화 후 전달 (Mapper 에서 암호화 금지)
         - phone_number_hash 는 Service Layer 에서 SHA-256 생성 후 전달 (검색용 hash — knowledge.md)
         - status != 'WITHDRAWN' 조건: 조회-갱신 사이 동시 탈퇴 Race Condition 최종 방어선
           (0 row 반환 시 Service 에서 USER_ALREADY_WITHDRAWN 처리 — updateUserStatusToWithdrawn 과 동일)
@@ -128,7 +128,7 @@
     <update id="updateUserPhoneNumber">
         UPDATE users
         SET phone_number_hash        = #{phoneNumberHash},
-            phone_number_encrypt     = #{phoneNumberEncrypt},
+            phone_number_encrypted   = #{phoneNumberEncrypt},
             phone_number_changed_at  = NOW()
         WHERE id = #{userId}
           AND status != 'WITHDRAWN'
@@ -138,7 +138,7 @@
         이메일 인증번호 발송 - 이메일(SHA-256 hash) 중복 조회 (자기 자신 제외).
         - users.email_hash (UNIQUE) 대상
         - 인증번호를 받을 이메일이 다른 사용자에게 이미 등록되어 있는지 확인 (본인은 제외)
-        - 개인정보 원문(email_encrypt)은 조회하지 않는다 (knowledge.md: 검색용 hash —
+        - 개인정보 원문(email_encrypted)은 조회하지 않는다 (knowledge.md: 검색용 hash —
           AuthMapper.countByEmailHash 와 동일 원칙)
         - Mapper 는 조회만 담당 (중복 판단은 Service — EMAIL_ALREADY_IN_USE)
     -->
@@ -151,7 +151,7 @@
 
     <!--
         이메일 변경 - users 이메일 갱신.
-        - email_encrypt 는 Service Layer 에서 AES-256 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - email_encrypted 는 Service Layer 에서 AES-256 암호화 후 전달 (Mapper 에서 암호화 금지)
         - email_hash 는 Service Layer 에서 SHA-256 생성 후 전달 (검색용 hash — knowledge.md)
         - status != 'WITHDRAWN' 조건: 조회-갱신 사이 동시 탈퇴 Race Condition 최종 방어선
           (0 row 반환 시 Service 에서 USER_ALREADY_WITHDRAWN 처리 — updateUserPhoneNumber 와 동일)
@@ -160,9 +160,9 @@
     -->
     <update id="updateUserEmail">
         UPDATE users
-        SET email_hash        = #{emailHash},
-            email_encrypt     = #{emailEncrypt},
-            email_changed_at  = NOW()
+        SET email_hash          = #{emailHash},
+            email_encrypted     = #{emailEncrypt},
+            email_changed_at    = NOW()
         WHERE id = #{userId}
           AND status != 'WITHDRAWN'
     </update>

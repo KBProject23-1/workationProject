@@ -134,7 +134,7 @@ public class AuthServiceImpl implements AuthService {
         String normalizedEmail = normalizeAndValidateEmail(email);
 
         // 2. 검색용 SHA-256 hash 생성 후 users.email_hash 기준 중복 조회
-        //    - email_encrypt(AES 원문) 복호화 금지, 원문 검색 금지 (knowledge.md: 검색용 hash 저장)
+        //    - email_encrypted(AES 원문) 복호화 금지, 원문 검색 금지 (knowledge.md: 검색용 hash 저장)
         //    - 소문자 정규화 후 hash — email_hash 기준 UNIQUE 제약과 중복 체크가 대소문자에 무관하게 동작하도록
         //      회원가입 완료 시에도 동일하게 소문자 정규화 후 hash 해야 한다
         String emailHash = sha256Hex(normalizedEmail);
@@ -608,7 +608,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 2. loginId(이메일 또는 휴대폰) 기준 회원 조회 — loginByPassword 와 동일한 판별 규칙 재사용
-        //    - 개인정보 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md: 검색용 hash)
+        //    - 개인정보 원문(email_encrypted/phone_encrypted)은 절대 조회하지 않는다 (knowledge.md: 검색용 hash)
         //    - 회원 없음 → USER_NOT_FOUND(404) — 아이디 입력 화면에서 재확인 안내
         LoginUserVO user = findUserByLoginId(loginId);
         if (user == null) {
@@ -640,7 +640,7 @@ public class AuthServiceImpl implements AuthService {
         }
 
         // 2. loginId(이메일 또는 휴대폰) 기준 회원 조회 — loginByPassword 와 동일한 판별 규칙 재사용
-        //    - 개인정보 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md: 검색용 hash)
+        //    - 개인정보 원문(email_encrypted/phone_encrypted)은 절대 조회하지 않는다 (knowledge.md: 검색용 hash)
         //    - 회원 없음 → USER_NOT_FOUND(404) (docs)
         LoginUserVO user = findUserByLoginId(request.getLoginId());
         if (user == null) {
@@ -990,7 +990,7 @@ public class AuthServiceImpl implements AuthService {
      * loginId(이메일 또는 휴대폰)로 회원을 조회한다.
      * - '@' 포함 → 이메일: trim → lowercase → SHA-256 hash → email_hash 조회
      * - 그 외    → 휴대폰: trim → 하이픈 제거 → SHA-256 hash → phone_number_hash 조회
-     * - 개인정보 원문(email_encrypt/phone_encrypt)은 절대 조회하지 않는다 (knowledge.md)
+     * - 개인정보 원문(email_encrypted/phone_encrypted)은 절대 조회하지 않는다 (knowledge.md)
      * - PASSWORD 로그인(loginByPassword)과 비밀번호 재설정(verifyPasswordReset)이 공통 사용한다
      *
      * @return 매칭되는 회원이 없으면 null

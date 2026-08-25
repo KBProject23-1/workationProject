@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 //
 // 보안 규칙:
 // - 이메일 원문 로그 출력 금지 (호출 측 Service 가 로그에 값을 포함하지 않아야 한다)
-// - email_encrypt(AES 원문) 조회·복호화 후 검증 금지 — 검증은 항상 원문 기준
+// - email_encrypted(AES 원문) 조회·복호화 후 검증 금지 — 검증은 항상 원문 기준
 // - 검증 실패 시 IllegalArgumentException 을 던지고, 도메인 에러 변환(예: INVALID_EMAIL_FORMAT)은
 //   Service 계층에서 처리한다 (global.util 이 도메인 ErrorCode 에 의존하지 않도록)
 public final class EmailValidator {

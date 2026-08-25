@@ -124,7 +124,7 @@ public interface AuthService {
      *   2. PASS 본인인증 결과 검증 → CI 추출 (Provider 실패 시 BusinessException)
      *   3. CI SHA-256 hash 변환 → user_auth.identity_ci_hash 기준 가입 회원 조회
      *      - 없음 또는 비활성(탈퇴/차단) 회원 → USER_NOT_FOUND(404)
-     *   4. email_encrypt AES 복호화 → 마스킹 처리 (docs: user****@example.com)
+     *   4. email_encrypted AES 복호화 → 마스킹 처리 (docs: user****@example.com)
      *   5. 가입일 yyyy-MM-dd 포맷 → FindIdResponseDTO 반환
      *
      * @param identityVerificationId PASS 인증 후 발급받은 포트원 고유 ID (없으면 null)

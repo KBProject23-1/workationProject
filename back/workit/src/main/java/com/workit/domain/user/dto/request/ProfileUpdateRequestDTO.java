@@ -12,7 +12,7 @@ import lombok.ToString;
 // 처리 규칙:
 // - PATCH 방식 — nickname 또는 companyName 중 전달된 값만 수정 (전달되지 않은 필드는 기존 값 유지)
 // - name/phoneNumber/email 은 Request Body 에서 받지 않는다 —
-//   PASS 본인인증으로 저장된 기존 값(users.name_encrypt/phone_number_encrypt/email_encrypt)을
+//   PASS 본인인증으로 저장된 기존 값(users.name_encrypted/phone_number_encrypted/email_encrypted)을
 //   그대로 유지한다 (개인정보 수정은 재인증 API 경유 — knowledge.md)
 // - nickname: user_profile.nickname VARCHAR(50) UNIQUE
 // - companyName: user_profile.company_name VARCHAR(100)
