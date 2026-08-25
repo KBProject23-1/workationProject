@@ -1,0 +1,1570 @@
+package com.workit.domain.auth.controller;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.workit.domain.auth.dto.request.LoginRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordResetRequestDTO;
+import com.workit.domain.auth.dto.request.PasswordVerifyRequestDTO;
+import com.workit.domain.auth.dto.request.PinResetRequestDTO;
+import com.workit.domain.auth.dto.request.PinSetupRequestDTO;
+import com.workit.domain.auth.dto.request.SignupRequestDTO;
+import com.workit.domain.auth.dto.response.EmailAvailabilityResponseDTO;
+import com.workit.domain.auth.dto.response.FindIdResponseDTO;
+import com.workit.domain.auth.dto.response.LoginResponseDTO;
+import com.workit.domain.auth.dto.response.PasswordVerifyResponseDTO;
+import com.workit.domain.auth.dto.response.RefreshTokenResponseDTO;
+import com.workit.domain.auth.dto.response.SignupResponseDTO;
+import com.workit.domain.auth.dto.response.VerifyIdentityResponseDTO;
+import com.workit.domain.auth.exception.AuthErrorCode;
+import com.workit.domain.auth.service.AuthService;
+import com.workit.exception.BusinessException;
+import com.workit.exception.CommonExceptionAdvice;
+import com.workit.security.CurrentUserArgumentResolver;
+import com.workit.security.WorkitPrincipal;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.DefaultCsrfToken;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import javax.servlet.http.Cookie;
+import java.nio.charset.StandardCharsets;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+// AuthController (본인인증 검증 API) 테스트
+// - AuthService 를 Mockito @Mock 으로 주입한다 (Controller 계층 검증에 집중)
+// - @InjectMocks 를 사용하지 않는 이유: AuthController 생성자에 primitive @Value(boolean/String)
+//   파라미터가 있어 Mock 주입이 불가하므로 setUp 에서 직접 생성한다
+// - json-path 의존성 없이 Jackson ObjectMapper 로 응답 JSON 을 검증한다
+@ExtendWith(MockitoExtension.class)
+class AuthControllerTest {
+
+    @Mock
+    private AuthService authService;
+
+    private MockMvc mockMvc;
+
+    @BeforeEach
+    void setUp() {
+        // refreshCookieSecure=true / sameSite=Lax — 운영(HTTPS) 쿠키 스펙 그대로 검증
+        mockMvc = MockMvcBuilders.standaloneSetup(new AuthController(authService, true, "Lax"))
+                .setControllerAdvice(new CommonExceptionAdvice())
+                // @CurrentUser Long userId 파라미터 해석용 — 운영에서는 ServletConfig 가 등록한다
+                .setCustomArgumentResolvers(new CurrentUserArgumentResolver())
+                .build();
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        // @CurrentUser 테스트에서 설정한 인증 객체가 다른 테스트에 영향 주지 않도록 초기화
+        SecurityContextHolder.clearContext();
+    }
+
+    private JsonNode parse(MvcResult result) throws Exception {
+        String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        return new ObjectMapper().readTree(body);
+    }
+
+    // ---------- Stub 헬퍼 (Mockito when / doThrow) ----------
+
+    /** 이메일 중복 확인 Stub — available 여부 지정 */
+    private void stubCheckEmail(boolean available) {
+        when(authService.checkEmailAvailability(any()))
+                .thenReturn(EmailAvailabilityResponseDTO.of(available));
+    }
+
+    /** 이메일 중복 확인 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubCheckEmailError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).checkEmailAvailability(any());
+    }
+
+    /** 회원가입 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubSignupError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).signup(any(SignupRequestDTO.class));
+    }
+
+    /** 본인인증 검증(회원가입) 성공 Stub — Service 가 화면 표시용 이름을 반환한다 */
+    private void stubVerifyIdentitySuccess() {
+        when(authService.verifyIdentityForSignup(any()))
+                .thenReturn(VerifyIdentityResponseDTO.of("홍길동"));
+    }
+
+    /** 본인인증 검증(회원가입) 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubVerifyIdentityError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).verifyIdentityForSignup(any());
+    }
+
+    /** 회원가입 성공 Stub — Service 가 가입 완료 결과(userId/name)를 반환한다 (토큰 미발급) */
+    private void stubSignupSuccess() {
+        when(authService.signup(any(SignupRequestDTO.class)))
+                .thenReturn(SignupResponseDTO.of(501L, "홍길동"));
+    }
+
+    /** 로그인 성공 Stub — Service 가 userId/name/accessToken/refreshToken 을 반환한다 */
+    private void stubLoginSuccess() {
+        when(authService.login(any(LoginRequestDTO.class)))
+                .thenReturn(LoginResponseDTO.builder()
+                        .userId(501L)
+                        .name("홍길동")
+                        .pinSetupRequired(false)
+                        .accessToken("access-token-jwt")
+                        .accessTokenMaxAgeSeconds(900)
+                        .refreshToken("refresh-token-jwt")
+                        .refreshTokenMaxAgeSeconds(1209600)
+                        .build());
+    }
+
+    /** 로그인 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubLoginError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).login(any(LoginRequestDTO.class));
+    }
+
+    /** 재발급 성공 Stub — Service 가 신규 accessToken/refreshToken 을 반환한다 */
+    private void stubRefreshSuccess() {
+        when(authService.refreshAccessToken(any()))
+                .thenReturn(RefreshTokenResponseDTO.builder()
+                        .accessToken("new-access-token-jwt")
+                        .accessTokenMaxAgeSeconds(900)
+                        .refreshToken("new-refresh-token-jwt")
+                        .refreshTokenMaxAgeSeconds(1209600)
+                        .build());
+    }
+
+    /** 재발급 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubRefreshError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).refreshAccessToken(any());
+    }
+
+    /** 로그아웃 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubLogoutError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).logout(any());
+    }
+
+    /** 아이디 찾기 성공 Stub — Service 가 마스킹 이메일/가입일을 반환한다 */
+    private void stubFindIdSuccess() {
+        when(authService.findId(any()))
+                .thenReturn(FindIdResponseDTO.of("user****@example.com", "2026-07-24"));
+    }
+
+    /** 아이디 찾기 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubFindIdError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).findId(any());
+    }
+
+    /** 비밀번호 재설정 1단계 성공 Stub — Service 가 passwordResetToken + expiresAt 을 반환한다 */
+    private void stubPasswordVerifySuccess() {
+        when(authService.verifyPasswordReset(any(PasswordVerifyRequestDTO.class)))
+                .thenReturn(PasswordVerifyResponseDTO.of("9f1d7c3a-82ab-4d32-a5dd-000000000000",
+                        1782000000000L));
+    }
+
+    /** 비밀번호 재설정 1단계 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPasswordVerifyError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).verifyPasswordReset(any(PasswordVerifyRequestDTO.class));
+    }
+
+    /** 비밀번호 재설정 사전 단계(아이디 존재 확인) 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPasswordCheckIdError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).checkPasswordResetId(any());
+    }
+
+    /** 비밀번호 재설정 2단계 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPasswordResetError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode)).when(authService).resetPassword(any(PasswordResetRequestDTO.class));
+    }
+
+    // ---------- 회원가입 이메일 중복 확인 ----------
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 사용 가능한 이메일 (200 + SUCCESS + available=true)")
+    void checkEmail_available() throws Exception {
+        // Given — Service 는 사용 가능한 이메일로 판단한다
+        stubCheckEmail(true);
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", "new@example.com"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("사용 가능한 이메일입니다.", json.get("message").asText());
+
+        // 성공 응답에는 errorCode 가 없어야 한다 (CommonResponse NON_NULL)
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertTrue(data.get("available").asBoolean());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 이미 사용 중인 이메일 (200 + SUCCESS + available=false)")
+    void checkEmail_duplicate() throws Exception {
+        // Given — Service 는 중복 이메일로 판단한다
+        stubCheckEmail(false);
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", "used@example.com"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("이미 사용 중인 이메일입니다.", json.get("message").asText());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertFalse(data.get("available").asBoolean());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - email 파라미터 누락 (400 + INVALID_EMAIL_FORMAT)")
+    void checkEmail_missingParam() throws Exception {
+        // Given — Service 는 누락된 이메일을 형식 오류로 거부한다
+        stubCheckEmailError(AuthErrorCode.INVALID_EMAIL_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 잘못된 이메일 형식 (400 + INVALID_EMAIL_FORMAT)")
+    void checkEmail_invalidFormat() throws Exception {
+        // Given — Service 는 잘못된 형식의 이메일을 거부한다
+        stubCheckEmailError(AuthErrorCode.INVALID_EMAIL_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", "not-an-email"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 최대 길이(254자) 정상 (200 + SUCCESS + available=true)")
+    void checkEmail_maxLength() throws Exception {
+        // Given — Service 는 최대 길이 이메일을 사용 가능으로 판단한다
+        stubCheckEmail(true);
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", buildLongEmail(254)))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("사용 가능한 이메일입니다.", json.get("message").asText());
+        assertTrue(json.get("data").get("available").asBoolean());
+    }
+
+    @Test
+    @DisplayName("이메일 중복 확인 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
+    void checkEmail_tooLong() throws Exception {
+        // Given — Service 는 초과 길이 이메일을 형식 오류로 거부한다
+        stubCheckEmailError(AuthErrorCode.INVALID_EMAIL_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/signup/check-email")
+                        .param("email", buildLongEmail(255)))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    /**
+     * 지정한 전체 길이의 이메일 생성 — 로컬파트 64자 + @ + 도메인 + .com (RFC 5321 형식 유지)
+     * - Java 8 호환을 위해 String.repeat 대신 반복문 사용
+     */
+    private String buildLongEmail(int totalLength) {
+        int domainLength = totalLength - 65; // 로컬파트 64자 + @ 1자 제외
+        StringBuilder sb = new StringBuilder(totalLength);
+        for (int i = 0; i < 64; i++) {
+            sb.append('a');
+        }
+        sb.append('@');
+        for (int i = 0; i < domainLength - 4; i++) {
+            sb.append('b');
+        }
+        sb.append(".com");
+        return sb.toString();
+    }
+
+    // ---------- CSRF Token 발급 ----------
+
+    @Test
+    @DisplayName("CSRF 토큰 발급 - 200 + SUCCESS + data.csrfToken (XSRF-TOKEN Cookie 값과 동일)")
+    void csrf_success() throws Exception {
+        // Given — CsrfFilter 가 request attribute 에 원문 토큰을 저장한 상태를 재현한다
+        CsrfToken csrfToken = new DefaultCsrfToken("X-XSRF-TOKEN", "_csrf", "csrf-token-abc123");
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/csrf")
+                        .requestAttr(CsrfToken.class.getName(), csrfToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — data.csrfToken 으로 프론트가 X-XSRF-TOKEN Header 에 사용할 값을 받는다
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("CSRF 토큰이 발급되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertEquals("csrf-token-abc123", json.get("data").get("csrfToken").asText());
+    }
+
+    @Test
+    @DisplayName("CSRF 토큰 발급 - CsrfFilter 미적용(attribute 없음) → data.csrfToken null")
+    void csrf_noTokenAttribute() throws Exception {
+        // Given — Controller 단독 호출(standaloneSetup)이라 CsrfFilter 가 attribute 를 저장하지 않는다
+
+        // When
+        MvcResult result = mockMvc.perform(get("/api/v1/auth/csrf"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — 실패가 아니라 정상 응답 (실제 운영에서는 CsrfFilter 가 항상 토큰을 저장한다)
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertTrue(data.get("csrfToken") == null || data.get("csrfToken").isNull());
+    }
+
+    // ---------- 회원가입 본인인증 검증 및 회원 중복 체크 ----------
+
+    @Test
+    @DisplayName("본인인증 검증 성공 - 200 + SUCCESS + 화면 표시용 name 반환")
+    void verifyIdentity_success() throws Exception {
+        // Given — Service 가 화면 표시용 이름을 반환한다
+        stubVerifyIdentitySuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("본인인증 성공. 가입을 진행합니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("홍길동", data.get("name").asText());
+
+        // Service 가 인증 ID 를 그대로 전달받았는지 확인
+        verify(authService).verifyIdentityForSignup("imp_ver_9876543210");
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - 동일 휴대폰(CI) 중복 가입 → 409 + DUPLICATE_USER")
+    void verifyIdentity_duplicateUser() throws Exception {
+        // Given — Service 는 동일 휴대폰(CI) 으로 이미 가입한 회원을 거부한다
+        stubVerifyIdentityError(AuthErrorCode.DUPLICATE_USER);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_1234567890\"}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_USER", json.get("errorCode").asText());
+        assertEquals("이미 가입된 회원입니다. 로그인을 진행해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("본인인증 검증 - 유효하지 않은 인증 세션 → 400 + INVALID_VERIFICATION_ID")
+    void verifyIdentity_invalidVerificationId() throws Exception {
+        // Given — Service 는 존재하지 않거나 만료/사용 완료된 인증 세션을 거부한다
+        stubVerifyIdentityError(AuthErrorCode.INVALID_VERIFICATION_ID);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup/verify-identity")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
+    }
+
+    // ---------- 최종 회원가입 완료 ----------
+
+    /** 필수 약관(1, 2) 전체 동의 기본 본문 생성 — identityVerificationId 는 백엔드 발급 값 */
+    private String signupBody(String identityVerificationId, String email) {
+        return signupBody(identityVerificationId, email, ",\"agreedTermsIds\":[1,2]");
+    }
+
+    /** agreedTermsIds JSON 조각(빈 문자열이면 누락)을 지정하는 본문 생성 */
+    private String signupBody(String identityVerificationId, String email,
+                              String agreedTermsIdsJson) {
+        return "{\"identityVerificationId\":\"" + identityVerificationId
+                + "\",\"email\":\"" + email
+                + "\",\"password\":\"password123!\""
+                + agreedTermsIdsJson + "}";
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 성공 - 200 + SUCCESS + userId/name 반환 + 토큰/Cookie 미발급")
+    void signup_success() throws Exception {
+        // Given — Service 는 가입 완료 결과를 반환한다 (토큰 미발급 — 자동 로그인 없음)
+        stubSignupSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", "new@example.com")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // 회원가입 응답 — userId/name 만 반환 (자동 로그인 없음)
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals(501, data.get("userId").asInt());
+        assertEquals("홍길동", data.get("name").asText());
+        // token_info 는 발급하지 않는다 (토큰 미발급)
+        assertTrue(data.get("token_info") == null);
+
+        // Set-Cookie 가 없어야 한다 (Access/Refresh Token Cookie 미발급)
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "회원가입 응답에는 토큰 Cookie 가 없어야 한다");
+
+        // Service 가 가입 요청을 전달받았는지 확인
+        verify(authService).signup(any(SignupRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 유효하지 않은 인증 세션 (400 + INVALID_VERIFICATION_ID)")
+    void signup_invalidVerificationId() throws Exception {
+        // Given — Service 는 존재하지 않거나 만료/사용 완료된 인증 세션을 거부한다
+        stubSignupError(AuthErrorCode.INVALID_VERIFICATION_ID);
+
+        // When — 임의의(백엔드 미발급) identityVerificationId
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("invalid-id", "new@example.com")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - CI 중복 (409 + DUPLICATE_USER)")
+    void signup_duplicateCi() throws Exception {
+        // Given — Service 는 CI 중복을 거부한다
+        stubSignupError(AuthErrorCode.DUPLICATE_USER);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("dup-ci-id", "new@example.com")))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_USER", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 이메일 중복 (409 + DUPLICATE_EMAIL)")
+    void signup_duplicateEmail() throws Exception {
+        // Given — Service 는 이메일 중복을 거부한다
+        stubSignupError(AuthErrorCode.DUPLICATE_EMAIL);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", "used@example.com")))
+                .andExpect(status().isConflict())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("DUPLICATE_EMAIL", json.get("errorCode").asText());
+        assertEquals("이미 사용 중인 이메일입니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 255자 이상 이메일 (400 + INVALID_EMAIL_FORMAT)")
+    void signup_emailTooLong() throws Exception {
+        // Given — Service 는 초과 길이 이메일을 거부한다
+        stubSignupError(AuthErrorCode.INVALID_EMAIL_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", buildLongEmail(255))))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_EMAIL_FORMAT", json.get("errorCode").asText());
+        assertEquals("올바르지 않은 이메일 형식입니다. 이메일을 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 필수 값 누락 (400 + INVALID_SIGNUP_REQUEST)")
+    void signup_missingRequired() throws Exception {
+        // Given — Service 는 필수 값 누락을 거부한다
+        stubSignupError(AuthErrorCode.INVALID_SIGNUP_REQUEST);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_SIGNUP_REQUEST", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - agreedTermsIds 포함 정상 요청 (200 + SUCCESS + 토큰/Cookie 미발급)")
+    void signup_withAgreedTerms_success() throws Exception {
+        // Given — Service 는 가입 완료 결과를 반환한다 (토큰 미발급)
+        stubSignupSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", "new@example.com",
+                                ",\"agreedTermsIds\":[1,2,3]")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("회원가입이 완료되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        // 토큰 미발급 — data(userId/name) 만 반환, Set-Cookie 없음
+        assertNotNull(json.get("data"));
+        assertTrue(result.getResponse().getHeaders("Set-Cookie").isEmpty(),
+                "회원가입 응답에는 토큰 Cookie 가 없어야 한다");
+
+        // Service 가 가입 요청을 전달받았는지 확인
+        verify(authService).signup(any(SignupRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - agreedTermsIds 누락 (400 + MISSING_REQUIRED_TERMS)")
+    void signup_missingAgreedTerms() throws Exception {
+        // Given — Service 는 약관 동의 누락을 거부한다
+        stubSignupError(AuthErrorCode.MISSING_REQUIRED_TERMS);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", "new@example.com", "")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("MISSING_REQUIRED_TERMS", json.get("errorCode").asText());
+        assertEquals("필수 약관에 모두 동의해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 존재하지 않는 약관 ID (400 + INVALID_TERM_ID)")
+    void signup_invalidTermId() throws Exception {
+        // Given — Service 는 존재하지 않는 약관 ID 를 거부한다
+        stubSignupError(AuthErrorCode.INVALID_TERM_ID);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", "new@example.com",
+                                ",\"agreedTermsIds\":[1,2,99]")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_TERM_ID", json.get("errorCode").asText());
+        assertEquals("존재하지 않는 약관이 포함되어 있습니다. 다시 확인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 필수 약관 누락 (400 + MISSING_REQUIRED_TERMS)")
+    void signup_missingRequiredTerms() throws Exception {
+        // Given — Service 는 필수 약관 누락을 거부한다
+        stubSignupError(AuthErrorCode.MISSING_REQUIRED_TERMS);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(signupBody("valid-id", "new@example.com",
+                                ",\"agreedTermsIds\":[1]")))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("MISSING_REQUIRED_TERMS", json.get("errorCode").asText());
+        assertEquals("필수 약관에 모두 동의해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("회원가입 완료 - 잘못된 JSON 본문 (400 공통 형식 오류)")
+    void signup_malformedBody() throws Exception {
+        // When — JSON 파싱 실패는 Service 호출 전에 차단된다
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("not-json"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertFalse(json.get("errorCode").isNull());
+    }
+
+    // ---------- 통합 로그인 ----------
+
+    @Test
+    @DisplayName("PASSWORD 로그인 성공 - 200 + SUCCESS + userId/name/pinSetupRequired + accessToken/refreshToken Set-Cookie(HttpOnly)")
+    void login_password_success() throws Exception {
+        // Given — Service 는 로그인 성공 결과를 반환한다
+        stubLoginSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PASSWORD\",\"loginId\":\"user@example.com\",\"password\":\"password123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("로그인에 성공했습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals(501, data.get("userId").asInt());
+        assertEquals("홍길동", data.get("name").asText());
+        // 기기 최초 로그인 여부 — stub 은 기존 기기(등록 완료)로 false
+        assertFalse(data.get("pinSetupRequired").asBoolean());
+
+        // Cookie 기반 인증 — Response Body 에 JWT 가 절대 포함되지 않는다
+        // (accessToken/refreshToken/token_info 모두 @JsonIgnore — JSON 에 존재하면 안 된다)
+        assertTrue(data.get("token_info") == null, "token_info 는 JSON 에 없어야 한다");
+        assertTrue(data.get("accessToken") == null, "accessToken 은 JSON 에 없어야 한다");
+        assertTrue(data.get("access_token") == null, "access_token 은 JSON 에 없어야 한다");
+        assertTrue(data.get("refreshToken") == null, "refreshToken 은 JSON 에 없어야 한다");
+        assertTrue(data.get("refresh_token") == null, "refresh_token 은 JSON 에 없어야 한다");
+
+        // Set-Cookie 2개 — accessToken + refreshToken (과제 스펙: HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "로그인 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
+
+        String accessCookie = setCookies.stream()
+                .filter(c -> c.startsWith("accessToken=")).findFirst().orElseThrow();
+        assertTrue(accessCookie.contains("accessToken=access-token-jwt"), "쿠키명/값: " + accessCookie);
+        assertTrue(accessCookie.contains("Max-Age=900"), "Access Token Cookie Max-Age: " + accessCookie);
+        assertTrue(accessCookie.contains("HttpOnly"), "HttpOnly 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Path=/"), "Path 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Secure"), "Secure 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("SameSite=Lax"), "SameSite 속성: " + accessCookie);
+
+        String refreshCookie = setCookies.stream()
+                .filter(c -> c.startsWith("refreshToken=")).findFirst().orElseThrow();
+        assertTrue(refreshCookie.contains("refreshToken=refresh-token-jwt"), "쿠키명/값: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Max-Age=1209600"), "Refresh Token Cookie Max-Age: " + refreshCookie);
+        assertTrue(refreshCookie.contains("HttpOnly"), "HttpOnly 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Path=/"), "Path 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Secure"), "Secure 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("SameSite=Lax"), "SameSite 속성: " + refreshCookie);
+    }
+
+    @Test
+    @DisplayName("PASSWORD 휴대폰 로그인 성공 - 200 + SUCCESS + userId/name + 쿠키 발급")
+    void login_phone_success() throws Exception {
+        // Given — Service 는 로그인 성공 결과를 반환한다
+        stubLoginSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PASSWORD\",\"loginId\":\"010-1234-5678\",\"password\":\"password123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals(501, json.get("data").get("userId").asInt());
+        assertEquals("홍길동", json.get("data").get("name").asText());
+        assertTrue(result.getResponse().getHeader("Set-Cookie").contains("HttpOnly"));
+    }
+
+    @Test
+    @DisplayName("PIN 로그인 성공 - 200 + SUCCESS + userId + 쿠키 발급")
+    void login_pin_success() throws Exception {
+        // Given — Service 는 로그인 성공 결과를 반환한다
+        stubLoginSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PIN\",\"pinNumber\":\"123456\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals(501, json.get("data").get("userId").asInt());
+        assertTrue(result.getResponse().getHeader("Set-Cookie").contains("HttpOnly"));
+    }
+
+    @Test
+    @DisplayName("잘못된 password - 401 + INVALID_CREDENTIALS")
+    void login_wrongPassword() throws Exception {
+        // Given — Service 는 잘못된 비밀번호를 거부한다
+        stubLoginError(AuthErrorCode.INVALID_CREDENTIALS);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PASSWORD\",\"loginId\":\"user@example.com\",\"password\":\"wrong!\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_CREDENTIALS", json.get("errorCode").asText());
+        assertEquals("인증 정보가 올바르지 않습니다. 다시 확인 후 시도해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("잘못된 PIN - 401 + INVALID_CREDENTIALS")
+    void login_wrongPin() throws Exception {
+        // Given — Service 는 잘못된 PIN 을 거부한다
+        stubLoginError(AuthErrorCode.INVALID_CREDENTIALS);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PIN\",\"pinNumber\":\"000000\",\"deviceId\":\"device-uuid\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_CREDENTIALS", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 사용자 - 401 + INVALID_CREDENTIALS")
+    void login_unknownUser() throws Exception {
+        // Given — Service 는 존재하지 않는 사용자를 거부한다
+        stubLoginError(AuthErrorCode.INVALID_CREDENTIALS);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PASSWORD\",\"loginId\":\"unknown@example.com\",\"password\":\"password123!\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("INVALID_CREDENTIALS", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("잘못된 loginType - 400 + INVALID_LOGIN_TYPE")
+    void login_invalidLoginType() throws Exception {
+        // Given — Service 는 잘못된 loginType 을 거부한다
+        stubLoginError(AuthErrorCode.INVALID_LOGIN_TYPE);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"FACE_ID\",\"loginId\":\"user@example.com\",\"password\":\"password123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_LOGIN_TYPE", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("필수 값 누락 - 400 + INVALID_LOGIN_REQUEST")
+    void login_missingRequired() throws Exception {
+        // Given — Service 는 필수 값 누락을 거부한다
+        stubLoginError(AuthErrorCode.INVALID_LOGIN_REQUEST);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PASSWORD\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_LOGIN_REQUEST", json.get("errorCode").asText());
+    }
+
+    @Test
+    @DisplayName("PIN 잠금 - 403 + PIN_LOCK_EXCEEDED")
+    void login_pinLocked() throws Exception {
+        // Given — Service 는 PIN 잠금 상태를 거부한다
+        stubLoginError(AuthErrorCode.PIN_LOCK_EXCEEDED);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginType\":\"PIN\",\"pinNumber\":\"123456\",\"deviceId\":\"locked-device\"}"))
+                .andExpect(status().isForbidden())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("PIN_LOCK_EXCEEDED", json.get("errorCode").asText());
+        assertEquals("핀번호 입력 횟수가 5회 초과하여 계정이 잠겼습니다. PASS 본인인증을 통해 핀번호를 재설정해 주세요.",
+                json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("잘못된 JSON 본문 - 400 (공통 형식 오류)")
+    void login_malformedBody() throws Exception {
+        // When — JSON 파싱 실패는 Service 호출 전에 차단된다
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("not-json"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertFalse(json.get("errorCode").isNull());
+    }
+
+    // ---------- 로그인 토큰 재발급 ----------
+
+    @Test
+    @DisplayName("재발급 성공 - 200 + SUCCESS + data null + 신규 accessToken/refreshToken Set-Cookie(HttpOnly)")
+    void refresh_success() throws Exception {
+        // Given — Service 는 재발급 성공 결과를 반환한다
+        stubRefreshSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refreshToken", "valid-refresh-token-jwt")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("액세스 토큰이 성공적으로 재발급되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // Cookie 기반 인증 — Response Body 에 JWT 가 절대 포함되지 않는다 (data = null)
+        assertTrue(json.get("data") == null || json.get("data").isNull(),
+                "재발급 응답 본문에는 JWT 가 없어야 한다 (data null)");
+
+        // Set-Cookie 2개 — 신규 accessToken + 신규 refreshToken (Rotation, login 과 동일 속성)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "재발급 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
+
+        String accessCookie = setCookies.stream()
+                .filter(c -> c.startsWith("accessToken=")).findFirst().orElseThrow();
+        assertTrue(accessCookie.contains("accessToken=new-access-token-jwt"), "쿠키명/값: " + accessCookie);
+        assertTrue(accessCookie.contains("Max-Age=900"), "Access Token Cookie Max-Age: " + accessCookie);
+        assertTrue(accessCookie.contains("HttpOnly"), "HttpOnly 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Path=/"), "Path 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("Secure"), "Secure 속성: " + accessCookie);
+        assertTrue(accessCookie.contains("SameSite=Lax"), "SameSite 속성: " + accessCookie);
+
+        String refreshCookie = setCookies.stream()
+                .filter(c -> c.startsWith("refreshToken=")).findFirst().orElseThrow();
+        assertTrue(refreshCookie.contains("refreshToken=new-refresh-token-jwt"), "쿠키명/값: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Max-Age=1209600"), "Refresh Token Cookie Max-Age: " + refreshCookie);
+        assertTrue(refreshCookie.contains("HttpOnly"), "HttpOnly 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Path=/"), "Path 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("Secure"), "Secure 속성: " + refreshCookie);
+        assertTrue(refreshCookie.contains("SameSite=Lax"), "SameSite 속성: " + refreshCookie);
+    }
+
+    @Test
+    @DisplayName("Refresh Token 쿠키 누락 - 401 + INVALID_REFRESH_TOKEN")
+    void refresh_missingCookie() throws Exception {
+        // Given — Service 는 쿠키 누락을 거부한다
+        stubRefreshError(AuthErrorCode.INVALID_REFRESH_TOKEN);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
+        assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("유효하지 않은 Refresh Token - 401 + INVALID_REFRESH_TOKEN")
+    void refresh_invalidToken() throws Exception {
+        // Given — Service 는 유효하지 않은 Refresh Token 을 거부한다
+        stubRefreshError(AuthErrorCode.INVALID_REFRESH_TOKEN);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/refresh")
+                        .cookie(new Cookie("refreshToken", "invalid-refresh")))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
+        assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
+    }
+
+    // ---------- 로그아웃 ----------
+
+    @Test
+    @DisplayName("로그아웃 성공 - 200 + SUCCESS + Access/Refresh Token Cookie 즉시 만료(Max-Age=0)")
+    void logout_success() throws Exception {
+        // Given — Service 는 정상 로그아웃을 허용한다 (void — 별도 Stub 불필요)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/logout")
+                        .cookie(new Cookie("refreshToken", "valid-refresh-token-jwt")))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("성공적으로 로그아웃되었습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+
+        // Set-Cookie 2개 — accessToken + refreshToken 모두 즉시 만료 (docs: Max-Age=0; HttpOnly; Path=/; SameSite=Lax; Secure=운영)
+        java.util.List<String> setCookies = result.getResponse().getHeaders("Set-Cookie");
+        assertEquals(2, setCookies.size(), "로그아웃 응답에는 accessToken/refreshToken Cookie 2개가 있어야 한다");
+        for (String setCookie : setCookies) {
+            assertTrue(setCookie.contains("="), "쿠키명/값: " + setCookie);
+            assertTrue(setCookie.contains("Max-Age=0"), "Max-Age 속성: " + setCookie);
+            assertTrue(setCookie.contains("HttpOnly"), "HttpOnly 속성: " + setCookie);
+            assertTrue(setCookie.contains("Path=/"), "Path 속성: " + setCookie);
+            assertTrue(setCookie.contains("Secure"), "Secure 속성: " + setCookie);
+            assertTrue(setCookie.contains("SameSite=Lax"), "SameSite 속성: " + setCookie);
+        }
+        assertTrue(setCookies.stream().anyMatch(c -> c.startsWith("accessToken=")),
+                "accessToken Cookie 가 포함되어야 한다: " + setCookies);
+        assertTrue(setCookies.stream().anyMatch(c -> c.startsWith("refreshToken=")),
+                "refreshToken Cookie 가 포함되어야 한다: " + setCookies);
+
+        // Service 가 Refresh Token 을 전달받았는지 확인
+        verify(authService).logout("valid-refresh-token-jwt");
+    }
+
+    @Test
+    @DisplayName("Refresh Token 쿠키 누락 - 401 + INVALID_REFRESH_TOKEN")
+    void logout_missingCookie() throws Exception {
+        // Given — Service 는 쿠키 누락을 거부한다
+        stubLogoutError(AuthErrorCode.INVALID_REFRESH_TOKEN);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/logout"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
+        assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("유효하지 않은 Refresh Token - 401 + INVALID_REFRESH_TOKEN")
+    void logout_invalidToken() throws Exception {
+        // Given — Service 는 유효하지 않은 Refresh Token 을 거부한다
+        stubLogoutError(AuthErrorCode.INVALID_REFRESH_TOKEN);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/logout")
+                        .cookie(new Cookie("refreshToken", "invalid-refresh")))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_REFRESH_TOKEN", json.get("errorCode").asText());
+        assertEquals("세션이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.", json.get("message").asText());
+    }
+
+    // ---------- 아이디 찾기 ----------
+
+    @Test
+    @DisplayName("아이디 찾기 성공 - 200 + SUCCESS + 마스킹 이메일/가입일 반환")
+    void findId_success() throws Exception {
+        // Given — Service 가 마스킹 이메일과 가입일을 반환한다
+        stubFindIdSuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/find-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("가입된 이메일을 찾았습니다.", json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("user****@example.com", data.get("email").asText());
+        assertEquals("2026-07-24", data.get("createdAt").asText());
+
+        // Service 가 인증 ID 를 그대로 전달받았는지 확인
+        verify(authService).findId("imp_ver_9876543210");
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - identityVerificationId 누락 → 400 + INVALID_VERIFICATION_ID")
+    void findId_missingId() throws Exception {
+        // Given — Service 는 누락된 인증 ID 를 거부한다
+        stubFindIdError(AuthErrorCode.INVALID_VERIFICATION_ID);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/find-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_VERIFICATION_ID", json.get("errorCode").asText());
+        assertEquals("PASS 인증이 유효하지 않습니다. 다시 시도해주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("아이디 찾기 - 해당 CI 로 가입된 계정 없음 → 404 + USER_NOT_FOUND")
+    void findId_userNotFound() throws Exception {
+        // Given — Service 는 가입 회원 없음을 거부한다
+        stubFindIdError(AuthErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/find-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_0000000000\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("해당 본인인증 정보로 가입된 계정이 존재하지 않습니다.", json.get("message").asText());
+    }
+
+    // ---------- 비밀번호 재설정 1단계 (본인 확인 및 인증 토큰 발급) ----------
+
+    @Test
+    @DisplayName("비밀번호 재설정 토큰 발급 성공 - 200 + SUCCESS + passwordResetToken 반환")
+    void passwordVerify_success() throws Exception {
+        // Given — Service 가 passwordResetToken 을 반환한다
+        stubPasswordVerifySuccess();
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"user@example.com\",\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("본인 확인이 완료되었습니다. 5분 이내에 비밀번호를 재설정해 주세요.",
+                json.get("message").asText());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // docs: data.passwordResetToken (UUID) + data.expiresAt (5분 TTL 만료 시각)
+        JsonNode data = json.get("data");
+        assertNotNull(data);
+        assertEquals("9f1d7c3a-82ab-4d32-a5dd-000000000000", data.get("passwordResetToken").asText());
+        assertEquals(1782000000000L, data.get("expiresAt").asLong());
+
+        // Service 가 요청 DTO 를 전달받았는지 확인
+        verify(authService).verifyPasswordReset(any(PasswordVerifyRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 재설정 - loginId 로 조회되는 회원 없음 → 404 + USER_NOT_FOUND")
+    void passwordVerify_userNotFound() throws Exception {
+        // Given — Service 는 회원 없음을 거부한다
+        stubPasswordVerifyError(AuthErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"unknown@example.com\",\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("해당 본인인증 정보로 가입된 계정이 존재하지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재설정 - 본인확인(CI) 불일치 → 400 + VERIFICATION_FAILED")
+    void passwordVerify_verificationFailed() throws Exception {
+        // Given — Service 는 CI 불일치를 거부한다
+        stubPasswordVerifyError(AuthErrorCode.VERIFICATION_FAILED);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"user@example.com\",\"identityVerificationId\":\"imp_ver_0000000000\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("VERIFICATION_FAILED", json.get("errorCode").asText());
+        assertEquals("입력하신 계정 정보와 본인인증(PASS) 정보가 일치하지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 재설정 - 요청 값 누락 → 400 + INVALID_PASSWORD_RESET_REQUEST")
+    void passwordVerify_invalidRequest() throws Exception {
+        // Given — Service 는 요청 값 누락을 거부한다
+        stubPasswordVerifyError(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST);
+
+        // When — loginId 누락
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PASSWORD_RESET_REQUEST", json.get("errorCode").asText());
+    }
+
+    // ---------- 비밀번호 재설정 사전 단계 (아이디 존재 확인) ----------
+
+    @Test
+    @DisplayName("아이디 존재 확인 성공 - 200 + SUCCESS (data null)")
+    void passwordCheckId_success() throws Exception {
+        // Given — Service 는 존재하는 회원으로 판단한다 (void — 별도 Stub 불필요)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/check-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"user@example.com\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("비밀번호를 재설정할 수 있는 계정입니다.", json.get("message").asText());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // Service 가 loginId 를 전달받았는지 확인
+        verify(authService).checkPasswordResetId("user@example.com");
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - 미가입 아이디 → 404 + USER_NOT_FOUND")
+    void passwordCheckId_userNotFound() throws Exception {
+        // Given — Service 는 회원 없음을 거부한다
+        stubPasswordCheckIdError(AuthErrorCode.USER_NOT_FOUND);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/check-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginId\":\"unknown@example.com\"}"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("USER_NOT_FOUND", json.get("errorCode").asText());
+        assertEquals("해당 본인인증 정보로 가입된 계정이 존재하지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("아이디 존재 확인 - 요청 값 누락 → 400 + INVALID_PASSWORD_RESET_REQUEST")
+    void passwordCheckId_invalidRequest() throws Exception {
+        // Given — Service 는 요청 값 누락을 거부한다
+        stubPasswordCheckIdError(AuthErrorCode.INVALID_PASSWORD_RESET_REQUEST);
+
+        // When — loginId 누락
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/password/check-id")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PASSWORD_RESET_REQUEST", json.get("errorCode").asText());
+    }
+
+    // ---------- 비밀번호 재설정 2단계 (비밀번호 변경) ----------
+
+    @Test
+    @DisplayName("비밀번호 변경 성공 - 200 + SUCCESS + 안내 메시지 (data null)")
+    void passwordReset_success() throws Exception {
+        // Given — Service 는 정상 변경을 허용한다 (void — 별도 Stub 불필요)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"passwordResetToken\":\"9f1d7c3a-82ab-4d32-a5dd-000000000000\",\"newPassword\":\"NewPassword123!\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("비밀번호가 성공적으로 변경되었습니다. 새로운 비밀번호로 로그인해 주세요.",
+                json.get("message").asText());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+
+        // Service 가 변경 요청을 전달받았는지 확인
+        verify(authService).resetPassword(any(PasswordResetRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 만료/무효 토큰 → 400 + RESET_TIMEOUT_OR_INVALID_TOKEN")
+    void passwordReset_invalidToken() throws Exception {
+        // Given — Service 는 만료/무효 토큰을 거부한다
+        stubPasswordResetError(AuthErrorCode.RESET_TIMEOUT_OR_INVALID_TOKEN);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"passwordResetToken\":\"expired-token\",\"newPassword\":\"NewPassword123!\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("RESET_TIMEOUT_OR_INVALID_TOKEN", json.get("errorCode").asText());
+        assertEquals("비밀번호 변경 유효시간(5분)이 만료되었거나 올바르지 않은 접근입니다. 처음부터 다시 진행해 주세요.",
+                json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 - 약한 비밀번호 → 422 + WEAK_PASSWORD")
+    void passwordReset_weakPassword() throws Exception {
+        // Given — Service 는 정책 미달 비밀번호를 거부한다
+        stubPasswordResetError(AuthErrorCode.WEAK_PASSWORD);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"passwordResetToken\":\"9f1d7c3a-82ab-4d32-a5dd-000000000000\",\"newPassword\":\"password\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("WEAK_PASSWORD", json.get("errorCode").asText());
+        assertEquals("비밀번호는 영문, 숫자, 특수문자를 포함하여 8자 이상이어야 합니다.", json.get("message").asText());
+    }
+
+    // ---------- PIN 번호 최초 설정 (로그인 사용자 전용) ----------
+
+    /** PIN 설정 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPinSetupError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(authService).setupPin(anyLong(), any(PinSetupRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 최초 설정 성공 - 200 + SUCCESS + Service 호출 검증")
+    void pinSetup_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 (SecurityContext 에 WorkitPrincipal 설정)
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/me/pin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinNumber\":\"123456\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\"deviceName\":\"Chrome / Windows\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — Controller 는 userId 와 요청을 Service 로 위임만 한다 (암호화/DB 접근 금지)
+        verify(authService).setupPin(eq(501L), any(PinSetupRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("핀번호가 성공적으로 설정되었습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("잘못된 PIN 요청 - 400 + INVALID_PIN_FORMAT")
+    void pinSetup_invalidPin() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 PIN 형식 오류를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinSetupError(AuthErrorCode.INVALID_PIN_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/me/pin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinNumber\":\"12345\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\"deviceName\":\"Chrome / Windows\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PIN_FORMAT", json.get("errorCode").asText());
+        assertEquals("핀번호는 6자리 숫자여야 합니다. 다시 입력해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("인증 없는 요청 - 401 + AUTH_TOKEN_NOT_FOUND")
+    void pinSetup_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(post("/api/v1/auth/me/pin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pinNumber\":\"123456\",\"deviceId\":\"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\"deviceName\":\"Chrome / Windows\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(authService, never()).setupPin(anyLong(), any(PinSetupRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+
+    // ---------- 보안 PIN 번호 재설정 (로그인 사용자 + PASS 재인증) ----------
+
+    /** PIN 재설정 실패 Stub — Service 가 지정 에러를 던진다 */
+    private void stubPinResetError(AuthErrorCode errorCode) {
+        doThrow(new BusinessException(errorCode))
+                .when(authService).resetPin(anyLong(), any(PinResetRequestDTO.class));
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 성공 - 200 + SUCCESS + Service 호출 검증 (data null)")
+    void pinReset_success() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 (SecurityContext 에 WorkitPrincipal 설정)
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"654321\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // Then — Controller 는 userId 와 요청을 Service 로 위임만 한다 (PASS 인증/암호화/DB 접근 금지)
+        verify(authService).resetPin(eq(501L), any(PinResetRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("SUCCESS", json.get("status").asText());
+        assertEquals("보안 PIN 번호가 성공적으로 변경되었습니다.", json.get("message").asText());
+        assertTrue(json.get("data") == null || json.get("data").isNull());
+        assertTrue(json.get("errorCode") == null || json.get("errorCode").isNull());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 본인확인(CI) 불일치 → 400 + VERIFICATION_FAILED")
+    void pinReset_verificationFailed() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 CI 불일치를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinResetError(AuthErrorCode.VERIFICATION_FAILED);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_0000000000\",\"pinNumber\":\"654321\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("VERIFICATION_FAILED", json.get("errorCode").asText());
+        assertEquals("입력하신 계정 정보와 본인인증(PASS) 정보가 일치하지 않습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 잘못된 PIN 형식 → 400 + INVALID_PIN_FORMAT")
+    void pinReset_invalidPinFormat() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 PIN 형식 오류를 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinResetError(AuthErrorCode.INVALID_PIN_FORMAT);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"12345\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("INVALID_PIN_FORMAT", json.get("errorCode").asText());
+        assertEquals("핀번호는 6자리 숫자여야 합니다. 다시 입력해 주세요.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 기존 PIN 과 동일한 번호 → 400 + SAME_AS_CURRENT_PIN")
+    void pinReset_sameAsCurrentPin() throws Exception {
+        // Given — JWT 인증된 로그인 사용자 + Service 가 기존 PIN 과 동일함을 거부한다
+        SecurityContextHolder.getContext().setAuthentication(new WorkitPrincipal(501L, "ROLE_USER"));
+        stubPinResetError(AuthErrorCode.SAME_AS_CURRENT_PIN);
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"123456\"}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+
+        // Then
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("SAME_AS_CURRENT_PIN", json.get("errorCode").asText());
+        assertEquals("기존 핀번호와 동일한 번호는 사용할 수 없습니다.", json.get("message").asText());
+    }
+
+    @Test
+    @DisplayName("PIN 재설정 - 인증 없는 요청 → 401 + AUTH_TOKEN_NOT_FOUND + Service 미호출")
+    void pinReset_unauthenticated() throws Exception {
+        // Given — SecurityContext 에 인증 객체가 없음 (CurrentUserArgumentResolver 가 401 처리)
+
+        // When
+        MvcResult result = mockMvc.perform(patch("/api/v1/auth/me/pin/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identityVerificationId\":\"imp_ver_9876543210\",\"pinNumber\":\"654321\"}"))
+                .andExpect(status().isUnauthorized())
+                .andReturn();
+
+        // Then — Service 호출 없이 401 응답
+        verify(authService, never()).resetPin(anyLong(), any(PinResetRequestDTO.class));
+        JsonNode json = parse(result);
+        assertEquals("ERROR", json.get("status").asText());
+        assertEquals("AUTH_TOKEN_NOT_FOUND", json.get("errorCode").asText());
+    }
+}

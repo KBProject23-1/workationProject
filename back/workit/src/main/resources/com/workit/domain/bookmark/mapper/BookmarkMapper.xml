@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.bookmark.mapper.BookmarkMapper">
+
+    <resultMap id="bookmarkResultMap" type="com.workit.domain.bookmark.vo.BookmarkVO">
+        <id property="bookmarkId" column="bookmark_id"/>
+        <result property="userId" column="users_id"/>
+        <result property="merchantId" column="merchants_id"/>
+        <result property="category" column="category"/>
+        <result property="name" column="name"/>
+        <result property="address" column="address"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="price" column="price"/>
+        <result property="rating" column="rating"/>
+        <result property="reviewCount" column="review_count"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="isDeleted" column="is_deleted"/>
+    </resultMap>
+
+    <select id="selectMerchantExists" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM merchants m
+            WHERE m.id = #{merchantId}
+        )
+    </select>
+
+    <select id="selectActiveBookmarkExistsByUserAndMerchant" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM bookmarks b
+            WHERE b.users_id = #{userId}
+              AND b.merchants_id = #{merchantId}
+              AND b.is_deleted IS NULL
+        )
+    </select>
+
+    <insert id="insertBookmark" parameterType="com.workit.domain.bookmark.vo.BookmarkVO"
+            useGeneratedKeys="true" keyProperty="bookmarkId">
+        INSERT INTO bookmarks (
+            users_id, merchants_id, created_at, updated_at
+        ) VALUES (
+            #{userId}, #{merchantId}, NOW(), NOW()
+        )
+    </insert>
+
+    <select id="selectActiveBookmarkById" resultMap="bookmarkResultMap">
+        SELECT id AS bookmark_id, users_id, merchants_id, created_at, updated_at
+          FROM bookmarks
+         WHERE id = #{bookmarkId}
+           AND is_deleted IS NULL
+    </select>
+
+    <update id="updateBookmarkDeletedAt">
+        UPDATE bookmarks
+           SET is_deleted = NOW(),
+               updated_at = NOW()
+         WHERE id = #{bookmarkId}
+           AND is_deleted IS NULL
+    </update>
+
+    <select id="selectBookmarkDetail" resultMap="bookmarkResultMap">
+        SELECT b.id AS bookmark_id,
+               b.merchants_id,
+               b.created_at,
+               m.category,
+               m.name,
+               m.thumbnail_url,
+               m.address,
+               m.price,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM reviews r
+                       WHERE r.merchant_id = m.id
+                         AND r.status = 'ACTIVE'
+                   ) THEN COALESCE(m.rating, 0.0)
+                   ELSE 0.0
+               END AS rating,
+               (SELECT COUNT(*)
+                  FROM reviews r
+                 WHERE r.merchant_id = m.id
+                   AND r.status = 'ACTIVE') AS review_count
+          FROM bookmarks b
+          JOIN merchants m ON m.id = b.merchants_id
+         WHERE b.id = #{bookmarkId}
+           AND b.is_deleted IS NULL
+    </select>
+
+    <select id="selectBookmarks" resultMap="bookmarkResultMap">
+        SELECT b.id AS bookmark_id,
+               b.merchants_id,
+               b.created_at,
+               m.category,
+               m.name,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM reviews r
+                       WHERE r.merchant_id = m.id
+                         AND r.status = 'ACTIVE'
+                   ) THEN COALESCE(m.rating, 0.0)
+                   ELSE 0.0
+               END AS rating,
+               (SELECT COUNT(*)
+                  FROM reviews r
+                 WHERE r.merchant_id = m.id
+                   AND r.status = 'ACTIVE') AS review_count
+          FROM bookmarks b
+          JOIN merchants m ON b.merchants_id = m.id
+         WHERE b.users_id = #{userId}
+           AND b.is_deleted IS NULL
+        <if test="category != null">
+           AND m.category = #{category}
+        </if>
+        <if test="cursor != null">
+           AND b.id &lt; #{cursor}
+        </if>
+         ORDER BY b.created_at DESC, b.id DESC
+         LIMIT #{size}
+    </select>
+
+</mapper>

@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.workit.domain.card.mapper.CardMapper">
+
+    <resultMap id="LinkableCardResultMap" type="com.workit.domain.card.vo.LinkableCardVO">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="card_company_code" property="cardCompanyCode"/>
+        <result column="card_company_name" property="cardCompanyName"/>
+        <result column="card_company_logo_url" property="cardCompanyLogoUrl"/>
+        <result column="card_number" property="cardNumber"/>
+        <result column="card_name" property="cardName"/>
+        <result column="card_classification" property="cardClassification"/>
+        <result column="card_type" property="cardType"/>
+        <result column="is_linked" property="isLinked"/>
+    </resultMap>
+
+    <resultMap id="CardResultMap" type="com.workit.domain.card.vo.CardVO">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="card_company_code" property="cardCompanyCode"/>
+        <result column="card_company_name" property="cardCompanyName"/>
+        <result column="card_name" property="cardName"/>
+        <result column="card_number" property="cardNumber"/>
+        <result column="card_classification" property="cardClassification"/>
+        <result column="card_type" property="cardType"/>
+        <result column="is_primary" property="isPrimary"/>
+        <result column="is_agreed" property="isAgreed"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="is_deleted" property="isDeleted"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="deleted_at" property="deletedAt"/>
+    </resultMap>
+
+    <!--
+        연동 가능 카드 = (아직 연동 안 한 것) OR (연동했다가 삭제해서 재연동 가능한 것)
+    -->
+    <select id="findAvailableCards" resultMap="LinkableCardResultMap">
+        SELECT lc.id, lc.user_id, lc.card_company_code, cc.name AS card_company_name, cc.logo_url AS card_company_logo_url,
+        lc.card_number, lc.card_name, lc.card_classification, lc.card_type, lc.is_linked
+        FROM linkable_cards lc
+        JOIN card_companies cc ON lc.card_company_code = cc.code
+        WHERE lc.user_id = #{userId}
+        AND (
+        lc.is_linked = 0
+        OR EXISTS (
+        SELECT 1 FROM cards c
+        WHERE c.user_id = lc.user_id
+        AND c.card_number = lc.card_number
+        AND c.is_deleted = 1
+        )
+        )
+    </select>
+
+    <select id="findLinkableCardById" resultMap="LinkableCardResultMap">
+        SELECT lc.id, lc.user_id, lc.card_company_code, cc.name AS card_company_name, cc.logo_url AS card_company_logo_url,
+        lc.card_number, lc.card_name, lc.card_classification, lc.card_type, lc.is_linked
+        FROM linkable_cards lc
+        JOIN card_companies cc ON lc.card_company_code = cc.code
+        WHERE lc.id = #{linkableCardId} AND lc.user_id = #{userId}
+    </select>
+
+    <update id="markLinkableCardAsLinked">
+        UPDATE linkable_cards
+        SET is_linked = 1
+        WHERE id = #{linkableCardId}
+    </update>
+
+    <select id="findDeletedCardByNumber" resultMap="CardResultMap">
+        SELECT c.id, c.user_id, c.card_company_code, cc.name AS card_company_name,
+        c.card_name, c.card_number, c.card_classification, c.card_type,
+        c.is_primary, c.is_agreed, c.created_at, c.is_deleted, c.updated_at, c.deleted_at
+        FROM cards c
+        JOIN card_companies cc ON c.card_company_code = cc.code
+        WHERE c.user_id = #{userId} AND c.card_number = #{cardNumber} AND c.is_deleted = 1
+    </select>
+
+    <update id="restoreCard">
+        UPDATE cards
+        SET is_deleted = 0, deleted_at = NULL, is_primary = #{isPrimary}, updated_at = NOW(),
+        card_company_code = #{cardCompanyCode}, card_name = #{cardName},
+        card_classification = #{cardClassification}, card_type = #{cardType}
+        WHERE id = #{cardId} AND user_id = #{userId}
+    </update>
+
+    <select id="findMyCards" resultMap="CardResultMap">
+        SELECT c.id, c.user_id, c.card_company_code, cc.name AS card_company_name,
+        c.card_name, c.card_number, c.card_classification, c.card_type,
+        c.is_primary, c.is_agreed, c.created_at, c.is_deleted, c.updated_at, c.deleted_at
+        FROM cards c
+        JOIN card_companies cc ON c.card_company_code = cc.code
+        WHERE c.user_id = #{userId} AND c.is_deleted = 0
+        ORDER BY c.is_primary DESC, c.id ASC
+    </select>
+
+    <!-- 거래 내역 카드별 필터용. 삭제된 카드도 과거 결제 내역 조회가 필요해서 is_deleted 조건을 걸지 않는다 -->
+    <select id="findAllCardsForFilter" resultMap="CardResultMap">
+        SELECT c.id, c.user_id, c.card_company_code, cc.name AS card_company_name,
+        c.card_name, c.card_number, c.card_classification, c.card_type,
+        c.is_primary, c.is_agreed, c.created_at, c.is_deleted, c.updated_at, c.deleted_at
+        FROM cards c
+        JOIN card_companies cc ON c.card_company_code = cc.code
+        WHERE c.user_id = #{userId}
+        ORDER BY c.is_deleted ASC, c.is_primary DESC, c.id ASC
+    </select>
+
+    <select id="findCardById" resultMap="CardResultMap">
+        SELECT c.id, c.user_id, c.card_company_code, cc.name AS card_company_name,
+        c.card_name, c.card_number, c.card_classification, c.card_type,
+        c.is_primary, c.is_agreed, c.created_at, c.is_deleted, c.updated_at, c.deleted_at
+        FROM cards c
+        JOIN card_companies cc ON c.card_company_code = cc.code
+        WHERE c.id = #{cardId} AND c.user_id = #{userId} AND c.is_deleted = 0
+    </select>
+
+    <select id="countActiveCards" resultType="int">
+        SELECT COUNT(*) FROM cards
+        WHERE user_id = #{userId} AND is_deleted = 0
+    </select>
+
+    <insert id="insertCard" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO cards (
+        user_id, card_company_code, card_name, card_number,
+        card_classification, card_type, is_primary, is_agreed, is_deleted
+        ) VALUES (
+        #{userId}, #{cardCompanyCode}, #{cardName}, #{cardNumber},
+        #{cardClassification}, #{cardType}, #{isPrimary}, 1, 0
+        )
+    </insert>
+
+    <update id="clearPrimaryCard">
+        UPDATE cards
+        SET is_primary = 0
+        WHERE user_id = #{userId} AND is_primary = 1
+    </update>
+
+    <update id="setPrimaryCard">
+        UPDATE cards
+        SET is_primary = 1
+        WHERE id = #{cardId} AND user_id = #{userId}
+    </update>
+
+    <update id="updateCardNickname">
+        UPDATE cards
+        SET card_name = #{cardNickname}, updated_at = NOW()
+        WHERE id = #{cardId} AND user_id = #{userId}
+    </update>
+
+    <update id="deleteCard">
+        UPDATE cards
+        SET is_deleted = 1, deleted_at = NOW()
+        WHERE id = #{cardId} AND user_id = #{userId}
+    </update>
+
+</mapper>

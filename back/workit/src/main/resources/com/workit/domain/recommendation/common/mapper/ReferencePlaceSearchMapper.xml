@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.recommendation.common.mapper.ReferencePlaceSearchMapper">
+
+    <!--
+        기준 장소 검색.
+
+        검색 결과는 추천 유형별 업종으로 제한하지 않고 DB의 모든 업종을 대상으로 한다.
+        지역은 진행 중인 워케이션 지역으로 제한한다.
+        예약 여부는 후보 조회와 같은 방식으로 채워 목록에서 구분되게 한다.
+    -->
+    <select id="selectReferencePlaceCandidatesByName"
+            resultType="com.workit.domain.recommendation.common.vo.ReferencePlaceCandidateVO">
+        SELECT m.id           AS merchant_id,
+               m.name         AS merchant_name,
+               m.category,
+               m.latitude,
+               m.longitude,
+               EXISTS (
+                   SELECT 1
+                     FROM reservations r
+                     JOIN reservation_products rp ON rp.id = r.product_id
+                    WHERE r.user_id = #{userId}
+                      AND r.workation_id = #{workationId}
+                      AND r.status IN ('CONFIRMED', 'COMPLETED')
+                      AND rp.merchant_id = m.id
+               ) AS reserved
+          FROM merchants m
+     LEFT JOIN tourism_merchant_sources tms ON tms.merchant_id = m.id
+         WHERE m.name LIKE CONCAT('%', #{keyword}, '%')
+           AND m.region_id = #{regionId}
+           AND (tms.merchant_id IS NULL OR tms.is_active = 1)
+         ORDER BY reserved DESC,
+                  m.name ASC,
+                  m.id ASC
+         LIMIT #{size}
+    </select>
+
+</mapper>

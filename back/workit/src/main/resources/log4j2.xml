@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <!--
+        Log4j2 콘솔 로깅 설정 (개발 환경)
+        - SLF4J(애플리케이션 로깅 API) -> log4j-slf4j-impl -> Log4j2 구현체
+        - 클래스패스 루트에 log4j2.xml 이 있으면 Log4j2 가 자동으로 로드한다.
+        - JSON 로그 / 외부 수집 / AsyncAppender / RollingFile 은 사용하지 않는다.
+        - 예외 stack trace 는 Log4j2 기본 동작(패턴에 %ex 없어도)으로 함께 출력된다.
+    -->
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout charset="UTF-8"
+                           pattern="%d{yyyy-MM-dd HH:mm:ss.SSS}{Asia/Seoul} [%thread] %-5level %logger{36} - %msg%n"/>
+        </Console>
+    </Appenders>
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

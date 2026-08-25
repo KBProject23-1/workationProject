@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.workit.domain.transaction.mapper.TransactionMapper">
+
+    <resultMap id="TransactionResultMap" type="com.workit.domain.transaction.vo.TransactionVO">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="wallet_id" property="walletId"/>
+        <result column="bank_account_id" property="bankAccountId"/>
+        <result column="card_id" property="cardId"/>
+        <result column="workation_id" property="workationId"/>
+        <result column="reservation_id" property="reservationId"/>
+        <result column="merchant_id" property="merchantId"/>
+        <result column="payment_source_type" property="paymentSourceType"/>
+        <result column="merchant_name" property="merchantName"/>
+        <result column="amount" property="amount"/>
+        <result column="transaction_type" property="transactionType"/>
+        <result column="category_assigned" property="categoryAssigned"/>
+        <result column="is_business_expense" property="isBusinessExpense"/>
+        <result column="approved_number" property="approvedNumber"/>
+        <result column="pg_transaction_id" property="pgTransactionId"/>
+        <result column="transaction_number" property="transactionNumber"/>
+        <result column="status" property="status"/>
+        <result column="approved_at" property="approvedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+        <result column="cancelled_at" property="cancelledAt"/>
+        <result column="merchant_category" property="merchantCategory"/>
+        <result column="review_id" property="reviewId"/>
+        <result column="review_status" property="reviewStatus"/>
+        <result column="merchant_address" property="merchantAddress"/>
+        <result column="merchant_taxpayer_number" property="merchantTaxpayerNumber"/>
+        <result column="merchant_phone_number" property="merchantPhoneNumber"/>
+        <result column="card_company_name" property="cardCompanyName"/>
+        <result column="card_name" property="cardName"/>
+        <result column="card_number" property="cardNumber"/>
+        <result column="card_classification" property="cardClassification"/>
+    </resultMap>
+
+    <sql id="transactionFilters">
+        WHERE user_id = #{userId}
+        <if test="startDate != null and startDate != ''">
+            AND approved_at &gt;= CONCAT(#{startDate}, ' 00:00:00')
+        </if>
+        <if test="endDate != null and endDate != ''">
+            AND approved_at &lt;= CONCAT(#{endDate}, ' 23:59:59')
+        </if>
+        <if test="paymentSourceType != null and paymentSourceType != ''">
+            AND payment_source_type = #{paymentSourceType}
+        </if>
+        <if test="transactionType != null and transactionType != ''">
+            AND transaction_type = #{transactionType}
+        </if>
+        <if test="cardId != null">
+            AND card_id = #{cardId}
+        </if>
+    </sql>
+
+    <select id="findTransactions" resultMap="TransactionResultMap">
+        SELECT id, user_id, workation_id, payment_source_type, merchant_name, amount,
+        transaction_type, category_assigned, is_business_expense, approved_number, status, approved_at
+        FROM transactions
+        <include refid="transactionFilters"/>
+        ORDER BY approved_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <!-- 목록과 필터 조건이 같아야 페이지 수가 맞는다 -->
+    <select id="countTransactions" resultType="long">
+        SELECT COUNT(*)
+        FROM transactions
+        <include refid="transactionFilters"/>
+    </select>
+
+    <!-- transactionType 은 지출/충전 두 값을 함께 집계해야 하므로 필터에서 제외한다 -->
+    <sql id="transactionSummaryFilters">
+        WHERE user_id = #{userId}
+        AND status != 'CANCELED'
+        <if test="startDate != null and startDate != ''">
+            AND approved_at &gt;= CONCAT(#{startDate}, ' 00:00:00')
+        </if>
+        <if test="endDate != null and endDate != ''">
+            AND approved_at &lt;= CONCAT(#{endDate}, ' 23:59:59')
+        </if>
+        <if test="paymentSourceType != null and paymentSourceType != ''">
+            AND payment_source_type = #{paymentSourceType}
+        </if>
+        <if test="cardId != null">
+            AND card_id = #{cardId}
+        </if>
+    </sql>
+
+    <select id="findTransactionSummary" resultType="com.workit.domain.transaction.vo.TransactionSummaryVO">
+        SELECT
+            COALESCE(SUM(CASE WHEN transaction_type = 'PAYMENT' THEN amount ELSE 0 END), 0) AS total_payment_amount,
+            COALESCE(SUM(CASE WHEN transaction_type = 'DEPOSIT' THEN amount ELSE 0 END), 0) AS total_charge_amount,
+            COUNT(CASE WHEN transaction_type = 'PAYMENT' THEN 1 END) AS total_payment_count
+        FROM transactions
+        <include refid="transactionSummaryFilters"/>
+    </select>
+
+    <select id="findTransactionDetailById" resultMap="TransactionResultMap">
+        SELECT
+            t.*,
+            m.address AS merchant_address,
+            m.category AS merchant_category,
+            rv.review_id,
+            rv.status AS review_status
+        FROM transactions t
+        LEFT JOIN merchants m ON t.merchant_id = m.id
+        LEFT JOIN reviews rv ON rv.transaction_id = t.id
+        WHERE t.id = #{transactionId} AND t.user_id = #{userId}
+    </select>
+
+    <select id="findTransactionForReceipt" resultMap="TransactionResultMap">
+        SELECT t.*,
+        m.address AS merchant_address,
+        m.taxpayer_identification_number AS merchant_taxpayer_number,
+        m.phone_number AS merchant_phone_number,
+        cc.name AS card_company_name,
+        c.card_name AS card_name,
+        c.card_number AS card_number,
+        c.card_classification AS card_classification
+        FROM transactions t
+        LEFT JOIN merchants m ON t.merchant_id = m.id
+        LEFT JOIN cards c ON t.card_id = c.id
+        LEFT JOIN card_companies cc ON c.card_company_code = cc.code
+        WHERE t.id = #{transactionId} AND t.user_id = #{userId}
+    </select>
+
+    <!-- 결제 시점에 가맹점 카테고리를 스냅샷으로 확보하기 위한 단건 조회 -->
+    <select id="findMerchantCategoryById" resultType="string">
+        SELECT category
+        FROM merchants
+        WHERE id = #{merchantId}
+    </select>
+
+    <insert id="insertTransaction" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO transactions (
+        user_id, wallet_id, bank_account_id, card_id, workation_id, reservation_id, merchant_id, idempotency_key,
+        payment_source_type, merchant_name, amount, transaction_type,
+        category_assigned, is_business_expense, approved_number, transaction_number,
+        status, approved_at, created_at
+        ) VALUES (
+        #{userId}, #{walletId}, #{bankAccountId}, #{cardId}, #{workationId}, #{reservationId}, #{merchantId}, #{idempotencyKey},
+        #{paymentSourceType}, #{merchantName}, #{amount}, #{transactionType},
+        #{categoryAssigned}, #{isBusinessExpense}, #{approvedNumber}, #{transactionNumber},
+        #{status}, #{approvedAt}, NOW()
+        )
+    </insert>
+
+    <!-- PG 승인 반영: PG 거래ID/승인번호 기록 + AUTHORIZED 로 전이 -->
+    <update id="applyPgAuthorization">
+        UPDATE transactions
+        SET pg_transaction_id = #{pgTransactionId},
+            approved_number   = #{approvedNumber},
+            status            = 'AUTHORIZED',
+            updated_at        = NOW()
+        WHERE id = #{transactionId} AND user_id = #{userId}
+    </update>
+
+    <!-- 상태 전이. approved_at 은 전달된 값이 있을 때만 갱신(승인 성공 시점) -->
+    <update id="updateStatus">
+        UPDATE transactions
+        SET status = #{status},
+            updated_at = NOW()
+            <if test="approvedAt != null">, approved_at = #{approvedAt}</if>
+        WHERE id = #{transactionId} AND user_id = #{userId}
+    </update>
+
+    <select id="findTransactionForCancel" resultMap="TransactionResultMap">
+        SELECT t.*, c.card_classification AS card_classification
+        FROM transactions t
+                 LEFT JOIN cards c ON t.card_id = c.id
+        WHERE t.id = #{transactionId} AND t.user_id = #{userId}
+    </select>
+
+    <!-- PAID 일 때만 CANCELED 로 원자적 전이. 동시 이중취소 시 승자만 rows==1, 나머지는 0(이미 취소) -->
+    <update id="cancelTransaction">
+        UPDATE transactions
+        SET status = 'CANCELED', cancelled_at = NOW()
+        WHERE id = #{transactionId} AND user_id = #{userId} AND status = 'PAID'
+    </update>
+</mapper>

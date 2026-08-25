@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.category.mapper.CategoryMapper">
+
+    <sql id="categoryColumns">
+        ec.id,
+        ec.budget_type,
+        ec.code,
+        ec.name,
+        ec.description,
+        ec.is_default,
+        ec.is_deletable,
+        ec.sort_order,
+        ucl.custom_name
+    </sql>
+
+    <!--
+        사용자 별칭은 지정한 카테고리에만 존재하므로 LEFT JOIN 을 사용한다.
+        user_id 조건을 WHERE 가 아닌 ON 절에 두어야 별칭이 없는 카테고리도 함께 조회된다.
+    -->
+    <select id="selectCategoryList"
+            resultType="com.workit.domain.category.vo.ExpenseCategoryVO">
+        SELECT
+        <include refid="categoryColumns"/>
+        FROM expense_categories ec
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        WHERE ec.budget_type = #{budgetType}
+        AND (ec.user_id IS NULL OR ec.user_id = #{userId})
+        <include refid="corporateCardOnlyFilter"/>
+        ORDER BY ec.sort_order
+    </select>
+
+    <!--
+        법인카드 결제만 비용으로 인정되는 계정과목은, 법인카드가 없으면 목록에서 뺀다.
+        예산에 배정하지 못하게 하면 지출 등록에서도 자연히 선택할 수 없다.
+        저장 버튼을 누른 뒤에 거절하는 것보다 처음부터 안 보이는 편이 낫다.
+
+          ENTERTAINMENT  접대비. 법인세법이 법인카드 결제를 요구한다
+          MEETING        회의비. 내부 회의와 외부 거래처 미팅을 구분할 수 없어 보수적으로 막는다
+
+        이미 예산에 배정된 카테고리에는 적용하지 않는다.
+        법인카드를 나중에 삭제한 사용자의 기존 예산이 사라지면 안 된다.
+    -->
+    <sql id="corporateCardOnlyFilter">
+        AND (
+            ec.budget_type &lt;&gt; 'WORK'
+            OR ec.code NOT IN ('ENTERTAINMENT', 'MEETING')
+            OR EXISTS (
+                SELECT 1
+                  FROM cards c
+                 WHERE c.user_id   = #{userId}
+                   AND c.card_type = 'WORK'
+                   AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            )
+        )
+    </sql>
+
+    <!-- 해당 워케이션 예산에 배정된 카테고리만 조회한다 -->
+    <select id="selectBudgetedCategoryList"
+            resultType="com.workit.domain.category.vo.ExpenseCategoryVO">
+        SELECT
+        <include refid="categoryColumns"/>
+        FROM budgets b
+        JOIN expense_categories ec
+          ON ec.id = b.expense_category_id
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        WHERE b.workation_id = #{workationId}
+        AND b.budget_type = #{budgetType}
+        AND (ec.user_id IS NULL OR ec.user_id = #{userId})
+        ORDER BY ec.sort_order
+    </select>
+
+    <select id="selectCategoryById"
+            resultType="com.workit.domain.category.vo.ExpenseCategoryVO">
+        SELECT
+        <include refid="categoryColumns"/>
+        FROM expense_categories ec
+        LEFT JOIN user_category_labels ucl
+               ON ucl.expense_category_id = ec.id
+              AND ucl.user_id = #{userId}
+        WHERE ec.id = #{categoryId}
+        AND (ec.user_id IS NULL OR ec.user_id = #{userId})
+    </select>
+
+    <!--
+        (user_id, expense_category_id) 복합 PK 를 이용한 UPSERT.
+        조회 후 분기하면 그 사이에 다른 요청이 INSERT 할 수 있어 중복 키 오류가 난다.
+    -->
+    <insert id="upsertCategoryLabel">
+        INSERT INTO user_category_labels (user_id, expense_category_id, custom_name, updated_at)
+        VALUES (#{userId}, #{categoryId}, #{customName}, NOW())
+        ON DUPLICATE KEY UPDATE
+            custom_name = #{customName},
+            updated_at  = NOW()
+    </insert>
+
+    <delete id="deleteCategoryLabel">
+        DELETE FROM user_category_labels
+         WHERE user_id             = #{userId}
+           AND expense_category_id = #{categoryId}
+    </delete>
+
+</mapper>

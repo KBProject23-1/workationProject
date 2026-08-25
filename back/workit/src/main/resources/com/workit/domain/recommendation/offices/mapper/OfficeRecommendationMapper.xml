@@ -1,0 +1,473 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.recommendation.offices.mapper.OfficeRecommendationMapper">
+
+    <!--
+        설문은 사용자당 1회라 워케이션 조건을 걸지 않는다.
+        workationId 파라미터는 호출부 시그니처를 유지하려고 남겨 둔 것이고 쓰지 않는다.
+    -->
+    <select id="selectLatestSurveyIdByWorkation" resultType="java.lang.Long">
+        SELECT id
+        FROM user_surveys
+        WHERE user_id = #{userId}
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectSurveyAnswersBySurveyId"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeSurveyAnswerVO">
+        SELECT q.question_code,
+               so.option_code
+        FROM user_survey_answers usa
+        JOIN survey_options so ON so.id = usa.option_id
+        JOIN survey_questions q ON q.id = so.question_id
+        WHERE usa.survey_id = #{surveyId}
+        AND q.question_code IN ('PRIORITY_FACTOR', 'OFFICE_ENVIRONMENT')
+    </select>
+
+    <select id="selectAccommodationReference"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeReferenceMerchantVO">
+        SELECT m.id   AS merchantId,
+               m.name AS merchantName,
+               CAST(m.latitude AS DECIMAL(10, 8)) AS latitude,
+               CAST(m.longitude AS DECIMAL(11, 8)) AS longitude
+        FROM reservations r
+        JOIN reservation_products rp ON rp.id = r.product_id
+        JOIN merchants m ON m.id = rp.merchant_id
+        WHERE r.user_id = #{userId}
+          AND r.workation_id = #{workationId}
+          AND r.status IN ('CONFIRMED', 'COMPLETED')
+          AND m.category = 'ACCOMMODATION'
+        ORDER BY r.start_date ASC, r.id ASC
+        LIMIT 1
+    </select>
+
+    <select id="selectAccommodationReferenceCandidates"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeCandidateVO">
+        SELECT m.id           AS merchant_id,
+               m.name,
+               m.category,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.latitude,
+               m.longitude,
+               m.rating,
+               CAST(COUNT(rw.review_id) AS UNSIGNED) AS review_count,
+               NULL AS noise_level,
+               COALESCE(CAST(SUM(CASE WHEN rw.atmosphere = 'QUIET' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS quiet_review_count,
+               COALESCE(CAST(SUM(CASE WHEN rw.atmosphere = 'OPEN' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS open_review_count,
+               COALESCE(CAST(SUM(CASE WHEN rw.atmosphere = 'COLLAB' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS collab_review_count,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM bookmarks b
+                       WHERE b.users_id = #{userId}
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END AS bookmarked,
+               (rd.merchant_id IS NOT NULL) AS reserved,
+               rd.reservation_distance
+          FROM merchants m
+          JOIN (
+            SELECT rp.merchant_id,
+                   MIN(ABS(DATEDIFF(r.start_date, #{workationStartDate}))) AS reservation_distance
+              FROM reservations r
+              JOIN reservation_products rp
+                ON rp.id = r.product_id
+             WHERE r.user_id = #{userId}
+               AND r.workation_id = #{workationId}
+               AND r.status IN ('CONFIRMED', 'COMPLETED')
+             GROUP BY rp.merchant_id
+          ) rd
+            ON rd.merchant_id = m.id
+          LEFT JOIN reviews rw
+                 ON rw.merchant_id = m.id
+                AND rw.status = 'ACTIVE'
+         WHERE m.region_id = #{regionId}
+           AND m.category = 'ACCOMMODATION'
+         GROUP BY m.id,
+                  m.name,
+                  m.category,
+                  m.address,
+                  m.thumbnail_url,
+                  m.price,
+                  m.latitude,
+                  m.longitude,
+                  m.rating,
+                  rd.reservation_distance
+         ORDER BY (rd.merchant_id IS NOT NULL) DESC,
+                  rd.reservation_distance ASC,
+                  m.id ASC
+    </select>
+
+    <select id="selectReferenceMerchant"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeReferenceMerchantVO">
+        SELECT m.id AS merchant_id,
+               m.name AS merchant_name,
+               m.latitude,
+               m.longitude
+          FROM merchants m
+         WHERE m.id = #{merchantId}
+           AND m.region_id = #{regionId}
+    </select>
+
+    <select id="selectOfficeCandidates"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeCandidateVO">
+        SELECT m.id           AS merchant_id,
+               m.name,
+               m.category,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.latitude,
+               m.longitude,
+               m.rating,
+               CAST(COUNT(r.review_id) AS UNSIGNED) AS review_count,
+               o.noise_level,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'QUIET' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS quiet_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'OPEN' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS open_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'COLLAB' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS collab_review_count,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM bookmarks b
+                       WHERE b.users_id = #{userId}
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END AS bookmarked
+        FROM merchants m
+                 INNER JOIN offices o
+                            ON o.merchant_id = m.id
+                 LEFT JOIN reviews r
+                           ON r.merchant_id = m.id
+                               AND r.status = 'ACTIVE'
+        WHERE m.category = 'OFFICE'
+          AND m.region_id = #{regionId}
+          AND EXISTS (
+            SELECT 1
+            FROM reservation_products rp
+            INNER JOIN product_daily_inventories pdi
+                       ON pdi.product_id = rp.id
+            WHERE rp.merchant_id = m.id
+              AND pdi.is_available = 1
+              AND pdi.remaining_capacity <![CDATA[ > ]]> 0
+              AND pdi.inventory_date BETWEEN #{startDate} AND #{endDate}
+        )
+        GROUP BY m.id,
+                 m.name,
+                 m.category,
+                 m.address,
+                 m.thumbnail_url,
+                 m.price,
+                 m.latitude,
+                 m.longitude,
+                 m.rating,
+                 o.noise_level
+        ORDER BY m.id ASC
+    </select>
+
+    <select id="selectOfficeCandidatesByMerchantIds"
+            resultType="com.workit.domain.recommendation.offices.vo.OfficeCandidateVO">
+        SELECT m.id           AS merchant_id,
+               m.name,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.latitude,
+               m.longitude,
+               m.rating,
+               CAST(COUNT(r.review_id) AS UNSIGNED) AS review_count,
+               o.noise_level,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'QUIET' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS quiet_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'OPEN' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS open_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'COLLAB' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS collab_review_count,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM bookmarks b
+                       WHERE b.users_id = #{userId}
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END AS bookmarked
+          FROM merchants m
+                   INNER JOIN offices o
+                              ON o.merchant_id = m.id
+                   LEFT JOIN reviews r
+                             ON r.merchant_id = m.id
+                                 AND r.status = 'ACTIVE'
+         WHERE m.category = 'OFFICE'
+           AND m.id IN
+           <foreach collection="merchantIds" item="merchantId" open="(" separator="," close=")">
+               #{merchantId}
+           </foreach>
+        GROUP BY m.id,
+                 m.name,
+                 m.address,
+                 m.thumbnail_url,
+                 m.price,
+                 m.latitude,
+                 m.longitude,
+                 m.rating,
+                 o.noise_level
+        ORDER BY m.id ASC
+    </select>
+
+    <insert id="insertRecommendationRequest" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO recommendation_requests (
+            user_id,
+            workation_id,
+            reference_merchant_id,
+            secondary_reference_merchant_id,
+            recommendation_type,
+            reference_type,
+            meal_type,
+            reference_latitude,
+            reference_longitude
+        )
+        VALUES (
+            #{userId},
+            #{workationId},
+            #{referenceMerchantId},
+            #{secondaryReferenceMerchantId},
+            #{recommendationType},
+            #{referenceType},
+            #{mealType},
+            #{referenceLatitude},
+            #{referenceLongitude}
+        )
+    </insert>
+
+    <select id="selectLatestRecommendationRequestByUser" resultType="com.workit.domain.recommendation.offices.vo.OfficeRecommendationRequestVO">
+        SELECT rr.id,
+               rr.user_id,
+               rr.workation_id,
+               rr.reference_merchant_id,
+               rr.secondary_reference_merchant_id,
+               rr.recommendation_type AS recommendationType,
+               rr.reference_type AS referenceType,
+               rr.meal_type,
+               rr.reference_latitude,
+               rr.reference_longitude,
+               rr.created_at,
+               m.name AS referenceMerchantName,
+               m2.name AS secondaryReferenceMerchantName
+        FROM recommendation_requests rr
+        LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+        LEFT JOIN merchants m2 ON m2.id = rr.secondary_reference_merchant_id
+        WHERE rr.user_id = #{userId}
+          AND rr.workation_id = #{workationId}
+          AND rr.recommendation_type = 'OFFICE'
+        <if test="referenceMerchantId != null">
+            AND rr.reference_merchant_id = #{referenceMerchantId}
+        </if>
+        ORDER BY rr.created_at DESC, rr.id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectRecommendationRequestById" resultType="com.workit.domain.recommendation.offices.vo.OfficeRecommendationRequestVO">
+        SELECT rr.id,
+               rr.user_id,
+               rr.workation_id,
+               rr.reference_merchant_id,
+               rr.secondary_reference_merchant_id,
+               rr.recommendation_type AS recommendationType,
+               rr.reference_type AS referenceType,
+               rr.meal_type,
+               rr.reference_latitude,
+               rr.reference_longitude,
+               rr.created_at,
+               m.name AS referenceMerchantName,
+               m2.name AS secondaryReferenceMerchantName
+        FROM recommendation_requests rr
+        LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+        LEFT JOIN merchants m2 ON m2.id = rr.secondary_reference_merchant_id
+        WHERE rr.id = #{recommendationRequestId}
+          AND rr.user_id = #{userId}
+          AND rr.recommendation_type = 'OFFICE'
+        LIMIT 1
+    </select>
+
+    <select id="selectTodayLatestRecommendationRequestByUser" resultType="com.workit.domain.recommendation.offices.vo.OfficeRecommendationRequestVO">
+        SELECT rr.id,
+               rr.user_id,
+               rr.workation_id,
+               rr.reference_merchant_id,
+               rr.secondary_reference_merchant_id,
+               rr.recommendation_type AS recommendationType,
+               rr.reference_type AS referenceType,
+               rr.meal_type,
+               rr.reference_latitude,
+               rr.reference_longitude,
+               rr.created_at,
+               m.name AS referenceMerchantName,
+               m2.name AS secondaryReferenceMerchantName
+        FROM recommendation_requests rr
+        LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+        LEFT JOIN merchants m2 ON m2.id = rr.secondary_reference_merchant_id
+        WHERE rr.user_id = #{userId}
+          AND rr.workation_id = #{workationId}
+          AND rr.recommendation_type = 'OFFICE'
+          AND rr.created_at <![CDATA[ >= ]]>#{startAt}
+          AND rr.created_at <![CDATA[ < ]]> #{endAt}
+        <if test="referenceMerchantId != null">
+            AND rr.reference_merchant_id = #{referenceMerchantId}
+        </if>
+        ORDER BY rr.created_at DESC, rr.id DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectRecommendationResultCountByRequestId" resultType="java.lang.Integer">
+        SELECT COUNT(1)
+        FROM recommendation_results
+        WHERE recommendation_request_id = #{recommendationRequestId}
+    </select>
+
+    <insert id="insertRecommendationResults">
+        INSERT INTO recommendation_results (
+            recommendation_request_id,
+            merchant_id,
+            price_score,
+            preference_score,
+            accessibility_score,
+            rating_score,
+            total_score,
+            ranking
+        )
+        VALUES
+        <foreach collection="results" item="result" separator=",">
+            (#{requestId},
+             #{result.merchantId},
+             #{result.priceScore},
+             #{result.preferenceScore},
+             #{result.accessibilityScore},
+             #{result.ratingScore},
+             #{result.totalScore},
+             #{result.ranking})
+        </foreach>
+    </insert>
+
+    <select id="selectRecommendationResultsByCursor"
+            resultMap="recommendationResultMap">
+        SELECT rr.id               AS recommendation_result_id,
+               rr.recommendation_request_id AS recommendation_request_id,
+               rr.ranking,
+               rr.price_score,
+               rr.preference_score,
+               rr.accessibility_score,
+               rr.rating_score,
+               rr.total_score,
+               m.id               AS merchant_id,
+               m.name,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.rating,
+               o.noise_level,
+               CAST(COUNT(r.review_id) AS UNSIGNED) AS review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'QUIET' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS quiet_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'OPEN' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS open_review_count,
+               COALESCE(CAST(SUM(CASE WHEN r.atmosphere = 'COLLAB' THEN 1 ELSE 0 END) AS UNSIGNED), 0) AS collab_review_count,
+               rr.calculated_at,
+               CAST(m.latitude AS DECIMAL(10, 8)) AS latitude,
+               CAST(m.longitude AS DECIMAL(11, 8)) AS longitude,
+               CASE
+                   WHEN EXISTS (
+                       SELECT 1
+                       FROM bookmarks b
+                       WHERE b.users_id = #{userId}
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL
+                   ) THEN 1
+                   ELSE 0
+               END AS bookmarked
+        FROM recommendation_results rr
+        JOIN recommendation_requests rec_request
+          ON rec_request.id = rr.recommendation_request_id
+        JOIN workations w
+          ON w.id = rec_request.workation_id
+        JOIN merchants m ON m.id = rr.merchant_id
+        JOIN offices o ON o.merchant_id = m.id
+        LEFT JOIN reviews r ON r.merchant_id = m.id AND r.status = 'ACTIVE'
+        WHERE rr.recommendation_request_id = #{recommendationRequestId}
+          AND EXISTS (
+              SELECT 1
+              FROM reservation_products rp
+              JOIN product_daily_inventories pdi ON pdi.product_id = rp.id
+              WHERE rp.merchant_id = rr.merchant_id
+                AND rp.product_detail_type IN ('OFFICE_SEAT', 'MEETING_ROOM')
+                AND pdi.inventory_date &gt;= w.start_date
+                AND pdi.inventory_date &lt;= w.end_date
+              GROUP BY rp.id
+              HAVING COUNT(DISTINCT pdi.inventory_date) = DATEDIFF(w.end_date, w.start_date) + 1
+                 AND MIN(CASE WHEN pdi.is_available = 1
+                     AND pdi.remaining_capacity &gt;= 1 THEN 1 ELSE 0 END) = 1
+          )
+          <if test="cursorRanking != null and cursorId != null">
+              AND (
+                  rr.ranking <![CDATA[ > ]]> #{cursorRanking}
+                  OR (
+                      rr.ranking = #{cursorRanking}
+                      AND rr.id <![CDATA[ > ]]> #{cursorId}
+                  )
+              )
+          </if>
+        GROUP BY rr.id,
+                 rr.recommendation_request_id,
+                 rr.ranking,
+                 rr.price_score,
+                 rr.preference_score,
+                 rr.accessibility_score,
+                 rr.rating_score,
+                 rr.total_score,
+                 m.id,
+                 m.name,
+                 m.address,
+                 m.thumbnail_url,
+                 m.price,
+                 m.rating,
+                 o.noise_level,
+                 rr.calculated_at,
+                 m.latitude,
+                 m.longitude,
+                 w.start_date,
+                 w.end_date
+        ORDER BY rr.ranking ASC, rr.id ASC
+        LIMIT #{size}
+    </select>
+
+    <resultMap id="recommendationResultMap" type="com.workit.domain.recommendation.offices.vo.OfficeRecommendationResultVO">
+        <id     property="recommendationResultId" column="recommendation_result_id"/>
+        <result property="recommendationRequestId"   column="recommendation_request_id"/>
+        <result property="merchantId"                 column="merchant_id"/>
+        <result property="ranking"                     column="ranking"/>
+        <result property="priceScore"                  column="price_score"/>
+        <result property="preferenceScore"             column="preference_score"/>
+        <result property="accessibilityScore"          column="accessibility_score"/>
+        <result property="ratingScore"                 column="rating_score"/>
+        <result property="totalScore"                  column="total_score"/>
+        <result property="name"                        column="name"/>
+        <result property="address"                     column="address"/>
+        <result property="thumbnailUrl"                column="thumbnail_url"/>
+        <result property="price"                       column="price"/>
+        <result property="rating"                      column="rating"/>
+        <result property="noiseLevel"                  column="noise_level"/>
+        <result property="reviewCount"                 column="review_count"/>
+        <result property="quietReviewCount"            column="quiet_review_count"/>
+        <result property="openReviewCount"             column="open_review_count"/>
+        <result property="collabReviewCount"           column="collab_review_count"/>
+        <result property="calculatedAt"                column="calculated_at"/>
+        <result property="bookmarked"                  column="bookmarked"/>
+        <result property="latitude"                    column="latitude"/>
+        <result property="longitude"                   column="longitude"/>
+    </resultMap>
+
+</mapper>

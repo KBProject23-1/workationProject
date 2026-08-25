@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.recommendation.common.mapper.ReservationProductAvailabilityMapper">
+
+    <select id="selectAvailableMerchantIdsByPeriod" resultType="java.lang.Long">
+        SELECT DISTINCT rp.merchant_id
+          FROM reservation_products rp
+          JOIN merchants m ON m.id = rp.merchant_id
+          JOIN product_daily_inventories pdi ON pdi.product_id = rp.id
+         WHERE m.region_id = #{regionId}
+           AND m.category = #{merchantCategory}
+          <if test="productDetailType != null and productDetailType != ''">
+             AND rp.product_detail_type = #{productDetailType}
+          </if>
+          <if test="merchantCategory == 'ACCOMMODATION'">
+             AND rp.max_headcount * #{roomCount} &gt;= #{requiredHeadcount}
+          </if>
+           AND pdi.inventory_date &gt;= #{startDate}
+          <if test="includeEndDate">
+             AND pdi.inventory_date &lt;= #{endDate}
+          </if>
+          <if test="!includeEndDate">
+             AND pdi.inventory_date &lt; #{endDate}
+          </if>
+           AND pdi.is_available = 1
+           AND pdi.remaining_capacity &gt;= #{requiredQuantity}
+         <if test="requiredInventoryDateCount != null">
+         GROUP BY rp.id
+         HAVING COUNT(DISTINCT pdi.inventory_date) = #{requiredInventoryDateCount}
+            AND MIN(CASE WHEN pdi.is_available = 1
+                AND pdi.remaining_capacity &gt;= #{requiredQuantity} THEN 1 ELSE 0 END) = 1
+         </if>
+    </select>
+
+</mapper>

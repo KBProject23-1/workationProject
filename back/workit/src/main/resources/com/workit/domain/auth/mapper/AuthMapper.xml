@@ -1,0 +1,329 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.auth.mapper.AuthMapper">
+
+    <!--
+        약관 목록 전체 조회.
+        화면 노출 순서 = 필수 먼저(required DESC), 그 다음 id 오름차순으로 고정
+    -->
+    <select id="selectTermsList"
+            resultType="com.workit.domain.auth.vo.TermsVO">
+        SELECT id,
+               version,
+               title,
+               content,
+               required,
+               created_at,
+               active
+        FROM terms
+        WHERE active = 1
+        ORDER BY required DESC, id ASC
+    </select>
+
+    <!--
+        필수 약관 ID 목록 조회.
+        - 회원가입 완료 시 agreedTermsIds 검증 기준 (terms.required = 1)
+        - LONGTEXT 본문(content)은 읽지 않아 약관 목록 조회보다 가볍다
+    -->
+    <select id="selectRequiredTermsIds" resultType="java.lang.Long">
+        SELECT id
+        FROM terms
+        WHERE required = 1
+        ORDER BY id ASC
+    </select>
+
+    <!--
+        주어진 약관 ID 중 존재하는 ID 만 조회.
+        - terms 마스터 기준 존재 여부 검증용 (IN 쿼리)
+        - 결과 목록 크기와 요청 ID 목록 크기가 다르면 존재하지 않는 약관이 섞인 것
+    -->
+    <select id="selectExistingTermIds" resultType="java.lang.Long">
+        SELECT id
+        FROM terms
+        WHERE id IN
+        <foreach collection="termIds" item="termId" open="(" separator="," close=")">
+            #{termId}
+        </foreach>
+    </select>
+
+    <!--
+        CI 중복 가입 조회.
+        - knowledge.md: 검색용 개인정보는 SHA-256 hash 로 저장 → user_auth.identity_ci_hash 조회
+        - Mapper 는 조회만 담당 (비즈니스 판단은 Service)
+    -->
+    <select id="countByCiHash" resultType="int">
+        SELECT COUNT(*)
+        FROM user_auth
+        WHERE identity_ci_hash = #{ciHash}
+    </select>
+
+    <!--
+        아이디 찾기 - CI(SHA-256 hash) 기준 가입 회원 조회.
+        - user_auth.identity_ci_hash (UNIQUE) + users JOIN
+        - email_encrypt 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
+        - status 도 함께 조회 — 탈퇴/차단 등 비활성 여부 판단은 Service (Mapper 비즈니스 로직 금지)
+        - 결과 없음 → Mapper 는 null 반환, USER_NOT_FOUND(404) 판단은 Service
+    -->
+    <select id="selectUserByCiHash"
+            resultType="com.workit.domain.auth.vo.UserVO">
+        SELECT u.id,
+               u.status,
+               u.email_encrypt,
+               u.created_at
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE a.identity_ci_hash = #{ciHash}
+    </select>
+
+    <!--
+        회원가입 이메일 중복 확인.
+        - users.email_hash (SHA-256, UNIQUE) 대상 조회
+        - email_encrypt(원문)은 복호화하지 않고 hash 만 사용 (knowledge.md: 검색용 hash 저장)
+        - Mapper 는 조회만 담당 (비즈니스 판단은 Service)
+    -->
+    <select id="countByEmailHash" resultType="int">
+        SELECT COUNT(*)
+        FROM users
+        WHERE email_hash = #{emailHash}
+    </select>
+
+    <!--
+        회원가입 완료 닉네임 중복 확인.
+        - user_profile.nickname (UNIQUE) 대상 조회
+        - Mapper 는 조회만 담당 (비즈니스 판단은 Service)
+    -->
+    <!--
+        회원가입 완료 - users insert.
+        - useGeneratedKeys: 자동 생성 PK 를 UserVO.id 로 채운다
+        - email_hash/phone_number_hash(SHA-256), email_encrypt/name_encrypt/phone_number_encrypt(AES-256)
+          는 Service Layer 에서 암호화/해시 후 전달 (Mapper 에서 암호화 금지)
+        - status/created_at/updated_at/deleted_at 은 DB 기본값(ACTIVE, CURRENT_TIMESTAMP) 사용
+    -->
+    <insert id="insertUser"
+            parameterType="com.workit.domain.auth.vo.UserVO"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO users (email_hash, email_encrypt, name_hash, name_encrypt,
+                           phone_number_hash, phone_number_encrypt)
+        VALUES (#{emailHash}, #{emailEncrypt}, #{nameHash}, #{nameEncrypt},
+                #{phoneNumberHash}, #{phoneNumberEncrypt})
+    </insert>
+
+    <!--
+        회원가입 완료 - user_auth insert.
+        - user_id 는 users insert 후 생성된 PK (PK = FK)
+        - password_hash(BCrypt), identity_ci_hash(SHA-256) 는 Service Layer 에서 처리
+    -->
+    <insert id="insertUserAuth"
+            parameterType="com.workit.domain.auth.vo.UserAuthVO">
+        INSERT INTO user_auth (user_id, password_hash, identity_ci_hash)
+        VALUES (#{userId}, #{passwordHash}, #{identityCiHash})
+    </insert>
+
+    <!--
+        회원가입 완료 - user_profile insert (nickname 저장).
+        - nickname 은 Service Layer 에서 중복 검증 후 저장
+        - company_name 은 선택값이라 회원가입 시점에는 insert 하지 않는다
+    -->
+    <insert id="insertUserProfile"
+            parameterType="com.workit.domain.auth.vo.UserProfileVO">
+        INSERT INTO user_profile (user_id, nickname)
+        VALUES (#{userId}, #{nickname})
+    </insert>
+
+    <!--
+        회원가입 완료 - user_terms_agreements 일괄 insert (약관 동의 저장).
+        - ERD 기준 테이블: user_terms_agreements (user_id, term_id, agreed_at)
+        - agreed_at 은 DB 기본값(CURRENT_TIMESTAMP) — insert 하지 않는다
+        - 약관 검증(필수 여부)은 Service Layer 에서 수행 후 동의 목록만 전달한다
+    -->
+    <insert id="insertUserTerms">
+        INSERT INTO user_terms_agreements (user_id, term_id)
+        VALUES
+        <foreach collection="termIds" item="termId" separator=",">
+            (#{userId}, #{termId})
+        </foreach>
+    </insert>
+
+    <!--
+        PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
+        - users.email_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash/identity_ci_hash 함께 조회
+        - email_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회 (로그인에서는 미사용)
+        - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
+    -->
+    <select id="findUserByEmailHash"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               u.name_hash,
+               u.name_encrypt,
+               a.password_hash,
+               a.identity_ci_hash
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE u.email_hash = #{emailHash}
+    </select>
+
+    <!--
+        PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
+        - users.phone_number_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash/identity_ci_hash 함께 조회
+        - phone_number_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회 (로그인에서는 미사용)
+        - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
+    -->
+    <select id="findUserByPhoneHash"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               u.name_hash,
+               u.name_encrypt,
+               a.password_hash,
+               a.identity_ci_hash
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE u.phone_number_hash = #{phoneHash}
+    </select>
+
+    <!--
+        PIN 로그인 - 등록 기기(device_id) 기준 회원 + PIN hash 조회.
+        - user_device(device_id) + users JOIN 으로 pin_hash/status/name 함께 조회
+        - UNIQUE(user_id, device_id) 이므로 device_id 당 1건이 원칙이지만 LIMIT 1 로 안전 처리
+        - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
+    -->
+    <select id="findUserByDeviceId"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               u.name_encrypt,
+               d.pin_hash
+        FROM users u
+                 JOIN user_device d ON d.user_id = u.id
+        WHERE d.device_id = #{deviceId}
+        LIMIT 1
+    </select>
+
+    <!--
+        Refresh Token 재발급 - userId(PK) 기준 회원 상태 조회.
+        - 재발급 시 회원 존재 여부 + ACTIVE 상태 검증용 (users.status 만 필요)
+        - name_encrypt 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+        - 결과 없음 → Mapper 는 null 반환, 재발급 실패(INVALID_REFRESH_TOKEN) 판단은 Service
+    -->
+    <select id="findUserById"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT id,
+               status
+        FROM users
+        WHERE id = #{userId}
+    </select>
+
+    <!--
+        비밀번호 변경 - 로그인 사용자의 현재 비밀번호 hash 조회.
+        - 현재 비밀번호 BCrypt 대조용 — password_hash(해시) 만 조회한다
+        - BCrypt 는 단방향 해시이므로 원문을 복호화하지 않고 해시 그대로 matches() 에 사용한다
+        - user_auth 행이 없으면 null 반환 (USER_NOT_FOUND 판단은 Service)
+    -->
+    <select id="selectPasswordHashByUserId" resultType="java.lang.String">
+        SELECT password_hash
+        FROM user_auth
+        WHERE user_id = #{userId}
+    </select>
+
+    <!--
+        비밀번호 재설정 - user_auth.password_hash 갱신 (비밀번호 변경 완료).
+        - password_hash(BCrypt) 는 Service Layer 에서 생성 후 전달 (Mapper 에서 암호화 금지)
+        - updated_at 은 DB 기본값 정책과 동일하게 CURRENT_TIMESTAMP 로 갱신 (created_at 변경 없음)
+        - 갱신 행 수가 0 이면 해당 userId 의 인증 정보가 없는 것 (Service 에서 판단)
+    -->
+    <update id="updatePasswordHash">
+        UPDATE user_auth
+        SET password_hash      = #{passwordHash},
+            password_changed_at = NOW()
+        WHERE user_id = #{userId}
+    </update>
+
+    <!--
+        PIN 최초 설정 - 기존 PIN 등록 여부 확인.
+        - UNIQUE(user_id, device_id) 기준 조회 — 같은 기기에 이미 PIN 이 등록되어 있으면 재등록 불가
+        - Mapper 는 조회만 담당 (중복 판단은 Service — PIN_ALREADY_EXISTS)
+    -->
+    <select id="countByUserIdAndDeviceId" resultType="int">
+        SELECT COUNT(*)
+        FROM user_device
+        WHERE user_id = #{userId}
+          AND device_id = #{deviceId}
+    </select>
+
+    <!--
+        PIN 최초 설정 - user_device insert (PIN 정보 저장).
+        - pin_hash(BCrypt) 는 Service Layer 에서 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - last_login_at 은 최초 설정 시점 null, created_at 은 DB 기본값(CURRENT_TIMESTAMP) 사용
+    -->
+    <insert id="insertUserDevice"
+            parameterType="com.workit.domain.auth.vo.UserDeviceVO"
+            useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO user_device (user_id, device_id, device_name, pin_hash)
+        VALUES (#{userId}, #{deviceId}, #{deviceName}, #{pinHash})
+    </insert>
+
+    <!--
+        보안 PIN 재설정 - JWT 로그인 사용자 조회 (users + user_auth JOIN).
+        - userId(PK) 기준 status + identity_ci_hash 함께 조회 (PASS 재인증 CI 대조용)
+        - findUserById 는 status 만 조회하므로 본 플로우 전용으로 별도 정의
+        - 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+        - 결과 없음 → Mapper 는 null 반환, USER_NOT_FOUND(404) 판단은 Service
+    -->
+    <select id="selectUserAuthById"
+            resultType="com.workit.domain.auth.vo.LoginUserVO">
+        SELECT u.id,
+               u.status,
+               a.identity_ci_hash
+        FROM users u
+                 JOIN user_auth a ON a.user_id = u.id
+        WHERE u.id = #{userId}
+    </select>
+
+    <!--
+        보안 PIN 재설정 - 로그인 사용자의 모든 등록 기기 pin_hash 갱신.
+        - pin_hash(BCrypt) 는 Service Layer 에서 암호화 후 전달 (Mapper 에서 암호화 금지)
+        - PASS 재인증 기반 개인 단위 재설정이므로 기기(device_id) 구분 없이 user_id 기준 전체 갱신
+        - user_device 에는 updated_at 컬럼이 없다 (ERD 기준: id/user_id/device_id/device_name/pin_hash/
+          last_login_at/created_at) — 타임스탬프 갱신 없이 pin_hash 만 변경
+        - 갱신 행 수가 0 이면 등록된 PIN(기기)이 없는 것 (Service 에서 PIN_NOT_REGISTERED 판단)
+    -->
+    <update id="updateUserDevicePinHash">
+        UPDATE user_device
+        SET pin_hash       = #{pinHash},
+            pin_updated_at = NOW()
+        WHERE user_id = #{userId}
+    </update>
+
+    <!--
+        보안 PIN 재설정 - 로그인 사용자의 등록 기기별 기존 pin_hash 목록 조회.
+        - SAME_AS_CURRENT_PIN 대조용 — BCrypt matches() 검증을 위해 pin_hash 해시만 조회한다
+        - PIN 원문을 저장하지 않으므로 복호화 없이 해시 그대로 사용 (Mapper 는 조회만 담당)
+        - 등록된 기기가 없으면 빈 목록 반환 (동일 PIN 판단은 Service)
+    -->
+    <select id="selectPinHashesByUserId" resultType="java.lang.String">
+        SELECT pin_hash
+        FROM user_device
+        WHERE user_id = #{userId}
+    </select>
+
+    <!--
+        로그인 성공 시 last_login_at 갱신.
+        - user_id + device_id (UNIQUE) 기준으로 해당 기기의 최종 로그인 일시를 현재 시각으로 갱신
+        - PASSWORD 로그인(deviceId 제공) 및 PIN 로그인 성공 시 호출
+        - deviceId 가 등록되지 않은 신규 기기인 경우 행 수 0 반환 (갱신 없음)
+    -->
+    <update id="updateLastLoginAt">
+        UPDATE user_device
+        SET last_login_at = NOW()
+        WHERE user_id = #{userId}
+          AND device_id = #{deviceId}
+    </update>
+
+</mapper>

@@ -1,0 +1,304 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.workit.domain.recommendation.activities.mapper.ActivityRecommendationMapper">
+
+    <resultMap id="requestMap" type="com.workit.domain.recommendation.activities.vo.RecommendationRequestVO">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="workationId" column="workation_id"/>
+        <result property="recommendationType" column="recommendation_type"/>
+        <result property="referenceType" column="reference_type"/>
+        <result property="mealType" column="meal_type"/>
+        <result property="referenceMerchantId" column="reference_merchant_id"/>
+        <result property="secondaryReferenceMerchantId" column="secondary_reference_merchant_id"/>
+        <result property="referenceLatitude" column="reference_latitude"/>
+        <result property="referenceLongitude" column="reference_longitude"/>
+        <result property="referenceMerchantName" column="reference_merchant_name"/>
+        <result property="secondaryReferenceMerchantName" column="secondary_reference_merchant_name"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="requestColumns">
+        rr.id, rr.user_id, rr.workation_id, rr.recommendation_type, rr.meal_type,
+        rr.reference_type, rr.reference_merchant_id, rr.secondary_reference_merchant_id,
+        rr.reference_latitude, rr.reference_longitude, rr.created_at,
+        m.name AS reference_merchant_name, sm.name AS secondary_reference_merchant_name
+    </sql>
+
+    <!--
+        그 사용자의 최신 설문 1건.
+        설문을 먼저 하나로 좁혀야 문항별 답변이 서로 다른 설문에서 섞여 나오지 않는다.
+    -->
+    <sql id="latestSurveyId">
+        (SELECT s.id FROM user_surveys s
+          WHERE s.user_id = w.user_id
+          ORDER BY s.updated_at DESC, s.id DESC
+          LIMIT 1)
+    </sql>
+
+    <select id="selectActivityCondition"
+            resultType="com.workit.domain.recommendation.activities.vo.ActivityConditionVO">
+        SELECT w.id AS workation_id,
+               w.region_id,
+               w.start_date,
+               w.end_date,
+               (SELECT SUM(b.target_amount)
+                  FROM budgets b
+                  JOIN expense_categories ec ON ec.id = b.expense_category_id
+                 WHERE b.workation_id = w.id
+                   AND b.budget_type = 'PERSONAL'
+                   AND ec.code = 'LEISURE') AS leisure_budget,
+               (SELECT so.option_code
+                  FROM user_surveys us
+                  JOIN user_survey_answers usa ON usa.survey_id = us.id
+                  JOIN survey_options so ON so.id = usa.option_id
+                  JOIN survey_questions sq ON sq.id = so.question_id
+                 WHERE us.id = <include refid="latestSurveyId"/>
+                   AND sq.question_code = 'PRIORITY_FACTOR'
+                 ORDER BY usa.id DESC LIMIT 1) AS priority_option_code,
+               (SELECT so.option_name
+                  FROM user_surveys us
+                  JOIN user_survey_answers usa ON usa.survey_id = us.id
+                  JOIN survey_options so ON so.id = usa.option_id
+                  JOIN survey_questions sq ON sq.id = so.question_id
+                 WHERE us.id = <include refid="latestSurveyId"/>
+                   AND sq.question_code = 'PRIORITY_FACTOR'
+                 ORDER BY usa.id DESC LIMIT 1) AS priority_option_name,
+               (SELECT GROUP_CONCAT(so.option_code SEPARATOR ',')
+                  FROM user_surveys us
+                  JOIN user_survey_answers usa ON usa.survey_id = us.id
+                  JOIN survey_options so ON so.id = usa.option_id
+                  JOIN survey_questions sq ON sq.id = so.question_id
+                 WHERE us.id = <include refid="latestSurveyId"/>
+                   AND sq.question_code = 'ACTIVITY_PREFERENCE'
+                 ORDER BY usa.id DESC LIMIT 3) AS selected_activity_codes,
+               (SELECT GROUP_CONCAT(so.option_name SEPARATOR ',')
+                  FROM user_surveys us
+                  JOIN user_survey_answers usa ON usa.survey_id = us.id
+                  JOIN survey_options so ON so.id = usa.option_id
+                  JOIN survey_questions sq ON sq.id = so.question_id
+                 WHERE us.id = <include refid="latestSurveyId"/>
+                   AND sq.question_code = 'ACTIVITY_PREFERENCE'
+                 ORDER BY usa.id DESC LIMIT 3) AS selected_activity_names
+          FROM workations w
+         WHERE w.user_id = #{userId}
+           AND w.id = #{workationId}
+           AND w.status = 'ACTIVE'
+         ORDER BY w.created_at DESC
+         LIMIT 1
+    </select>
+
+    <select id="selectActivities"
+            resultType="com.workit.domain.recommendation.activities.vo.ActivityCandidateVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.address,
+               m.thumbnail_url, m.price, m.rating, m.latitude, m.longitude,
+               a.activity_type,
+               CAST(COUNT(r.review_id) AS UNSIGNED) AS review_count,
+               NULL AS difficulty
+          FROM merchants m
+          JOIN activities a ON a.merchant_id = m.id
+     LEFT JOIN tourism_merchant_sources tms ON tms.merchant_id = m.id
+     LEFT JOIN reviews r ON r.merchant_id = m.id AND r.status = 'ACTIVE'
+         WHERE m.region_id = #{regionId}
+           AND m.category = 'ACTIVITY'
+           AND (tms.merchant_id IS NULL OR tms.is_active = 1)
+           AND m.latitude IS NOT NULL
+           AND m.longitude IS NOT NULL
+         GROUP BY m.id, m.name, m.category, m.address, m.thumbnail_url,
+                  m.price, m.rating, m.latitude, m.longitude, a.activity_type
+         ORDER BY m.id ASC
+    </select>
+
+
+    <select id="selectReferencePlaceCandidates"
+            resultType="com.workit.domain.recommendation.activities.vo.ActivityCandidateVO">
+        SELECT m.id AS merchant_id,
+               m.name AS merchant_name,
+               m.category,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.rating,
+               m.latitude,
+               m.longitude,
+               NULL AS activity_type,
+               CAST(COUNT(rw.review_id) AS UNSIGNED) AS review_count,
+               NULL AS difficulty,
+               (rd.merchant_id IS NOT NULL) AS reserved
+          FROM merchants m
+          JOIN (
+            SELECT rp.merchant_id,
+                   MIN(ABS(DATEDIFF(r.start_date, #{workationStartDate}))) AS reservation_distance
+              FROM reservations r
+              JOIN reservation_products rp
+                ON rp.id = r.product_id
+             WHERE r.user_id = #{userId}
+               AND r.workation_id = #{workationId}
+               AND r.status IN ('CONFIRMED', 'COMPLETED')
+             GROUP BY rp.merchant_id
+          ) rd
+            ON rd.merchant_id = m.id
+          LEFT JOIN reviews rw
+            ON rw.merchant_id = m.id
+           AND rw.status = 'ACTIVE'
+         WHERE m.region_id = #{regionId}
+           AND m.category IN ('ACCOMMODATION', 'OFFICE')
+         GROUP BY m.id, m.name, m.category, m.address, m.thumbnail_url,
+                  m.price, m.rating, m.latitude, m.longitude,
+                  rd.reservation_distance
+         ORDER BY (rd.merchant_id IS NOT NULL) DESC,
+                  CASE m.category
+                     WHEN 'ACCOMMODATION' THEN 0
+                     WHEN 'OFFICE' THEN 1
+                     ELSE 2
+                  END,
+                  rd.reservation_distance,
+                  m.id ASC
+    </select>
+    <select id="selectConfirmedAccommodation"
+            resultType="com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category,
+               m.address, m.thumbnail_url, m.price, m.rating, m.latitude, m.longitude, 1 AS reserved
+          FROM reservations r
+          JOIN reservation_products rp ON rp.id = r.product_id
+          JOIN merchants m ON m.id = rp.merchant_id
+         WHERE r.user_id = #{userId} AND r.workation_id = #{workationId}
+           AND r.status = 'CONFIRMED' AND m.category = 'ACCOMMODATION'
+         ORDER BY r.created_at DESC, r.id DESC LIMIT 1
+    </select>
+
+    <select id="selectActivityReferenceMerchant"
+            resultType="com.workit.domain.recommendation.activities.vo.RecommendationMerchantVO">
+        SELECT m.id AS merchant_id, m.name AS merchant_name, m.category, m.latitude, m.longitude
+          FROM merchants m
+         WHERE m.id = #{merchantId}
+           AND m.region_id = #{regionId}
+    </select>
+
+    <insert id="insertRecommendationResults">
+        INSERT INTO recommendation_results (
+            recommendation_request_id, merchant_id, price_score, preference_score,
+            accessibility_score, rating_score, total_score, ranking, calculated_at
+        ) VALUES
+        <foreach collection="results" item="result" separator=",">
+            (#{requestId}, #{result.merchantId}, #{result.priceScore}, #{result.preferenceScore},
+             #{result.accessibilityScore}, #{result.ratingScore}, #{result.totalScore},
+             #{result.ranking}, NOW())
+        </foreach>
+    </insert>
+
+    <insert id="insertRecommendationRequest" parameterType="com.workit.domain.recommendation.activities.vo.RecommendationRequestVO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO recommendation_requests (
+            user_id, workation_id, recommendation_type, meal_type, reference_type,
+            reference_merchant_id, secondary_reference_merchant_id,
+            reference_latitude, reference_longitude, created_at
+        ) VALUES (
+            #{userId}, #{workationId}, #{recommendationType}, #{mealType}, #{referenceType},
+            #{referenceMerchantId}, #{secondaryReferenceMerchantId},
+            #{referenceLatitude}, #{referenceLongitude}, NOW()
+        )
+    </insert>
+
+    <select id="selectRecommendationRequest" resultMap="requestMap">
+        SELECT <include refid="requestColumns"/>
+          FROM recommendation_requests rr
+          LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+          LEFT JOIN merchants sm ON sm.id = rr.secondary_reference_merchant_id
+         WHERE rr.id = #{requestId}
+           AND rr.user_id = #{userId}
+    </select>
+
+    <select id="selectLatestActivityRequest" resultMap="requestMap">
+        SELECT <include refid="requestColumns"/>
+          FROM recommendation_requests rr
+          LEFT JOIN merchants m ON m.id = rr.reference_merchant_id
+          LEFT JOIN merchants sm ON sm.id = rr.secondary_reference_merchant_id
+         WHERE rr.user_id = #{userId}
+           AND rr.workation_id = #{workationId}
+           AND rr.recommendation_type = 'ACTIVITY'
+        <if test="referenceMerchantId != null">
+           AND rr.reference_merchant_id = #{referenceMerchantId}
+        </if>
+         ORDER BY rr.created_at DESC, rr.id DESC
+         LIMIT 1
+    </select>
+
+    <select id="selectRecommendationResults"
+            resultMap="recommendationResultMap">
+        SELECT result.id AS recommendation_result_id,
+               result.recommendation_request_id,
+               result.merchant_id,
+               result.price_score,
+               result.preference_score,
+               result.accessibility_score,
+               result.rating_score,
+               result.total_score,
+               result.calculated_at,
+               result.ranking,
+               m.name AS merchant_name,
+               m.address,
+               m.thumbnail_url,
+               m.price,
+               m.rating,
+               a.activity_type,
+               CAST(COUNT(rv.review_id) AS UNSIGNED) AS review_count,
+               NULL AS difficulty,
+               (SELECT GROUP_CONCAT(t.name ORDER BY t.name ASC SEPARATOR ',')
+                  FROM merchant_tags mt
+                  INNER JOIN tags t ON t.id = mt.tag_id
+                 WHERE mt.merchant_id = m.id) AS activity_tags,
+               EXISTS (SELECT 1 FROM bookmarks b
+                       WHERE b.users_id = (SELECT user_id FROM recommendation_requests WHERE id = #{requestId})
+                         AND b.merchants_id = m.id
+                         AND b.is_deleted IS NULL) AS bookmarked,
+               m.latitude,
+               m.longitude
+          FROM recommendation_results result
+          JOIN merchants m ON m.id = result.merchant_id
+          LEFT JOIN activities a ON a.merchant_id = m.id
+          LEFT JOIN reviews rv ON rv.merchant_id = m.id AND rv.status = 'ACTIVE'
+         WHERE result.recommendation_request_id = #{requestId}
+        <if test="cursorRanking != null and cursorId != null">
+           AND (result.ranking &gt; #{cursorRanking}
+                OR (result.ranking = #{cursorRanking} AND result.id &gt; #{cursorId}))
+        </if>
+         GROUP BY result.id, result.recommendation_request_id, result.merchant_id,
+                  result.price_score, result.preference_score, result.accessibility_score,
+                  result.rating_score, result.total_score, result.calculated_at,
+                  result.ranking,
+                  m.name, m.address, m.thumbnail_url, m.price, m.rating,
+                  a.activity_type, m.latitude, m.longitude
+         ORDER BY result.ranking ASC, result.id ASC
+         LIMIT #{limit}
+    </select>
+
+    <resultMap id="recommendationResultMap" type="com.workit.domain.recommendation.activities.vo.ActivityRecommendationResultVO">
+        <id property="recommendationResultId" column="recommendation_result_id"/>
+        <result property="recommendationRequestId" column="recommendation_request_id"/>
+        <result property="merchantId" column="merchant_id"/>
+        <result property="ranking" column="ranking"/>
+        <result property="priceScore" column="price_score"/>
+        <result property="preferenceScore" column="preference_score"/>
+        <result property="accessibilityScore" column="accessibility_score"/>
+        <result property="ratingScore" column="rating_score"/>
+        <result property="totalScore" column="total_score"/>
+        <result property="calculatedAt" column="calculated_at"/>
+        <result property="distance" column="distance"/>
+        <result property="merchantName" column="merchant_name"/>
+        <result property="address" column="address"/>
+        <result property="thumbnailUrl" column="thumbnail_url"/>
+        <result property="price" column="price"/>
+        <result property="rating" column="rating"/>
+        <result property="activityType" column="activity_type"/>
+        <result property="activityTags" column="activity_tags"/>
+        <result property="reviewCount" column="review_count"/>
+        <result property="difficulty" column="difficulty"/>
+        <result property="bookmarked" column="bookmarked"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+    </resultMap>
+
+</mapper>
