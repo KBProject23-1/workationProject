@@ -21,7 +21,7 @@ public class LoginResponseDTO {
     /** 회원 고유 번호 */
     private Long userId;
 
-    /** 회원 이름 (user_profile 아님 — users.name_encrypt 복호화 값) */
+    /** 회원 이름 (user_profile 아님 — users.name_encrypted 복호화 값) */
     private String name;
 
     /**

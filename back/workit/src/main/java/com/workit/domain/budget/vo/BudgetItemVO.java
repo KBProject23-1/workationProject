@@ -21,6 +21,7 @@ public class BudgetItemVO {
     private Long expenseCategoryId;
 
     private String categoryName;     // 마스터 기본 이름
+    private String categoryCode;     // expense_categories.code (예: FOOD, ACCOMMODATION)
     private String customName;       // 사용자 별칭. 없으면 null
     private String description;
     private Boolean isDeletable;

@@ -3,6 +3,7 @@ package com.workit.domain.workation.mapper;
 import com.workit.domain.workation.vo.BudgetSpentVO;
 import com.workit.domain.workation.vo.WorkationHistoryVO;
 import com.workit.domain.workation.vo.WorkationReservationVO;
+import com.workit.domain.workation.vo.WorkationUncheckedCountVO;
 import com.workit.domain.workation.vo.WorkationVO;
 import org.apache.ibatis.annotations.Param;
 
@@ -75,4 +76,16 @@ public interface WorkationMapper {
 
     // 워케이션 종료 (ACTIVE → SETTLED)
     int settleWorkation(@Param("id") Long id);
+
+    // 내일 시작하는 ACTIVE 워케이션 조회
+    List<WorkationVO> selectWorkationsByStartDate(@Param("startDate") LocalDate startDate);
+
+    // 내일 종료하는 ACTIVE 워케이션 조회
+    List<WorkationVO> selectWorkationsByEndDate(@Param("endDate") LocalDate endDate);
+
+    // 종료 후 3일 경과 but 정산 미완료(ACTIVE) 워케이션 조회
+    List<WorkationVO> selectUnsettledOverdueWorkations(@Param("cutoffDate") LocalDate cutoffDate);
+
+    // 전체 ACTIVE 워케이션 중 미확인 지출이 3건 이상인 워케이션 조회 (스케줄러용)
+    List<WorkationUncheckedCountVO> selectActiveWorkationsWithUncheckedExpenses();
 }

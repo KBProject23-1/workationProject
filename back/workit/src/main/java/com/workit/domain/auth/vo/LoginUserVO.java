@@ -6,9 +6,9 @@ import lombok.ToString;
 
 // 통합 로그인 전용 조회 VO (MyBatis ResultType)
 //
-// 로그인은 원문(email_encrypt/phone_encrypt)을 절대 조회하지 않고
+// 로그인은 원문(email_encrypted/phone_encrypted)을 절대 조회하지 않고
 // 검색용 SHA-256 hash(email_hash/phone_number_hash)와 device_id 만으로 회원을 찾는다
-// (knowledge.md: email_encrypt/phone_encrypt 조회 금지).
+// (knowledge.md: email_encrypted/phone_encrypted 조회 금지).
 //
 // 조회 쿼리별로 채워지는 필드가 다르다:
 // - findUserByEmailHash   : password_hash 채움 (user_auth JOIN)
@@ -18,7 +18,7 @@ import lombok.ToString;
 //
 // 보안 규칙:
 // - password_hash / pin_hash 는 BCrypt 해시이므로 평문이 아니다 (로그 주의는 동일하게 요구됨)
-// - name_encrypt 는 Service Layer 에서만 복호화한다 (Controller/Mapper 금지)
+// - name_encrypted 는 Service Layer 에서만 복호화한다 (Controller/Mapper 금지)
 @Getter
 @Setter
 @ToString
@@ -34,7 +34,7 @@ public class LoginUserVO {
     private String nameHash;
 
     /** 이름 AES-256 암호화본 (응답 name 은 Service 에서 복호화) */
-    private String nameEncrypt;
+    private String nameEncrypted;
 
     /** 비밀번호 BCrypt 해시 (PASSWORD 로그인 검증용) */
     private String passwordHash;

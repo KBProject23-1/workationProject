@@ -770,10 +770,9 @@ class NotificationServiceImplTest {
         when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(5);
 
         // When
-        int updatedRows = notificationService.markAllAsRead(TEST_USER_ID);
+        notificationService.markAllAsRead(TEST_USER_ID);
 
         // Then
-        assertEquals(5, updatedRows);
         verify(notificationMapper).markAllAsRead(TEST_USER_ID);
     }
 
@@ -784,10 +783,9 @@ class NotificationServiceImplTest {
         when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(0);
 
         // When
-        int updatedRows = notificationService.markAllAsRead(TEST_USER_ID);
+        notificationService.markAllAsRead(TEST_USER_ID);
 
-        // Then — 0이 반환되지만 예외 발생 없음 (정상 성공)
-        assertEquals(0, updatedRows);
+        // Then — 예외 발생 없음 (정상 성공)
         verify(notificationMapper).markAllAsRead(TEST_USER_ID);
     }
 
@@ -799,12 +797,9 @@ class NotificationServiceImplTest {
         when(notificationMapper.markAllAsRead(userA)).thenReturn(3);
 
         // When — 사용자 A가 전체 읽음 처리
-        int userAUpdated = notificationService.markAllAsRead(userA);
+        notificationService.markAllAsRead(userA);
 
-        // Then — 사용자 A의 알림 3개만 변경됨
-        assertEquals(3, userAUpdated);
-
-        // Mapper 호출 확인 — userA의 ID로만 호출됨
+        // Then — Mapper 호출 확인 — userA의 ID로만 호출됨
         verify(notificationMapper).markAllAsRead(userA);
     }
 
@@ -828,10 +823,9 @@ class NotificationServiceImplTest {
         when(notificationMapper.markAllAsRead(TEST_USER_ID)).thenReturn(0);
 
         // When
-        int updatedRows = notificationService.markAllAsRead(TEST_USER_ID);
+        notificationService.markAllAsRead(TEST_USER_ID);
 
         // Then — 예외 발생 없이 정상 성공
-        assertEquals(0, updatedRows);
         verify(notificationMapper).markAllAsRead(TEST_USER_ID);
     }
 

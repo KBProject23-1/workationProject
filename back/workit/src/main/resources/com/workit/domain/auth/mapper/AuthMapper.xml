@@ -62,7 +62,7 @@
     <!--
         아이디 찾기 - CI(SHA-256 hash) 기준 가입 회원 조회.
         - user_auth.identity_ci_hash (UNIQUE) + users JOIN
-        - email_encrypt 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
+        - email_encrypted 는 AES 암호화본이므로 SELECT 가능 — 복호화는 Service Layer 에서만 수행
         - status 도 함께 조회 — 탈퇴/차단 등 비활성 여부 판단은 Service (Mapper 비즈니스 로직 금지)
         - 결과 없음 → Mapper 는 null 반환, USER_NOT_FOUND(404) 판단은 Service
     -->
@@ -70,7 +70,7 @@
             resultType="com.workit.domain.auth.vo.UserVO">
         SELECT u.id,
                u.status,
-               u.email_encrypt,
+               u.email_encrypted,
                u.created_at
         FROM users u
                  JOIN user_auth a ON a.user_id = u.id
@@ -97,7 +97,7 @@
     <!--
         회원가입 완료 - users insert.
         - useGeneratedKeys: 자동 생성 PK 를 UserVO.id 로 채운다
-        - email_hash/phone_number_hash(SHA-256), email_encrypt/name_encrypt/phone_number_encrypt(AES-256)
+        - email_hash/phone_number_hash(SHA-256), email_encrypted/name_encrypted/phone_number_encrypted(AES-256)
           는 Service Layer 에서 암호화/해시 후 전달 (Mapper 에서 암호화 금지)
         - status/created_at/updated_at/deleted_at 은 DB 기본값(ACTIVE, CURRENT_TIMESTAMP) 사용
     -->
@@ -105,8 +105,8 @@
             parameterType="com.workit.domain.auth.vo.UserVO"
             useGeneratedKeys="true"
             keyProperty="id">
-        INSERT INTO users (email_hash, email_encrypt, name_hash, name_encrypt,
-                           phone_number_hash, phone_number_encrypt)
+        INSERT INTO users (email_hash, email_encrypted, name_hash, name_encrypted,
+                           phone_number_hash, phone_number_encrypted)
         VALUES (#{emailHash}, #{emailEncrypt}, #{nameHash}, #{nameEncrypt},
                 #{phoneNumberHash}, #{phoneNumberEncrypt})
     </insert>
@@ -150,7 +150,7 @@
     <!--
         PASSWORD 로그인 - 이메일(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
         - users.email_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash/identity_ci_hash 함께 조회
-        - email_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - email_encrypted(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
         - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회 (로그인에서는 미사용)
         - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
     -->
@@ -159,7 +159,7 @@
         SELECT u.id,
                u.status,
                u.name_hash,
-               u.name_encrypt,
+               u.name_encrypted,
                a.password_hash,
                a.identity_ci_hash
         FROM users u
@@ -170,7 +170,7 @@
     <!--
         PASSWORD 로그인 - 휴대폰 번호(SHA-256 hash) 기준 회원 + 비밀번호 hash 조회.
         - users.phone_number_hash(UNIQUE) 기준, user_auth JOIN 으로 password_hash/identity_ci_hash 함께 조회
-        - phone_number_encrypt(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
+        - phone_number_encrypted(원문)는 SELECT 하지 않는다 (knowledge.md: 원문 조회 금지)
         - identity_ci_hash 는 비밀번호 재설정(verify)의 CI 대조용으로 함께 조회 (로그인에서는 미사용)
         - 결과 없음 → Mapper 는 null 반환, 인증 실패(INVALID_CREDENTIALS) 판단은 Service
     -->
@@ -179,7 +179,7 @@
         SELECT u.id,
                u.status,
                u.name_hash,
-               u.name_encrypt,
+               u.name_encrypted,
                a.password_hash,
                a.identity_ci_hash
         FROM users u
@@ -197,7 +197,7 @@
             resultType="com.workit.domain.auth.vo.LoginUserVO">
         SELECT u.id,
                u.status,
-               u.name_encrypt,
+               u.name_encrypted,
                d.pin_hash
         FROM users u
                  JOIN user_device d ON d.user_id = u.id
@@ -208,7 +208,7 @@
     <!--
         Refresh Token 재발급 - userId(PK) 기준 회원 상태 조회.
         - 재발급 시 회원 존재 여부 + ACTIVE 상태 검증용 (users.status 만 필요)
-        - name_encrypt 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
+        - name_encrypted 등 개인정보 원문은 조회하지 않는다 (knowledge.md: 원문 조회 금지)
         - 결과 없음 → Mapper 는 null 반환, 재발급 실패(INVALID_REFRESH_TOKEN) 판단은 Service
     -->
     <select id="findUserById"

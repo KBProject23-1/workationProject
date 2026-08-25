@@ -17,6 +17,7 @@
             resultType="com.workit.domain.notification.vo.NotificationVO">
         SELECT id                AS notification_id,
                category,
+               notification_type AS notification_type,
                important,
                title,
                content,
@@ -154,5 +155,88 @@
         </set>
         WHERE user_id = #{userId}
     </update>
+
+    <!--
+        알림 템플릿 조회 - category + notification_type 조건으로 활성화된 템플릿을 조회한다.
+        - is_active = 1 조건이 포함된다.
+        - 동일한 category + notification_type 조합은 하나의 활성 템플릿만 존재한다고 가정한다.
+        - 조회 결과가 없는 경우 null을 반환한다.
+    -->
+    <select id="selectActiveTemplate"
+            resultType="com.workit.domain.notification.vo.NotificationTemplateVO">
+        SELECT id                AS id,
+               category          AS category,
+               notification_type AS notification_type,
+               title_template    AS title_template,
+               content_template  AS content_template,
+               is_active         AS is_active,
+               created_at        AS created_at,
+               updated_at        AS updated_at
+        FROM notification_templates
+        WHERE category = #{category}
+          AND notification_type = #{notificationType}
+          AND is_active = 1
+        LIMIT 1
+    </select>
+
+    <!--
+        알림 이력 저장 - notification_histories 테이블에 알림을 저장한다.
+        - read = 0 (읽지 않은 상태)로 초기 저장
+        - created_at은 DB 기본값 CURRENT_TIMESTAMP 사용
+        - useGeneratedKeys로 생성된 PK를 historyVO에 반환
+    -->
+    <insert id="insertNotificationHistory"
+            useGeneratedKeys="true" keyProperty="history.notificationId">
+        INSERT INTO notification_histories
+            (user_id, category, important, title, content,
+             notification_type, reference_type, reference_id, `read`)
+        VALUES
+            (#{userId},
+             #{history.category},
+             #{history.important},
+             #{history.title},
+             #{history.content},
+             #{history.notificationType},
+             #{history.referenceType},
+             #{history.referenceId},
+             0)
+    </insert>
+
+    <!--
+        알림 중복 존재 여부 확인 - userId + referenceType + referenceId + notificationType 조건으로
+        기존 알림이 존재하는지 확인한다.
+        - 각 도메인 Alert 서비스에서 공통으로 사용하는 쿼리
+        - 알림 생성 트랜잭션 내에서 호출하여 중복 알림 생성을 방지한다
+    -->
+    <select id="existsNotificationByReference" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM notification_histories
+            WHERE user_id = #{userId}
+              AND reference_type = #{referenceType}
+              AND reference_id = #{referenceId}
+              AND notification_type = #{notificationType}
+        )
+    </select>
+
+    <!--
+        알림 중복 존재 여부 확인 (배치) - 여러 건의 reference에 대해 한 번에 중복 여부를 확인한다.
+        - ScheduleAlertScheduler 등에서 N+1 쿼리 방지용
+        - IN 절을 사용하여 userId + (referenceType, referenceId, notificationType) 조합으로 EXISTS 확인
+        - 결과는 이미 알림이 존재하는 (referenceType, referenceId, notificationType) 조합을 반환한다
+    -->
+    <select id="existsNotificationsByReferencesBatch"
+            resultType="com.workit.domain.notification.vo.NotificationDuplicateKeyVO">
+        SELECT reference_type AS referenceType,
+               reference_id   AS referenceId,
+               notification_type AS notificationType
+        FROM notification_histories
+        WHERE user_id = #{userId}
+          AND (reference_type, reference_id, notification_type) IN
+        <foreach collection="references" item="ref" open="(" separator="," close=")">
+            (#{ref.referenceType}, #{ref.referenceId}, #{ref.notificationType})
+        </foreach>
+        GROUP BY reference_type, reference_id, notification_type
+    </select>
 
 </mapper>

@@ -61,9 +61,8 @@ public interface NotificationService {
      * 3. 정상 성공 시 200 OK 반환
      *
      * @param userId JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
-     * @return 읽음 처리된 알림 개수
      */
-    int markAllAsRead(Long userId);
+    void markAllAsRead(Long userId);
 
     /**
      * 알림 수신 설정 조회 - 현재 로그인한 사용자의 알림 수신 설정 상태를 조회한다.

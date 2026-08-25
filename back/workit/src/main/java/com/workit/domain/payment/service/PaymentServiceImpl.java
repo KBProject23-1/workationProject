@@ -25,6 +25,7 @@ import com.workit.domain.wallet.dto.response.ChargeResponse;
 import com.workit.domain.wallet.dto.response.RefundResponse;
 import com.workit.domain.wallet.exception.WalletErrorCode;
 import com.workit.domain.wallet.mapper.WalletMapper;
+import com.workit.domain.wallet.service.TransferAlertService;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +60,8 @@ public class PaymentServiceImpl implements PaymentService {
     private final PinValidator pinValidator;
     private final PaymentTransactionRecorder paymentTransactionRecorder;
     private final ExpenseImportTrigger expenseImportTrigger;
+    private final PaymentAlertService paymentAlertService;
+    private final TransferAlertService transferAlertService;
 
     // ===== 충전 =====
     @Override
@@ -106,7 +109,12 @@ public class PaymentServiceImpl implements PaymentService {
         // 4) PAID 로 전이 (상태머신 규칙 검증 포함)
         markPaid(chargeTx, userId);
 
-        return ChargeResponse.of(chargeTx, walletBalanceAfter);
+        ChargeResponse chargeResponse = ChargeResponse.of(chargeTx, walletBalanceAfter);
+
+        // 지갑 충전 완료 알림 생성 (PAID 상태 확정 후)
+        transferAlertService.notifyChargeSuccess(userId, chargeResponse);
+
+        return chargeResponse;
     }
 
     // ===== 환불 =====
@@ -158,7 +166,12 @@ public class PaymentServiceImpl implements PaymentService {
         // 4) PAID 로 전이 (상태머신 규칙 검증 포함)
         markPaid(refundTx, userId);
 
-        return RefundResponse.of(refundTx, walletBalanceAfter, targetAccount);
+        RefundResponse refundResponse = RefundResponse.of(refundTx, walletBalanceAfter, targetAccount);
+
+        // 계좌 환불 완료 알림 생성 (PAID 상태 확정 후)
+        transferAlertService.notifyRefundSuccess(userId, refundResponse);
+
+        return refundResponse;
     }
 
     // ===== 결제 =====
@@ -174,6 +187,9 @@ public class PaymentServiceImpl implements PaymentService {
         PaymentResponse response = "WALLET".equals(request.getPaymentSourceType())
                 ? paymentTransactionRecorder.payWithWallet(userId, request)
                 : payWithCard(userId, request);
+
+        // 결제 성공 알림 생성 (PAID 상태 확정 후)
+        paymentAlertService.notifyPaymentSuccess(userId, response);
 
         // 결제가 커밋된 뒤에 워케이션 지출로 옮긴다.
         // 이 메서드에는 트랜잭션이 없어 유입은 자체 트랜잭션으로 돌고, 실패해도 결제에 영향이 없다
@@ -294,7 +310,12 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
-        return CancelResponse.of(cancelled, amount, refundedTo);
+        CancelResponse response = CancelResponse.of(cancelled, amount, refundedTo);
+
+        // 결제 취소 완료 알림 생성
+        paymentAlertService.notifyRefundSuccess(userId, response);
+
+        return response;
     }
 
     // ===== 상태 전이 (상태머신 규칙 강제) =====

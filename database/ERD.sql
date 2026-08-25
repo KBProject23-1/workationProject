@@ -8,11 +8,11 @@ CREATE TABLE `users`
 (
     `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '회원 고유 번호(PK)',
     `email_hash`                 VARCHAR(100) NOT NULL COMMENT '회원 이메일 (로그인 ID) SHA-256',
-    `email_encrypt`              VARCHAR(400) NOT NULL COMMENT '회원 이메일 (로그인 ID) AES',
+    `email_encrypted`              VARCHAR(400) NOT NULL COMMENT '회원 이메일 (로그인 ID) AES',
     `name_hash`                  VARCHAR(100) NOT NULL COMMENT '회원 이름 SHA-256',
-    `name_encrypt`               VARCHAR(100) NOT NULL COMMENT '회원 이름 AES',
+    `name_encrypted`               VARCHAR(100) NOT NULL COMMENT '회원 이름 AES',
     `phone_number_hash`          VARCHAR(255) NOT NULL COMMENT '회원 핸드폰 번호 SHA-256',
-    `phone_number_encrypt`       VARCHAR(255) NOT NULL COMMENT '회원 핸드폰 번호 AES',
+    `phone_number_encrypted`       VARCHAR(255) NOT NULL COMMENT '회원 핸드폰 번호 AES',
     `status`                     VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE, PENDING, BLOCKED, WITHDRAWN',
     `created_at`                 DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '회원 계정 생성 시간',
     `email_changed_at`           DATETIME         NULL DEFAULT NULL COMMENT '회원 이메일 최종 수정 시각',
@@ -55,24 +55,23 @@ CREATE TABLE `user_profile`
 
     -- 제약 조건 설정
     PRIMARY KEY (`user_id`),
-    UNIQUE KEY `ux_user_profile_user_id` (`user_id`),   -- 1:1 관계 강제 (한 유저당 프로필은 단 하나)
     UNIQUE KEY `ux_user_profile_nickname` (`nickname`), -- 닉네임 중복 원천 차단
     CONSTRAINT `fk_user_profile_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_unicode_ci COMMENT ='회원 부가 프로필 정보 테이블 (비식별 관계)';
+  COLLATE = utf8mb4_unicode_ci COMMENT ='회원 부가 프로필 정보 테이블';
 
 
 CREATE TABLE `user_device`
 (
-    `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '기기 등록 고유 번호(PK)',
-    `user_id`       BIGINT       NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
-    `device_id`     VARCHAR(100) NOT NULL COMMENT '브라우저 고유 식별 UUID',
-    `device_name`   VARCHAR(100) NOT NULL COMMENT '회원 기기 정보 (예: Chrome / Windows)',
-    `pin_hash`      CHAR(60)     NOT NULL COMMENT '자산 거래용 6자리 핀번호 (BCrypt 암호화문)',
-    `pin_updated_at`DATETIME         NULL DEFAULT NULL COMMENT 'PIN 최종 변경 일시',
-    `last_login_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '해당 기기 최종 로그인 일시',
-    `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '기기 최초 인증 등록 일시',
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '기기 등록 고유 번호(PK)',
+    `user_id`        BIGINT       NOT NULL COMMENT '회원 고유 번호 (FK, users.id 참조)',
+    `device_id`      VARCHAR(100) NOT NULL COMMENT '브라우저 고유 식별 UUID',
+    `device_name`    VARCHAR(100) NOT NULL COMMENT '회원 기기 정보 (예: Chrome / Windows)',
+    `pin_hash`       CHAR(60)     NOT NULL COMMENT '자산 거래용 6자리 핀번호 (BCrypt 암호화문)',
+    `pin_updated_at` DATETIME         NULL DEFAULT NULL COMMENT 'PIN 최종 변경 일시',
+    `last_login_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '해당 기기 최종 로그인 일시',
+    `created_at`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '기기 최초 인증 등록 일시',
 
     -- 제약 조건 설정
     PRIMARY KEY (`id`),
@@ -142,6 +141,7 @@ CREATE TABLE `notification_histories`
     `important`         TINYINT(1)        NOT NULL DEFAULT 0 COMMENT '중요 알림 여부 (0:일반, 1:중요)',
     `title`             VARCHAR(100)      NOT NULL COMMENT '알림 제목',
     `content`           TEXT              NOT NULL COMMENT '알림 본문 내용',
+    `notification_type` VARCHAR(50)       NOT NULL COMMENT '알림 세부 유형 (notification_templates.notification_type과 일치)',
     `reference_type`    VARCHAR(30)           NULL COMMENT '알림이 참조하는 대상 타입',
     `reference_id`      BIGINT                NULL COMMENT '알림이 참조하는 대상 데이터 ID',
     `read`              TINYINT(1)        NOT NULL DEFAULT 0 COMMENT '읽음 여부 상태 (0:안읽음, 1:읽음)',
@@ -149,10 +149,32 @@ CREATE TABLE `notification_histories`
 
     -- 제약 조건 설정
     PRIMARY KEY (`id`),
+    KEY `ix_notification_histories_user_id_id` (`user_id`, `id`),
     CONSTRAINT `fk_notification_histories_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='사용자별 수신 알림 목록 이력 테이블 (비식별 관계)';
+
+CREATE TABLE `notification_templates`
+(
+    `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '알림 템플릿 고유 번호(PK)',
+    `category`             VARCHAR(30)  NOT NULL COMMENT '알림 카테고리',
+    `notification_type`    VARCHAR(50)  NOT NULL COMMENT '알림 세부 유형',
+    `title_template`       VARCHAR(255) NOT NULL COMMENT '알림 제목 템플릿',
+    `content_template`     TEXT         NOT NULL COMMENT '알림 내용 템플릿',
+    `is_active`            TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '템플릿 활성화 여부',
+    `created_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '생성 일시',
+    `updated_at`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP COMMENT '수정 일시',
+
+    PRIMARY KEY (`id`),
+
+    UNIQUE KEY `ux_notification_templates_type`
+        (`category`, `notification_type`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci
+  COMMENT ='알림 메시지 템플릿 관리 테이블';
 
 -- =========================================================================================
 -- 1. 워케이션 거점 지역
@@ -1003,125 +1025,6 @@ CREATE TABLE `bookmarks` (
                              CONSTRAINT `bookmarks_ibfk_1` FOREIGN KEY (`users_id`) REFERENCES `users` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
                              CONSTRAINT `bookmarks_ibfk_2` FOREIGN KEY (`merchants_id`) REFERENCES `merchants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-
-
--- ALTER TABLE `reservation_daily_inventories`
---     ADD CONSTRAINT `PK_RESERVATION_DAILY_INVENTORIES` PRIMARY KEY (
---                                                                    `id`
---         );
-
-
--- ALTER TABLE `reservations`
---     ADD CONSTRAINT `PK_RESERVATIONS` PRIMARY KEY (
---                                                   `id`
---         );
-
-
--- ALTER TABLE `product_daily_inventories`
---     ADD CONSTRAINT `PK_PRODUCT_DAILY_INVENTORIES` PRIMARY KEY (
---                                                                `id`
---         );
-
--- ALTER TABLE `reservation_products`
---     ADD CONSTRAINT `PK_RESERVATION_PRODUCTS` PRIMARY KEY (
---                                                           `id`
---         );
-
--- ALTER TABLE `reservation_cancels`
---     ADD CONSTRAINT `PK_RESERVATION_CANCELS` PRIMARY KEY (
---                                                          `id`
---         );
-
-# ALTER TABLE `restaurants` ADD CONSTRAINT `PK_RESTAURANTS` PRIMARY KEY (
-                                                                         #                                                                        `id`
-#
-# );
-
-# ALTER TABLE `merchant_tags` ADD CONSTRAINT `PK_MERCHANT_TAGS` PRIMARY KEY (
-                                                                             #                                                                            `merchant_id`,
-                                                                             #                                                                            `tag_id`
-#     );
-
-# ALTER TABLE `survey_questions` ADD CONSTRAINT `PK_SURVEY_QUESTIONS` PRIMARY KEY (
-                                                                                   #                                                                                  `id`
-#     );
-
-# ALTER TABLE `offices` ADD CONSTRAINT `PK_OFFICES` PRIMARY KEY (
-                                                                 #                                                                `id`,
-                                                                 #                                                                `merchant_id`
-#     );
-
-# ALTER TABLE `user_survey_answers` ADD CONSTRAINT `PK_USER_SURVEY_ANSWERS` PRIMARY KEY (
-                                                                                         #                                                                                        `id`
-#     );
-
-# ALTER TABLE `tags` ADD CONSTRAINT `PK_TAGS` PRIMARY KEY (
-                                                           #                                                          `id`
-#     );
-
-# ALTER TABLE `survey_options` ADD CONSTRAINT `PK_SURVEY_OPTIONS` PRIMARY KEY (
-                                                                               #                                                                              `id`
-#     );
-#
-# ALTER TABLE `user_surveys` ADD CONSTRAINT `PK_USER_SURVEYS` PRIMARY KEY (
-                                                                           #                                                                          `id`
-#     );
-
-# ALTER TABLE `accommodations` ADD CONSTRAINT `PK_ACCOMMODATIONS` PRIMARY KEY (
-                                                                               #                                                                              `id`
-#     );
-#
-# ALTER TABLE `activities` ADD CONSTRAINT `PK_ACTIVITIES` PRIMARY KEY (
-                                                                       #                                                                      `id`,
-                                                                       #                                                                      `merchant_id`
-#     );
-
-# ALTER TABLE `restaurants` ADD CONSTRAINT `FK_merchants_TO_restaurants_1` FOREIGN KEY (
-                                                                                        #                                                                                       `id2`
-#     )
-    #     REFERENCES `merchants` (
-    #                             `id`
-    #         );
-
-# ALTER TABLE `merchant_tags` ADD CONSTRAINT `FK_merchants_TO_merchant_tags_1` FOREIGN KEY (
-                                                                                            #                                                                                           `merchant_id`
-#     )
-    #     REFERENCES `merchants` (
-    #                             `id`
-    #         );
-#
-# ALTER TABLE `merchant_tags` ADD CONSTRAINT `FK_tags_TO_merchant_tags_1` FOREIGN KEY (
-                                                                                       #                                                                                      `tag_id`
-#     )
-    #     REFERENCES `tags` (
-    #                        `id`
-    #         );
-
-# ALTER TABLE `offices` ADD CONSTRAINT `FK_merchants_TO_offices_1` FOREIGN KEY (
-                                                                                #                                                                               `merchant_id`
-#     )
-    #     REFERENCES `merchants` (
-    #                             `id`
-    #         );
-#
-# ALTER TABLE `accommodations` ADD CONSTRAINT `FK_merchants_TO_accommodations_1` FOREIGN KEY (
-                                                                                              #                                                                                             `id2`
-#     )
-    #     REFERENCES `merchants` (
-    #                             `id`
-    #         );
-#
-# ALTER TABLE `activities` ADD CONSTRAINT `FK_merchants_TO_activities_1` FOREIGN KEY (
-                                                                                      #                                                                                     `merchant_id`
-#     )
-    #     REFERENCES `merchants` (
-    #                             `id`
-    #         );
-
-# ALTER TABLE `reviews` ADD CONSTRAINT `PK_REVIEWS` PRIMARY KEY (
-                                                                 #                                                                `review_id`
-#     );
 
 -- ========================================================================================
 -- 워케이션 파트 외래키 (담당: 김태균)

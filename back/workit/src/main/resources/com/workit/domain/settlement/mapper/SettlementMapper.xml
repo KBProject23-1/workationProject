@@ -138,7 +138,7 @@
     </select>
 
     <select id="selectUserName" resultType="string">
-        SELECT name_encrypt FROM users WHERE id = #{userId}
+        SELECT name_encrypted FROM users WHERE id = #{userId}
     </select>
 
     <!-- 회사명은 선택 입력이라 미입력 회원은 null -->

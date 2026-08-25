@@ -8,7 +8,7 @@ import lombok.ToString;
 //
 // users(이메일/이름/전화/상태)와 user_profile(닉네임/회사명)을 함께 조회한다.
 // 개인정보 규칙 (knowledge.md):
-// - email_encrypt/name_encrypt/phone_number_encrypt 는 AES 암호화본 — 복호화는 Service Layer 에서만 수행
+// - email_encrypted/name_encrypted/phone_number_encrypted 는 AES 암호화본 — 복호화는 Service Layer 에서만 수행
 // - 프로필 미등록 회원은 nickname/companyName 이 null (LEFT JOIN 결과)
 // - Mapper 는 조회만 담당 (상태 판단/복호화는 Service)
 @Getter
@@ -23,16 +23,16 @@ public class MyProfileVO {
     private String status;
 
     /** 이메일 AES-256 암호화본 (응답은 Service 에서 복호화) */
-    private String emailEncrypt;
+    private String emailEncrypted;
 
     /** 이름 SHA-256 해시 (검색/대조용) */
     private String nameHash;
 
     /** 이름 AES-256 암호화본 (응답은 Service 에서 복호화) */
-    private String nameEncrypt;
+    private String nameEncrypted;
 
     /** 휴대폰 번호 AES-256 암호화본 (응답은 Service 에서 복호화) */
-    private String phoneNumberEncrypt;
+    private String phoneNumberEncrypted;
 
     /** 닉네임 (user_profile.nickname — 프로필 미등록 시 null) */
     private String nickname;

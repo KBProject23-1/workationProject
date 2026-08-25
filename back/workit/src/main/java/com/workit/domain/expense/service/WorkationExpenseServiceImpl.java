@@ -16,6 +16,7 @@ import com.workit.domain.expense.dto.response.ExpenseDetailResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseItemResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseListResponseDTO;
 import com.workit.domain.expense.dto.response.ExpenseSummaryResponseDTO;
+import com.workit.domain.budget.service.BudgetAlertService;
 import com.workit.domain.expense.exception.ExpenseErrorCode;
 import com.workit.domain.expense.mapper.WorkationExpenseMapper;
 import com.workit.domain.expense.vo.ExpenseSummaryVO;
@@ -50,6 +51,7 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
     private final CategoryMapper categoryMapper;
     private final WorkationOwnershipValidator ownershipValidator;
     private final ExpenseImportService expenseImportService;
+    private final BudgetAlertService budgetAlertService;
 
     // =====================================================================================
     // 5.1 지출 목록 조회
@@ -132,6 +134,10 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
         log.info("지출 등록 완료 - expenseId: {}, workationId: {}, type: {}",
                 vo.getId(), workationId, budgetType);
 
+        // 지출 반영 직후 예산 사용률 확인 → 80% / 초과 알림 생성
+        budgetAlertService.checkAndNotifyBudgetAlert(
+                userId, workationId, budgetType, dto.getExpenseCategoryId());
+
         // 카테고리명·카드명은 조인해야 얻을 수 있으므로 재조회해서 응답한다
         return ExpenseItemResponseDTO.from(getOwnedExpense(userId, vo.getId()));
     }
@@ -182,6 +188,11 @@ public class WorkationExpenseServiceImpl implements WorkationExpenseService {
                 dto.getAmount(), dto.getSpentDate(), normalize(dto.getMemo()));
 
         log.info("지출 수정 완료 - expenseId: {}", expenseId);
+
+        // 지출 반영 직후 예산 사용률 확인 → 80% / 초과 알림 생성
+        budgetAlertService.checkAndNotifyBudgetAlert(
+                userId, target.getWorkationId(), target.getBudgetType(),
+                target.getExpenseCategoryId());
 
         WorkationExpenseVO updated = getOwnedExpense(userId, expenseId);
         return ExpenseDetailResponseDTO.of(updated,

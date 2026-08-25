@@ -21,6 +21,7 @@
             b.expense_category_id,
             b.target_amount,
             ec.name                      AS category_name,
+            ec.code                      AS category_code,
             ec.description,
             ec.is_deletable,
             ec.sort_order,

@@ -125,7 +125,7 @@ public interface UserService {
      *   6. 현재 휴대폰 번호와 동일 → PHONE_SAME_AS_CURRENT(400)
      *   7. 다른 사용자 등록 여부 확인 (users.phone_number_hash UNIQUE, 본인 제외)
      *      → PHONE_ALREADY_IN_USE(409)
-     *   8. users.phone_number_hash/phone_number_encrypt 갱신 (SHA-256 + AES-256 — Service Layer)
+     *   8. users.phone_number_hash/phone_number_encrypted 갱신 (SHA-256 + AES-256 — Service Layer)
      *   9. 변경된 휴대폰 번호 응답 (Access/Refresh Token 발급·관리 없음)
      *
      * @param userId  JWT 인증된 로그인 사용자 id (@CurrentUser — Controller 에서 주입)
@@ -194,7 +194,7 @@ public interface UserService {
      *   3. 인증 완료된 이메일이 현재 이메일과 동일 → EMAIL_SAME_AS_CURRENT(400)
      *   4. 다른 사용자가 이미 사용 중인 이메일(users.email_hash UNIQUE, 본인 제외)
      *      → EMAIL_ALREADY_IN_USE(409)
-     *   5. users.email_hash/email_encrypt 갱신 (SHA-256 + AES-256 — Service Layer)
+     *   5. users.email_hash/email_encrypted 갱신 (SHA-256 + AES-256 — Service Layer)
      *   6. 이메일 변경 성공 후 인증 세션 소비(삭제) — 동일 인증 결과 재사용 방지
      *      (Redis 삭제는 DB 커밋 확정 후 처리)
      *   7. 변경된 이메일 응답 (Access/Refresh Token 발급·관리 없음)

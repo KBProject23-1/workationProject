@@ -19,7 +19,7 @@ public class SignupResponseDTO {
     /** 회원 고유 번호 */
     private Long userId;
 
-    /** 회원 이름 (users.name_encrypt 복호화 값 — 완료 화면 안내용) */
+    /** 회원 이름 (users.name_encrypted 복호화 값 — 완료 화면 안내용) */
     private String name;
 
     public static SignupResponseDTO of(Long userId, String name) {
