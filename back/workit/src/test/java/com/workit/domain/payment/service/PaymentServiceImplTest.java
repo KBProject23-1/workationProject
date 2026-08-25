@@ -16,7 +16,9 @@ import com.workit.domain.transaction.mapper.TransactionMapper;
 import com.workit.domain.transaction.vo.TransactionVO;
 import com.workit.domain.wallet.dto.request.ChargeRequest;
 import com.workit.domain.wallet.exception.WalletErrorCode;
+import com.workit.domain.expense.service.ExpenseImportTrigger;
 import com.workit.domain.wallet.mapper.WalletMapper;
+import com.workit.domain.wallet.service.TransferAlertService;
 import com.workit.domain.wallet.vo.WalletVO;
 import com.workit.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
@@ -37,6 +39,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 /**
  * PaymentServiceImpl 오케스트레이션 단위 테스트 (Mockito).
@@ -62,6 +65,9 @@ class PaymentServiceImplTest {
     // 지갑결제(payWithWallet)/카드결제 DB 기입은 PaymentTransactionRecorder 로 이관됨 — 그 자체 로직은
     // PaymentTransactionRecorderTest 에서 검증. 여기서는 mock 으로 두고 카드결제 실패 시 PG 호출 순서만 본다.
     @Mock private PaymentTransactionRecorder paymentTransactionRecorder;
+    @Mock private PaymentAlertService paymentAlertService;
+    @Mock private TransferAlertService transferAlertService;
+    private ExpenseImportTrigger expenseImportTrigger = mock(ExpenseImportTrigger.class);
 
     @InjectMocks private PaymentServiceImpl paymentService;
 
@@ -183,6 +189,71 @@ class PaymentServiceImplTest {
                 () -> paymentService.cancelPayment(USER_ID, 200L));
 
         assertEquals(TransactionErrorCode.TRANSACTION_CANCEL_NOT_ALLOWED, ex.getErrorCode());
+    }
+
+    // ============================================================
+    // 3-1) 취소 성공 시 notifyRefundSuccess() 호출
+    // ============================================================
+    @Test
+    @DisplayName("취소: 지갑결제 취소 성공 시 notifyRefundSuccess()가 호출된다")
+    void 취소_지갑결제취소_성공시_환불알림이_호출된다() {
+        TransactionVO paid = new TransactionVO();
+        paid.setId(100L);
+        paid.setTransactionType("PAYMENT");
+        paid.setPaymentSourceType("WALLET");
+        paid.setStatus("PAID");
+        paid.setMerchantId(50L);
+        paid.setMerchantName("테스트 가맹점");
+        paid.setAmount(BigDecimal.valueOf(10000));
+        when(transactionMapper.findTransactionForCancel(100L, USER_ID)).thenReturn(paid);
+        when(transactionMapper.cancelTransaction(100L, USER_ID)).thenReturn(1);
+
+        WalletVO wallet = wallet(10L, 20000);
+        when(walletMapper.findByUserId(USER_ID)).thenReturn(wallet);
+
+        // findTransactionForCancel이 두 번 호출됨 (취소 전 조회 + 취소 후 조회)
+        TransactionVO cancelled = new TransactionVO();
+        cancelled.setId(100L);
+        cancelled.setStatus("CANCELED");
+        cancelled.setCancelledAt(java.time.LocalDateTime.now());
+        cancelled.setMerchantName("테스트 가맹점");
+        when(transactionMapper.findTransactionForCancel(100L, USER_ID))
+                .thenReturn(paid)
+                .thenReturn(cancelled);
+
+        paymentService.cancelPayment(USER_ID, 100L);
+
+        verify(paymentAlertService).notifyRefundSuccess(eq(USER_ID), any(com.workit.domain.transaction.dto.response.CancelResponse.class));
+    }
+
+    @Test
+    @DisplayName("취소: 카드결제 취소 성공 시 notifyRefundSuccess()가 호출된다")
+    void 취소_카드결제취소_성공시_환불알림이_호출된다() {
+        TransactionVO paid = new TransactionVO();
+        paid.setId(200L);
+        paid.setTransactionType("PAYMENT");
+        paid.setPaymentSourceType("CARD");
+        paid.setStatus("PAID");
+        paid.setMerchantId(50L);
+        paid.setMerchantName("카드 가맹점");
+        paid.setAmount(BigDecimal.valueOf(30000));
+        paid.setPgTransactionId("pg-tx-001");
+        paid.setCardId(8L);
+        when(transactionMapper.findTransactionForCancel(200L, USER_ID)).thenReturn(paid);
+        when(transactionMapper.cancelTransaction(200L, USER_ID)).thenReturn(1);
+
+        TransactionVO cancelled = new TransactionVO();
+        cancelled.setId(200L);
+        cancelled.setStatus("CANCELED");
+        cancelled.setCancelledAt(java.time.LocalDateTime.now());
+        cancelled.setMerchantName("카드 가맹점");
+        when(transactionMapper.findTransactionForCancel(200L, USER_ID))
+                .thenReturn(paid)
+                .thenReturn(cancelled);
+
+        paymentService.cancelPayment(USER_ID, 200L);
+
+        verify(paymentAlertService).notifyRefundSuccess(eq(USER_ID), any(com.workit.domain.transaction.dto.response.CancelResponse.class));
     }
 
     // ============================================================

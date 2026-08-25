@@ -3,6 +3,7 @@ package com.workit.domain.payment.service;
 import com.workit.domain.notification.dto.request.NotificationCreateRequestDTO;
 import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.service.NotificationCreateService;
+import com.workit.domain.transaction.dto.response.CancelResponse;
 import com.workit.domain.transaction.dto.response.PaymentResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -94,10 +95,21 @@ class PaymentAlertServiceImplTest {
         assertEquals("스타벅스 강남점", captor.getValue().getPlaceholders().get("merchant"));
     }
 
+    private CancelResponse createCancelResponse(Long transactionId, String merchantName,
+                                                   BigDecimal refundedAmount) {
+        CancelResponse response = new CancelResponse();
+        response.setTransactionId(transactionId);
+        response.setMerchantName(merchantName);
+        response.setRefundedAmount(refundedAmount);
+        response.setStatus("CANCELED");
+        response.setRefundedTo("WALLET");
+        return response;
+    }
+
     @Test
     @DisplayName("환불 완료 → REFUND_SUCCESS 알림 생성")
     void notifyRefundSuccess_createsNotification() {
-        PaymentResponse response = createPaymentResponse(TEST_TRANSACTION_ID, "테스트 가맹점",
+        CancelResponse response = createCancelResponse(TEST_TRANSACTION_ID, "테스트 가맹점",
                 BigDecimal.valueOf(30000));
 
         paymentAlertService.notifyRefundSuccess(TEST_USER_ID, response);
@@ -136,6 +148,55 @@ class PaymentAlertServiceImplTest {
         response.setTransactionId(null);
 
         paymentAlertService.notifyPaymentSuccess(TEST_USER_ID, response);
+
+        verify(notificationCreateService, never()).createNotification(any(), any());
+    }
+
+    // --- CancelResponse 기반 환불 알림 테스트 ---
+
+    @Test
+    @DisplayName("환불 완료 - {merchant} placeholder에 가맹점명이 전달됨")
+    void notifyRefundSuccess_merchantPlaceholder_correct() {
+        CancelResponse response = createCancelResponse(TEST_TRANSACTION_ID, "스타벅스 강남점",
+                BigDecimal.valueOf(5500));
+
+        paymentAlertService.notifyRefundSuccess(TEST_USER_ID, response);
+
+        ArgumentCaptor<NotificationCreateRequestDTO> captor =
+                ArgumentCaptor.forClass(NotificationCreateRequestDTO.class);
+        verify(notificationCreateService).createNotification(eq(TEST_USER_ID), captor.capture());
+        assertEquals("스타벅스 강남점", captor.getValue().getPlaceholders().get("merchant"));
+    }
+
+    @Test
+    @DisplayName("환불 완료 - {amount} placeholder에 환불 금액이 전달됨")
+    void notifyRefundSuccess_amountPlaceholder_correct() {
+        CancelResponse response = createCancelResponse(TEST_TRANSACTION_ID, "테스트 가맹점",
+                BigDecimal.valueOf(25000));
+
+        paymentAlertService.notifyRefundSuccess(TEST_USER_ID, response);
+
+        ArgumentCaptor<NotificationCreateRequestDTO> captor =
+                ArgumentCaptor.forClass(NotificationCreateRequestDTO.class);
+        verify(notificationCreateService).createNotification(eq(TEST_USER_ID), captor.capture());
+        assertEquals(BigDecimal.valueOf(25000),
+                captor.getValue().getPlaceholders().get("amount"));
+    }
+
+    @Test
+    @DisplayName("환불 완료 - null CancelResponse → 알림 미생성")
+    void notifyRefundSuccess_nullResponse_doesNotCreate() {
+        paymentAlertService.notifyRefundSuccess(TEST_USER_ID, null);
+        verify(notificationCreateService, never()).createNotification(any(), any());
+    }
+
+    @Test
+    @DisplayName("환불 완료 - transactionId가 null인 CancelResponse → 알림 미생성")
+    void notifyRefundSuccess_nullTransactionId_doesNotCreate() {
+        CancelResponse response = new CancelResponse();
+        response.setTransactionId(null);
+
+        paymentAlertService.notifyRefundSuccess(TEST_USER_ID, response);
 
         verify(notificationCreateService, never()).createNotification(any(), any());
     }

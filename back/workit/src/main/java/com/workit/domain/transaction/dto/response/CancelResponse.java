@@ -13,6 +13,7 @@ public class CancelResponse {
     private LocalDateTime cancelledAt;
     private BigDecimal refundedAmount;
     private String refundedTo;
+    private String merchantName;
 
     public static CancelResponse of(TransactionVO vo, BigDecimal refundedAmount, String refundedTo) {
         CancelResponse response = new CancelResponse();
@@ -21,6 +22,7 @@ public class CancelResponse {
         response.setCancelledAt(vo.getCancelledAt());
         response.setRefundedAmount(refundedAmount);
         response.setRefundedTo(refundedTo);
+        response.setMerchantName(vo.getMerchantName());
         return response;
     }
 }

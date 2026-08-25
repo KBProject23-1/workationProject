@@ -310,7 +310,12 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         TransactionVO cancelled = transactionMapper.findTransactionForCancel(transactionId, userId);
-        return CancelResponse.of(cancelled, amount, refundedTo);
+        CancelResponse response = CancelResponse.of(cancelled, amount, refundedTo);
+
+        // 결제 취소 완료 알림 생성
+        paymentAlertService.notifyRefundSuccess(userId, response);
+
+        return response;
     }
 
     // ===== 상태 전이 (상태머신 규칙 강제) =====

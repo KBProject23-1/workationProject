@@ -3,6 +3,7 @@ package com.workit.domain.payment.service;
 import com.workit.domain.notification.dto.request.NotificationCreateRequestDTO;
 import com.workit.domain.notification.enums.NotificationCategory;
 import com.workit.domain.notification.service.NotificationCreateService;
+import com.workit.domain.transaction.dto.response.CancelResponse;
 import com.workit.domain.transaction.dto.response.PaymentResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -63,16 +64,9 @@ public class PaymentAlertServiceImpl implements PaymentAlertService {
     }
 
     @Override
-    public void notifyRefundSuccess(Long userId, PaymentResponse response) {
+    public void notifyRefundSuccess(Long userId, CancelResponse response) {
         if (response == null || response.getTransactionId() == null) {
             log.warn("환불 완료 알림 - 거래 정보 없음. userId={}", userId);
-            return;
-        }
-
-        // 결제 거래(PAYMENT)인 경우만 알림 생성
-        if (!"PAYMENT".equals(response.getTransactionType())) {
-            log.debug("환불 완료 알림 스킵 - 결제 거래가 아님. transactionType={}, transactionId={}",
-                    response.getTransactionType(), response.getTransactionId());
             return;
         }
 
@@ -80,7 +74,7 @@ public class PaymentAlertServiceImpl implements PaymentAlertService {
 
         Map<String, Object> placeholders = new HashMap<>();
         placeholders.put("merchant", response.getMerchantName());
-        placeholders.put("amount", response.getAmount());
+        placeholders.put("amount", response.getRefundedAmount());
 
         NotificationCreateRequestDTO request = NotificationCreateRequestDTO.builder()
                 .category(NotificationCategory.PAYMENT_NOTIFY)
@@ -94,6 +88,6 @@ public class PaymentAlertServiceImpl implements PaymentAlertService {
         notificationCreateService.createNotification(userId, request);
 
         log.info("환불 완료 알림 생성 - userId={}, transactionId={}, merchant={}, amount={}",
-                userId, transactionId, response.getMerchantName(), response.getAmount());
+                userId, transactionId, response.getMerchantName(), response.getRefundedAmount());
     }
 }
